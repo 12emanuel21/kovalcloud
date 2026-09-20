@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPERADMIN
+  RESTAURANT_OWNER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  DELIVERED
+  CANCELLED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  role      Role     @default(RESTAURANT_OWNER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant?
+}
+
+model Plan {
+  id          String       @id @default(uuid())
+  name        String
+  price       Float
+  restaurants Restaurant[]
+}
+
+model Restaurant {
+  id                  String   @id @default(uuid())
+  name                String
+  slug                String   @unique
+  description         String?
+  phone               String?
+  logoUrl             String?
+  bannerUrl           String?
+  currency            String   @default("COP")
+  botpressBotId       String?  @default("koval-pizzeria-bot")
+  
+  // Integración Meta WhatsApp Cloud API (Multi-Tenant)
+  whatsappToken       String?
+  whatsappPhoneId     String?
+  whatsappWabaId      String?
+  whatsappVerifyToken String?  @default(uuid())
+  
+  ownerId             String   @unique
+  owner               User     @relation(fields: [ownerId], references: [id])
+  
+  planId              String
+  plan                Plan     @relation(fields: [planId], references: [id])
+
+  // Relaciones de la Fase 2 (Menú Digital)
+  categories          MenuCategory[]
+  items               MenuItem[]
+
+  // Relaciones del Módulo de Pedidos
+  orders              Order[]
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// --- MODELOS DE LA FASE 2 (MENÚ DIGITAL) ---
+
+model MenuCategory {
+  id           String     @id @default(uuid())
+  name         String     // Ej: "Pizzas Tradicionales", "Bebidas"
+  order        Int        @default(0) // Para ordenar en la vista web
+  
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  
+  items        MenuItem[]
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model MenuItem {
+  id           String       @id @default(uuid())
+  name         String       // Ej: "Pizza Pepperoni"
+  description  String?      // Ej: "Queso mozzarella, salsa de tomate y pepperoni americano"
+  price        Float        // Ej: 35000.0
+  imageUrl     String?      // URL de la imagen del plato
+  isAvailable  Boolean      @default(true) // Switch para marcar platos agotados
+  
+  restaurantId String
+  restaurant   Restaurant   @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  
+  categoryId   String
+  category     MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  // Relaciones del Módulo de Pedidos
+  orderItems   OrderItem[]
+
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+// --- MODELOS DEL MÓDULO DE PEDIDOS (ORDERS) ---
+
+model Order {
+  id              String       @id @default(uuid())
+  restaurantId    String
+  restaurant      Restaurant   @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  
+  customerName    String
+  customerPhone   String
+  deliveryAddress String?
+  total           Float
+  status          OrderStatus  @default(PENDING)
+  notes           String?
+
+  items           OrderItem[]
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model OrderItem {
+  id         String   @id @default(uuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+  
+  quantity   Int
+  unitPrice  Float
+  subtotal   Float
+}

@@ -1,0 +1,30 @@
+# Dependencias
+node_modules/
+.pnp
+.pnp.js
+
+# Entornos y Secretos (¡Nunca subir!)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Sesiones y claves de WhatsApp Baileys
+whatsapp_service/auth_info_baileys/
+auth_info_baileys/
+
+# Builds y caches
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Logs y runtime
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+.claude
+.vscode

@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: koval_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: koval_admin
+      POSTGRES_PASSWORD: koval_password_123
+      POSTGRES_DB: koval_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  botpress:
+    image: botpress/server:v12_30_1
+    container_name: koval_botpress
+    restart: always
+    depends_on:
+      - postgres
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - BP_HOST=0.0.0.0
+      - BP_PORT=3000
+      - EXTERNAL_URL=http://localhost:3000
+      - DATABASE_URL=postgres://koval_admin:koval_password_123@postgres:5432/koval_db
+      - AUTO_MIGRATE=true
+    ports:
+      - "3000:3000"
+    volumes:
+      - botpress_data:/botpress/data
+
+volumes:
+  postgres_data:
+  botpress_data:
