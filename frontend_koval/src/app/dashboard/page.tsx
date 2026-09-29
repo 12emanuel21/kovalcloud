@@ -27,7 +27,7 @@ const API_URL = 'http://localhost:4000';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { restaurantId, restaurant } = useAuth();
+  const { restaurantId, restaurant , token} = useAuth();
 
   // Estados principales
   const [categories, setCategories] = useState<Category[]>([]);
@@ -114,7 +114,8 @@ export default function DashboardPage() {
 
       const res = await fetch(`${API_URL}/categories`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
@@ -169,7 +170,8 @@ export default function DashboardPage() {
 
       const res = await fetch(`${API_URL}/menu-items`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
@@ -203,7 +205,8 @@ export default function DashboardPage() {
     try {
       const res = await fetch(`${API_URL}/menu-items/${item.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ isAvailable: nextAvailability }),
       });
 
@@ -265,7 +268,8 @@ export default function DashboardPage() {
 
       const res = await fetch(`${API_URL}/menu-items/${editingItem.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 

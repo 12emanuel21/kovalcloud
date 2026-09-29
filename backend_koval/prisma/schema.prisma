@@ -12,6 +12,12 @@ enum Role {
   RESTAURANT_OWNER
 }
 
+enum OrderType {
+  DINE_IN
+  DELIVERY
+  TAKEAWAY
+}
+
 enum OrderStatus {
   PENDING
   CONFIRMED
@@ -24,6 +30,8 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   password  String
+  twoFactorSecret    String?
+  isTwoFactorEnabled Boolean @default(false)
   role      Role     @default(RESTAURANT_OWNER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -120,6 +128,9 @@ model Order {
   customerPhone   String
   deliveryAddress String?
   total           Float
+  orderType       OrderType @default(DELIVERY)
+  tableNumber     String?
+  channel         String?   @default("WEB_MENU")
   status          OrderStatus  @default(PENDING)
   notes           String?
 

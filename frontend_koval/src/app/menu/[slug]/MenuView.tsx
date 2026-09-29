@@ -24,10 +24,11 @@ export interface RestaurantData {
   id: string;
   name: string;
   slug: string;
+  phone?: string;
   categories: Category[];
 }
 
-export const MenuView: React.FC<{ restaurant: RestaurantData }> = ({ restaurant }) => {
+export const MenuView: React.FC<{ restaurant: RestaurantData, tableNumber?: string }> = ({ restaurant, tableNumber }) => {
   const { addItem, items: cartItems } = useCart();
   const [addedItemIds, setAddedItemIds] = useState<{ [key: string]: boolean }>({});
 
@@ -62,9 +63,16 @@ export const MenuView: React.FC<{ restaurant: RestaurantData }> = ({ restaurant 
             </span>
             <h1 className="text-xl font-black text-white tracking-tight">{restaurant.name}</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" title="Abierto para pedidos" />
-            <span className="text-xs text-emerald-400 font-semibold">Abierto</span>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" title="Abierto para pedidos" />
+              <span className="text-xs text-emerald-400 font-semibold">Abierto</span>
+            </div>
+            {tableNumber && (
+              <span className="text-xs font-bold text-white bg-indigo-500/20 border border-indigo-500/30 px-2 py-0.5 rounded-md">
+                Mesa: {tableNumber}
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -166,6 +174,8 @@ export const MenuView: React.FC<{ restaurant: RestaurantData }> = ({ restaurant 
       <CartDrawer
         restaurantId={restaurant.id}
         restaurantName={restaurant.name}
+        restaurantPhone={restaurant.phone || ''}
+        tableNumber={tableNumber}
       />
     </div>
   );

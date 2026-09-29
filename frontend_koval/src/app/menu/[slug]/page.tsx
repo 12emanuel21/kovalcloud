@@ -16,10 +16,14 @@ async function getRestaurantMenu(slug: string): Promise<RestaurantData | null> {
 
 export default async function MenuPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { slug } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const table = typeof resolvedSearchParams.table === 'string' ? resolvedSearchParams.table : undefined;
   const restaurant = await getRestaurantMenu(slug);
 
   if (!restaurant) {
@@ -53,7 +57,7 @@ export default async function MenuPage({
 
   return (
     <CartProvider>
-      <MenuView restaurant={restaurant} />
+      <MenuView restaurant={restaurant} tableNumber={table} />
     </CartProvider>
   );
 }

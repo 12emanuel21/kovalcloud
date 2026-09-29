@@ -19,6 +19,9 @@ export class OrdersService {
   async create(createOrderDto: CreateOrderDto) {
     const {
       restaurantId,
+      orderType,
+      tableNumber,
+      channel,
       customerName,
       customerPhone,
       deliveryAddress,
@@ -78,6 +81,9 @@ export class OrdersService {
       return await tx.order.create({
         data: {
           restaurantId,
+          orderType,
+          tableNumber,
+          channel,
           customerName,
           customerPhone,
           deliveryAddress,

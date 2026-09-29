@@ -10,7 +10,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, OrderType } from '@prisma/client';
 
 export class CreateOrderItemDto {
   @IsString()
@@ -30,6 +30,18 @@ export class CreateOrderDto {
   @IsString()
   @IsNotEmpty()
   restaurantId: string;
+
+  @IsEnum(OrderType)
+  @IsOptional()
+  orderType?: OrderType;
+
+  @IsString()
+  @IsOptional()
+  tableNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  channel?: string;
 
   @IsString()
   @IsNotEmpty()

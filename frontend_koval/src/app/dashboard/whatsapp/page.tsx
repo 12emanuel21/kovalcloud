@@ -28,7 +28,7 @@ interface RestaurantData {
 }
 
 export default function WhatsAppDashboardPage() {
-  const { restaurantId } = useAuth();
+  const { restaurantId , token} = useAuth();
 
   // Selector de Pestaña Activa ('meta' | 'baileys')
   const [activeTab, setActiveTab] = useState<'meta' | 'baileys'>('meta');
@@ -127,7 +127,8 @@ export default function WhatsAppDashboardPage() {
 
       const res = await fetch(`${API_URL}/restaurants/${restaurantId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
@@ -210,7 +211,8 @@ export default function WhatsAppDashboardPage() {
     try {
       const res = await fetch(`${WHATSAPP_API_URL}/send`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: testPhone.trim(), message: testMessage.trim() }),
       });
 

@@ -1,3 +1,5 @@
+import { UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   Controller,
   Get,
@@ -83,6 +85,7 @@ export class MetaWhatsAppController {
    * Endpoint Receptor de Eventos y Mensajes de Meta Cloud API
    * POST /meta/webhook/:verifyToken
    */
+  @UseGuards(JwtAuthGuard)
   @Post(':verifyToken')
   @HttpCode(HttpStatus.OK)
   handleIncomingWebhook(

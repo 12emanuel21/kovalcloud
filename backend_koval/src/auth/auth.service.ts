@@ -1,3 +1,5 @@
+const { authenticator } = require('otplib');
+import * as qrcode from 'qrcode';
 import {
   Injectable,
   ConflictException,
@@ -95,5 +97,39 @@ export class AuthService {
         restaurant: user.restaurant,
       },
     };
+  }
+
+  async generateTwoFactorSecret(userId: string, email: string) {
+    const secret = authenticator.generateSecret();
+    const otpauthUrl = authenticator.keyuri(email, 'KovalCloud', secret);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { twoFactorSecret: secret },
+    });
+
+    return {
+      secret,
+      qrCodeUrl: await qrcode.toDataURL(otpauthUrl),
+    };
+  }
+
+  async verifyTwoFactorCode(userId: string, code: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.twoFactorSecret) return false;
+
+    const isCodeValid = authenticator.verify({
+      token: code,
+      secret: user.twoFactorSecret,
+    });
+
+    if (isCodeValid && !user.isTwoFactorEnabled) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { isTwoFactorEnabled: true },
+      });
+    }
+
+    return isCodeValid;
   }
 }

@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { QRCodeCanvas } from 'qrcode.react';
 
 export default function QRGeneratorPage() {
-  const { restaurant } = useAuth();
+  const { restaurant , token} = useAuth();
 
   const restaurantName = restaurant?.name || 'Mi Restaurante';
   const restaurantSlug = restaurant?.slug || 'pizzeria-napoles';

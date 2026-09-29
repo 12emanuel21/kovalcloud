@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
+import Image from 'next/image';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -36,7 +37,7 @@ interface TeamMember {
 }
 
 export default function SettingsPage() {
-  const { restaurantId } = useAuth();
+  const { restaurantId , token} = useAuth();
 
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -58,6 +59,49 @@ export default function SettingsPage() {
   const [inviteRole, setInviteRole] = useState<'SUPERVISOR' | 'STAFF'>('STAFF');
   const [showInviteModal, setShowInviteModal] = useState<boolean>(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+
+  
+  // 2FA States
+  const [twoFactorStatus, setTwoFactorStatus] = useState<'disabled' | 'generating' | 'pending_verification' | 'enabled'>('disabled');
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState('');
+
+  const generate2FA = async () => {
+    setTwoFactorStatus('generating');
+    try {
+      const res = await fetch(`${API_URL}/auth/2fa/generate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Error al generar 2FA');
+      const data = await res.json();
+      setQrCodeDataUrl(data.qrCodeUrl);
+      setTwoFactorStatus('pending_verification');
+    } catch (err) {
+      setFeedback({ type: 'error', text: 'Error generando 2FA' });
+      setTwoFactorStatus('disabled');
+    }
+  };
+
+  const verify2FA = async () => {
+    try {
+      const res = await fetch(`${API_URL}/auth/2fa/verify`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ code: verificationCode })
+      });
+      if (!res.ok) {
+        throw new Error('Código inválido');
+      }
+      setTwoFactorStatus('enabled');
+      setFeedback({ type: 'success', text: '2FA habilitado con éxito' });
+    } catch (err) {
+      setFeedback({ type: 'error', text: 'Código 2FA incorrecto' });
+    }
+  };
 
   // Cargar datos actuales del restaurante
   const fetchRestaurantSettings = useCallback(async () => {
@@ -142,7 +186,8 @@ export default function SettingsPage() {
 
       const res = await fetch(`${API_URL}/restaurants/${restaurantId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
@@ -564,6 +609,65 @@ export default function SettingsPage() {
             <span className="text-slate-500 font-medium">ID del Restaurante (Multi-Tenant):</span>
             <p className="text-emerald-400 font-mono mt-0.5">{restaurantId}</p>
           </div>
+        </div>
+      </section>
+
+      {/* SECCIÓN 4: SEGURIDAD Y 2FA */}
+      <section className="bg-slate-900/40 border border-slate-800/80 rounded-3xl p-6 space-y-4">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          Seguridad de la Cuenta (2FA)
+        </h3>
+        <div className="space-y-4">
+          <p className="text-xs text-slate-400">
+            Protege tu cuenta activando la Autenticación de Dos Factores (TOTP) usando Google Authenticator o Authy.
+          </p>
+
+          {twoFactorStatus === 'disabled' && (
+            <button
+              onClick={generate2FA}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition"
+            >
+              Habilitar 2FA
+            </button>
+          )}
+
+          {twoFactorStatus === 'generating' && (
+            <p className="text-xs text-slate-400">Generando código QR...</p>
+          )}
+
+          {twoFactorStatus === 'pending_verification' && qrCodeDataUrl && (
+            <div className="space-y-4 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
+              <p className="text-xs font-semibold text-white">1. Escanea este código QR con tu app de autenticación:</p>
+              <div className="bg-white p-2 w-max rounded-lg">
+                <Image src={qrCodeDataUrl} alt="QR Code 2FA" width={150} height={150} />
+              </div>
+              <p className="text-xs font-semibold text-white">2. Ingresa el código de 6 dígitos:</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
+                  className="bg-slate-900 border border-slate-700 px-3 py-2 rounded-lg text-white font-mono tracking-widest text-center w-32 outline-none focus:border-indigo-500"
+                  placeholder="000000"
+                />
+                <button
+                  onClick={verify2FA}
+                  disabled={verificationCode.length !== 6}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition"
+                >
+                  Verificar y Activar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {twoFactorStatus === 'enabled' && (
+            <div className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-xl">
+              <span className="font-bold text-lg">✓</span>
+              <span className="text-xs font-bold uppercase tracking-wider">Autenticación de 2 Factores (2FA) Activada</span>
+            </div>
+          )}
         </div>
       </section>
     </div>

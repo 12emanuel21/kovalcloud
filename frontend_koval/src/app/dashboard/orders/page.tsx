@@ -6,6 +6,8 @@ import { io, Socket } from 'socket.io-client';
 
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'DELIVERED' | 'CANCELLED';
 
+type OrderType = 'DINE_IN' | 'DELIVERY' | 'TAKEAWAY';
+
 interface OrderItem {
   id: string;
   orderId: string;
@@ -24,6 +26,9 @@ interface OrderItem {
 interface Order {
   id: string;
   restaurantId: string;
+  orderType?: OrderType;
+  tableNumber?: string;
+  channel?: string;
   customerName: string;
   customerPhone: string;
   deliveryAddress?: string;
@@ -77,7 +82,7 @@ const playOrderChime = () => {
 };
 
 export default function OrdersPage() {
-  const { restaurantId } = useAuth();
+  const { restaurantId , token} = useAuth();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -185,7 +190,8 @@ export default function OrdersPage() {
     try {
       const res = await fetch(`${API_URL}/orders/${orderId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
 
@@ -582,11 +588,21 @@ export default function OrdersPage() {
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono font-bold text-sm text-white">
                           #{shortId}
                         </span>
                         {getStatusBadge(order.status)}
+                        {order.orderType === 'DINE_IN' && (
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-400 text-[10px] font-bold border border-indigo-500/30">
+                            MESA {order.tableNumber || ''}
+                          </span>
+                        )}
+                        {order.orderType === 'DELIVERY' && (
+                          <span className="px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-400 text-[10px] font-bold border border-purple-500/30">
+                            DOMICILIO
+                          </span>
+                        )}
                       </div>
                       <p className="text-[11px] text-slate-400 mt-1">
                         {formatDate(order.createdAt)}
@@ -652,7 +668,12 @@ export default function OrdersPage() {
                       )}
                     </div>
 
-                    {order.deliveryAddress && (
+                    {order.orderType === 'DINE_IN' && order.tableNumber ? (
+                      <div className="flex items-start gap-2 text-xs text-indigo-300 pt-1 border-t border-slate-800/60 font-semibold">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0 mt-0.5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v9"/><path d="M5 12v9"/><path d="M9 3h6"/></svg>
+                        <span className="leading-snug">Consumo en Mesa: {order.tableNumber}</span>
+                      </div>
+                    ) : order.deliveryAddress ? (
                       <div className="flex items-start gap-2 text-xs text-slate-400 pt-1 border-t border-slate-800/60">
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -669,7 +690,7 @@ export default function OrdersPage() {
                         </svg>
                         <span className="leading-snug">{order.deliveryAddress}</span>
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Notas Especiales */}

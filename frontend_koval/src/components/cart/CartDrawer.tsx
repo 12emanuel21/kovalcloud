@@ -7,12 +7,14 @@ interface CartDrawerProps {
   restaurantId: string;
   restaurantName: string;
   restaurantPhone?: string;
+  tableNumber?: string;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
   restaurantId,
   restaurantName,
-  restaurantPhone = '573001234567', // Teléfono por defecto para pruebas
+  restaurantPhone = '', // Strict usage
+  tableNumber,
 }) => {
   const { items, totalCount, totalAmount, updateQuantity, removeItem, clearCart } = useCart();
   const [isOpen, setIsOpen] = useState(false);
@@ -51,9 +53,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       // 1. Enviar orden a la API de NestJS
       const payload = {
         restaurantId,
+        orderType: tableNumber ? 'DINE_IN' : 'DELIVERY',
+        tableNumber: tableNumber || undefined,
+        channel: 'WEB_MENU',
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim(),
-        deliveryAddress: deliveryAddress.trim() || undefined,
+        deliveryAddress: tableNumber ? undefined : (deliveryAddress.trim() || undefined),
         notes: notes.trim() || undefined,
         items: items.map((item) => ({
           menuItemId: item.id,
@@ -90,7 +95,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 🧾 *Orden:* #${orderShortId}
 👤 *Cliente:* ${customerName.trim()}
 📞 *Teléfono:* ${customerPhone.trim()}
-📍 *Dirección:* ${deliveryAddress.trim() || 'Para recoger / No especificada'}
+${tableNumber ? `📍 *Mesa:* ${tableNumber} (Consumo en Local)` : `📍 *Dirección:* ${deliveryAddress.trim() || 'Para recoger / No especificada'}`}
 
 🛒 *Detalle del Pedido:*
 ${itemsDetail}
@@ -358,18 +363,20 @@ ${itemsDetail}
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Dirección de Entrega (Opcional)
-                    </label>
-                    <input
-                      type="text"
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      placeholder="Ej. Cra 45 # 26-85 Apto 401"
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition"
-                    />
-                  </div>
+                  {!tableNumber && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">
+                        Dirección de Entrega (Opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={deliveryAddress}
+                        onChange={(e) => setDeliveryAddress(e.target.value)}
+                        placeholder="Ej. Cra 45 # 26-85 Apto 401"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
