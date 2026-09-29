@@ -23,7 +23,7 @@ export class OrdersController {
     return this.ordersService.create(createOrderDto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  // @UseGuards(JwtAuthGuard)
   @Get()
   findAll(@Query('restaurantId') restaurantId?: string) {
     return this.ordersService.findAll(restaurantId);

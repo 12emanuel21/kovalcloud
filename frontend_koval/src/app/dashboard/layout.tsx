@@ -235,6 +235,22 @@ export default function DashboardLayout({
             </div>
             <span className="text-[10px] text-slate-500 group-hover:text-emerald-400 font-mono">↗</span>
           </Link>
+
+          <Link
+            href={`/kitchen/${restaurant?.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-amber-400 hover:bg-slate-800/60 transition group mt-1"
+          >
+            <div className="flex items-center gap-3">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400 group-hover:text-amber-400">
+                <rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/>
+              </svg>
+              <span>Monitor de Cocina (KDS)</span>
+            </div>
+            <span className="text-[10px] text-slate-500 group-hover:text-amber-400 font-mono">↗</span>
+          </Link>
+
         </nav>
 
         {/* Footer del Sidebar: Perfil de Usuario y Botón de Cerrar Sesión */}

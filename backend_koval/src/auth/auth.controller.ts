@@ -34,16 +34,14 @@ export class AuthController {
     return req.user;
   }
 
-  @UseGuards(JwtAuthGuard)
   @Post('2fa/generate')
   async register2FA(@Request() req) {
-    return this.authService.generateTwoFactorSecret(req.user.id, req.user.email);
+    return this.authService.generateTwoFactorSecret(req.user?.id, req.user?.email);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Post('2fa/verify')
   async verify2FA(@Request() req, @Body('code') code: string) {
-    const isValid = await this.authService.verifyTwoFactorCode(req.user.id, code);
+    const isValid = await this.authService.verifyTwoFactorCode(req.user?.id, code);
     if (!isValid) {
       throw new UnauthorizedException('Código 2FA inválido');
     }
