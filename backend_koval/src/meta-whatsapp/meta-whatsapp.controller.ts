@@ -1,5 +1,3 @@
-import { UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   Controller,
   Get,
@@ -85,14 +83,16 @@ export class MetaWhatsAppController {
    * Endpoint Receptor de Eventos y Mensajes de Meta Cloud API
    * POST /meta/webhook/:verifyToken
    */
-  @UseGuards(JwtAuthGuard)
   @Post(':verifyToken')
   @HttpCode(HttpStatus.OK)
   handleIncomingWebhook(
     @Param('verifyToken') verifyToken: string,
     @Body() payload: MetaWebhookPayloadDto | any,
   ): { status: string } {
-    // Procesar en segundo plano de manera asíncrona no bloqueante (< 200ms)
+    // Debug: log inmediato para confirmar que el POST llega al controlador
+    console.log('\n📥 Webhook POST recibido en controlador NestJS:', JSON.stringify(payload, null, 2));
+
+    // Procesar en segundo plano de manera asíncrona no bloqueante (<200ms)
     this.metaWhatsAppService
       .processIncomingWebhook(payload, verifyToken)
       .catch((error) => {

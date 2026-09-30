@@ -8,6 +8,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { MenuItemsModule } from './menu-items/menu-items.module';
 import { OrdersModule } from './orders/orders.module';
 import { MetaWhatsAppModule } from './meta-whatsapp/meta-whatsapp.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { MetaWhatsAppModule } from './meta-whatsapp/meta-whatsapp.module';
     MenuItemsModule,
     OrdersModule,
     MetaWhatsAppModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [AppService],

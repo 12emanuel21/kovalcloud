@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiService } from '../ai/ai.service';
 import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
 
 export interface BotpressConverseResponse {
@@ -15,7 +16,10 @@ export class MetaWhatsAppService {
   private readonly logger = new Logger(MetaWhatsAppService.name);
   private readonly botpressUrl = process.env.BOTPRESS_URL || 'http://localhost:3000';
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly aiService: AiService,
+  ) {}
 
   /**
    * Envía un mensaje de texto oficial a WhatsApp utilizando Meta Graph API v22.0
@@ -220,14 +224,23 @@ export class MetaWhatsAppService {
         `📩 [${restaurant.name}] Mensaje entrante de [${senderNumber}] (PhoneID: ${targetPhoneId}): "${messageText}"`,
       );
 
-      // 4. Reenviar mensaje al bot de Botpress asignado al restaurante
-      const botId = restaurant.botpressBotId || 'koval-pizzeria-bot';
-      const replies = await this.forwardToBotpress(botId, senderNumber, messageText.trim());
+      // 4. Obtener el menú disponible del restaurante desde Prisma
+      const menuItems = await this.prisma.menuItem.findMany({
+        where: { isAvailable: true, restaurantId: restaurant.id },
+      });
 
-      // 5. Enviar cada respuesta a Meta Graph API v22.0 usando las credenciales del restaurante
-      for (const reply of replies) {
-        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, reply);
-      }
+      const menuString = menuItems
+        .map((i) => `ID: ${i.id} | Nombre: ${i.name} | Precio: ${i.price}`)
+        .join('\n');
+
+      // 5. Llamar a Gemini para interpretar el mensaje del cliente
+      const aiResult = await this.aiService.parseOrderIntent(messageText.trim(), menuString);
+
+      // 6. Log de la estructura extraída por IA
+      console.log('JSON Extraído por IA:', JSON.stringify(aiResult, null, 2));
+
+      // 7. Enviar la respuesta generada por IA al cliente vía Meta Graph API v22.0
+      await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, aiResult.responseToUser);
     } catch (error: any) {
       this.logger.error(`❌ Error procesando webhook entrante de Meta: ${error?.message || error}`, error?.stack);
     }

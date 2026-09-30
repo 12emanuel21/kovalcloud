@@ -106,7 +106,7 @@ ${itemsDetail}
       // 4. Redirigir a WhatsApp
       const cleanPhone = restaurantPhone.replace(/\D/g, '');
       const encodedMsg = encodeURIComponent(whatsappMessage);
-      const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedMsg}`;
+      const whatsappUrl = `https://wa.me/${cleanPhone || '573239999064'}?text=${encodedMsg}`;
 
       // Limpiar y resetear
       clearCart();
