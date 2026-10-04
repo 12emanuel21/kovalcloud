@@ -1,5 +1,6 @@
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { UseGuards, Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { UseGuards, Controller, Get, Post, Body, Patch, Param, Delete , UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { RestaurantsService } from './restaurants.service';
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
@@ -38,5 +39,16 @@ export class RestaurantsController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.restaurantsService.remove(id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(":id/menu/import")
+  @UseInterceptors(FileInterceptor("file"))
+  async importMenuFromPdf(
+    @Param("id") id: string,
+    @UploadedFile() file: { buffer: Buffer }
+  ) {
+    if (!file) throw new BadRequestException("Archivo PDF requerido");
+    return this.restaurantsService.importMenuFromPdf(id, file.buffer);
   }
 }

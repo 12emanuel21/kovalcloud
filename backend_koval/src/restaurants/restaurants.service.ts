@@ -2,12 +2,15 @@ import { Injectable, ConflictException, NotFoundException } from '@nestjs/common
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiService } from '../ai/ai.service';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class RestaurantsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private aiService: AiService) {}
 
   async findBySlug(slug: string) {
     const restaurant = await this.prisma.restaurant.findUnique({
@@ -136,6 +139,54 @@ export class RestaurantsService {
     await this.findOne(id);
     return await this.prisma.restaurant.delete({
       where: { id },
+    });
+  }
+
+  async importMenuFromPdf(id: string, fileBuffer: Buffer) {
+    await this.findOne(id); // Validar que el restaurante existe
+    
+    
+    // Guardar el PDF físico para enviarlo luego por WhatsApp
+    const menuDir = path.join(process.cwd(), "uploads", "menus");
+    if (!fs.existsSync(menuDir)) fs.mkdirSync(menuDir, { recursive: true });
+    fs.writeFileSync(path.join(menuDir, `${id}.pdf`), fileBuffer);
+    
+    // 1. Extraer el JSON estructurado usando Gemini
+    const aiResult = await this.aiService.extractMenuFromPdf(fileBuffer);
+    
+    // 2. Insertar en bloque usando transacción de Prisma
+    return await this.prisma.$transaction(async (tx) => {
+      const createdCategories: any[] = [];
+      
+      for (let i = 0; i < aiResult.categories.length; i++) {
+        const cat = aiResult.categories[i];
+        
+        // Se crea la categoría y sus items anidados automáticamente
+        const newCategory = await tx.menuCategory.create({
+          data: {
+            name: cat.name,
+            order: i,
+            restaurantId: id,
+            items: {
+              create: cat.items.map(item => ({
+                name: item.name,
+                description: item.description,
+                price: item.price,
+                restaurantId: id,
+              }))
+            }
+          },
+          include: { items: true }
+        });
+        
+        createdCategories.push(newCategory);
+      }
+      
+      return { 
+        message: "Menú importado y digitalizado exitosamente", 
+        categoriesCount: createdCategories.length,
+        categories: createdCategories 
+      };
     });
   }
 }

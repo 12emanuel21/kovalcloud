@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
@@ -112,48 +114,85 @@ export class MetaWhatsAppService {
     phoneId: string,
     token: string,
     to: string,
-    documentUrl: string,
-    caption: string = '',
+    filePathOrUrl: string,
     filename: string = 'Menu_Restaurante.pdf',
+    caption: string = '',
+    isBaileys: boolean = false,
   ): Promise<any> {
-    if (!phoneId || !token) {
+    if (!phoneId || (!token && !isBaileys)) {
       this.logger.warn('⚠️ No se puede enviar documento: phoneId o token no proporcionados.');
       return;
     }
 
+    const fsLib = require('fs');
+    const isLocalFile = !/^https?:\/\//i.test(filePathOrUrl);
     const cleanTo = to.replace(/\D/g, '');
-    const url = `https://graph.facebook.com/v22.0/${phoneId}/messages`;
-    const body = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: cleanTo,
-      type: 'document',
-      document: {
-        link: documentUrl,
-        caption: caption,
-        filename: filename,
-      },
-    };
 
     try {
-      const response = await fetch(url, {
+      // --- Baileys: se envía el PDF en Base64 ---
+      if (isBaileys) {
+        const buffer = isLocalFile
+          ? fsLib.readFileSync(filePathOrUrl)
+          : Buffer.from(await (await fetch(filePathOrUrl)).arrayBuffer());
+        const whatsappServiceUrl = process.env.WHATSAPP_SERVICE_URL || 'http://localhost:5000/send';
+        const response = await fetch(whatsappServiceUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: cleanTo,
+            document: buffer.toString('base64'),
+            filename,
+            mimetype: 'application/pdf',
+            caption,
+          }),
+        });
+        return await response.json();
+      }
+
+      // --- Meta: si es archivo local, se sube primero a Media API ---
+      const documentPayload: any = { caption, filename };
+      if (isLocalFile) {
+        const fileBuffer = fsLib.readFileSync(filePathOrUrl);
+        const form = new FormData();
+        form.append('messaging_product', 'whatsapp');
+        form.append('type', 'application/pdf');
+        form.append('file', new Blob([fileBuffer], { type: 'application/pdf' }), filename);
+        const uploadRes = await fetch(`https://graph.facebook.com/v22.0/${phoneId}/media`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+        const uploadData: any = await uploadRes.json();
+        if (!uploadRes.ok || !uploadData.id) {
+          this.logger.error(`❌ Error subiendo PDF a Meta: ${JSON.stringify(uploadData)}`);
+          return uploadData;
+        }
+        documentPayload.id = uploadData.id;
+      } else {
+        documentPayload.link = filePathOrUrl;
+      }
+
+      const response = await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: cleanTo,
+          type: 'document',
+          document: documentPayload,
+        }),
       });
-
       const data = await response.json();
-
       if (!response.ok) {
-        this.logger.error(`❌ Error enviando documento a ${cleanTo}:`, data);
-        return data;
+        this.logger.error(`❌ Error enviando documento a ${cleanTo}: ${JSON.stringify(data)}`);
       } else {
         this.logger.log(`✅ Documento PDF enviado exitosamente a ${cleanTo}`);
-        return data;
       }
+      return data;
     } catch (error: any) {
       this.logger.error(`❌ Excepción enviando documento a ${cleanTo}: ${error?.message || error}`);
       throw error;
@@ -373,6 +412,7 @@ export class MetaWhatsAppService {
       });
 
       const matchedReply = autoReplies.find((reply) =>
+        reply.responseType !== 'DYNAMIC_MENU' &&
         reply.triggerWords.some((word) => normalizedMsg === word.toLowerCase()),
       );
 
@@ -386,24 +426,12 @@ export class MetaWhatsAppService {
           finalResponse =
             matchedReply.responseBody ||
             `¡Hola! Conoce nuestro menú interactivo aquí: ${process.env.FRONTEND_URL || 'https://kovalcloud.com'}/menu/${restaurant.id}`;
-        } else if (matchedReply.responseType === 'DYNAMIC_MENU') {
-          const availableItems = menuItems.filter((item) => item.isAvailable);
-          finalResponse = matchedReply.responseBody
-            ? matchedReply.responseBody + '\n\n'
-            : '📋 *Nuestro Menú Actualizado:*\n\n';
-          availableItems.forEach((item) => {
-            finalResponse += `▪️ *${item.name}* - $${item.price.toLocaleString('es-CO')}\n`;
-            if (item.description) finalResponse += `   _${item.description}_\n`;
-          });
-          finalResponse += '\n¿Qué te gustaría ordenar?';
-          await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, finalResponse, isBaileys);
-          return;
         } else if (matchedReply.responseType === 'PDF_DOCUMENT') {
           const pdfUrl =
             matchedReply.responseBody ||
             'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
           const caption = '📄 Aquí tienes nuestro menú. ¡Dime qué te gustaría ordenar!';
-          await this.sendDocumentMessage(targetPhoneId, targetToken, senderNumber, pdfUrl, caption);
+          await this.sendDocumentMessage(targetPhoneId, targetToken, senderNumber, pdfUrl, "Menu.pdf", caption, isBaileys);
           return; // Detiene la ejecución de IA
         }
 
@@ -505,7 +533,33 @@ export class MetaWhatsAppService {
       }
 
       // 7. Enviar la respuesta generada por IA al cliente vía Meta Graph API v22.0
-      await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, finalResponse, isBaileys);
+      let pdfSent = false;
+      if (aiResult.sendMenuPdf) {
+        const menuPdfPath = path.join(process.cwd(), 'uploads', 'menus', `${restaurant.id}.pdf`);
+        if (fs.existsSync(menuPdfPath)) {
+          try {
+            const docRes = await this.sendDocumentMessage(
+              targetPhoneId,
+              targetToken,
+              senderNumber,
+              menuPdfPath,
+              'Menu.pdf',
+              finalResponse.slice(0, 1000),
+              isBaileys,
+            );
+            pdfSent = !!docRes && !docRes.error;
+            if (pdfSent) this.logger.log(`📄 Menú PDF enviado a ${senderNumber} (caption = respuesta IA)`);
+          } catch (e: any) {
+            this.logger.error(`❌ Falló envío del PDF, se enviará solo texto: ${e?.message || e}`);
+          }
+        } else {
+          this.logger.warn(`⚠️ PDF de menú no encontrado en ${menuPdfPath}, se envía solo texto.`);
+        }
+      }
+
+      if (!pdfSent) {
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, finalResponse, isBaileys);
+      }
 
       // Guardar la respuesta del modelo en el historial de chat
       await this.prisma.chatHistory.create({

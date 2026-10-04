@@ -4,6 +4,22 @@ import { google } from '@ai-sdk/google';
 import { z } from 'zod';
 import { WAITER_SYSTEM_PROMPT } from '../meta-whatsapp/prompts/waiter.prompt';
 
+
+const PdfMenuSchema = z.object({
+  categories: z.array(
+    z.object({
+      name: z.string().describe("Nombre de la categoría, ej: Pizzas, Bebidas, Postres"),
+      items: z.array(
+        z.object({
+          name: z.string(),
+          description: z.string().optional().describe("Descripción de los ingredientes si existe"),
+          price: z.number().describe("Precio numérico entero, sin símbolos de moneda"),
+        })
+      ),
+    })
+  ),
+});
+
 const OrderIntentSchema = z.object({
   intent: z.enum(['ORDER', 'QUESTION', 'COMPLAINT', 'GREETING']),
   items: z.array(
@@ -14,6 +30,11 @@ const OrderIntentSchema = z.object({
     }),
   ),
   responseToUser: z.string(),
+  sendMenuPdf: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('True única y estrictamente si el cliente pide el menú, la carta, o pregunta qué venden o qué opciones hay'),
 });
 
 export type OrderIntent = z.infer<typeof OrderIntentSchema>;
@@ -84,4 +105,27 @@ export class AiService {
     this.logger.log('Parsed intent: ' + object.intent);
     return object;
   }
+
+  async extractMenuFromPdf(pdfBuffer: Buffer) {
+    this.logger.log("📄 Extrayendo menú desde PDF con Gemini 2.5 Flash...");
+    
+    const { object } = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: PdfMenuSchema,
+      system: "Eres un sistema automatizado experto en digitalización de menús de restaurantes. Tu tarea es analizar el PDF adjunto y extraer su estructura a JSON. Agrupa los productos en sus categorías lógicas. Limpia los precios para que sean solo números (ej: de $25.000 a 25000). Si el nombre del producto incluye la descripción, sepáralos correctamente.",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Extrae todo el menú de este documento." },
+            { type: "file", data: pdfBuffer, mediaType: "application/pdf" },
+          ],
+        },
+      ],
+    });
+
+    this.logger.log(`✅ Extracción completada: ${object.categories.length} categorías encontradas.`);
+    return object;
+  }
+
 }

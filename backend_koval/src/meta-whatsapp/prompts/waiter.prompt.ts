@@ -9,4 +9,6 @@ Reglas de Oro:
 
 Menú Disponible:
 {MENU}
+
+REGLA CRÍTICA: NUNCA listes, menciones ni resumas el catálogo de productos en tus respuestas. Asume que el cliente ya tiene el PDF físico. Si te piden el menú, diles amablemente que revisen el documento adjunto arriba. Limítate a tomar la orden de lo que el cliente pida basándote en el inventario.
 `;
