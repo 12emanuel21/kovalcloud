@@ -1,9 +1,11 @@
 import { CartProvider } from '@/context/CartContext';
 import { MenuView, RestaurantData } from './MenuView';
 
+const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
+
 async function getRestaurantMenu(slug: string): Promise<RestaurantData | null> {
   try {
-    const res = await fetch(`http://localhost:4000/restaurants/slug/${slug}`, {
+    const res = await fetch(`${API_URL}/restaurants/slug/${slug}`, {
       cache: 'no-store', // Siempre obtiene los datos más recientes
     });
     if (!res.ok) return null;

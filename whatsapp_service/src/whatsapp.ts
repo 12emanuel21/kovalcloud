@@ -8,14 +8,11 @@ import pino from 'pino';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import axios from 'axios';
-import { sendMessageToBotpress } from './botpressBridge';
+import { sendToNestjs } from './nestjsBridge';
 
 dotenv.config();
 
 const AUTH_FOLDER = process.env.AUTH_FOLDER || 'auth_info_baileys';
-const API_URL = process.env.API_URL || 'http://localhost:4000';
-const DEFAULT_RESTAURANT_ID = process.env.RESTAURANT_ID || '8a23ecc8-788f-43fd-a5d6-d3f83ab5316d';
 
 export type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'QR_READY' | 'CONNECTED';
 
@@ -23,33 +20,10 @@ let sock: WASocket | null = null;
 let currentStatus: ConnectionStatus = 'DISCONNECTED';
 let currentQRCode: string | null = null;
 let connectedUser: { id?: string; name?: string } | null = null;
-let cachedBotId: string | null = null;
 
 export const getWhatsAppStatus = (): ConnectionStatus => currentStatus;
 export const getQRCode = (): string | null => currentQRCode;
 export const getConnectedUser = () => connectedUser;
-
-/**
- * Consulta dinámicamente el bot ID asignado al restaurante en la API de NestJS
- */
-async function resolveRestaurantBotId(): Promise<string> {
-  try {
-    const res = await axios.get(`${API_URL}/restaurants/${DEFAULT_RESTAURANT_ID}`, { timeout: 4000 });
-    const botId = res.data?.botpressBotId;
-    if (typeof botId === 'string' && botId.trim().length > 0) {
-      cachedBotId = botId.trim();
-      return botId.trim();
-    }
-  } catch {
-    // Fallback si la API no está disponible
-  }
-
-  if (cachedBotId) {
-    return cachedBotId;
-  }
-
-  return process.env.BOTPRESS_BOT_ID || 'koval-pizzeria-bot';
-}
 
 /**
  * Inicializa y gestiona la conexión con WhatsApp mediante Baileys
@@ -148,13 +122,9 @@ export async function connectToWhatsApp(): Promise<WASocket> {
       try {
         await sock?.sendPresenceUpdate('composing', remoteJid);
 
-        const activeBotId = await resolveRestaurantBotId();
-        const responses = await sendMessageToBotpress(senderNumber, messageText, activeBotId);
-
-        for (const reply of responses) {
-          await sock?.sendMessage(remoteJid, { text: reply });
-          console.log(`🤖 Respuesta enviada a ${senderNumber} [Bot: ${activeBotId}]: "${reply.slice(0, 60)}..."`);
-        }
+        const messageId = msg.key.id || `baileys_${Date.now()}`;
+        // Reenvío al adaptador de NestJS emulando Meta Cloud API
+        await sendToNestjs(remoteJid, messageText, messageId);
 
         await sock?.sendPresenceUpdate('paused', remoteJid);
       } catch (err) {

@@ -47,17 +47,21 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`🔔 Emitiendo evento [new_order] a sala restaurant_${restaurantId}`);
     if (this.server) {
       this.server.to(`restaurant_${restaurantId}`).emit('new_order', order);
-      this.server.emit(`new_order_${restaurantId}`, order);
-      this.server.emit('new_order', order);
-    }
+      }
   }
 
   emitOrderUpdated(restaurantId: string, order: unknown) {
     this.logger.log(`🔄 Emitiendo evento [order_updated] a sala restaurant_${restaurantId}`);
     if (this.server) {
       this.server.to(`restaurant_${restaurantId}`).emit('order_updated', order);
-      this.server.emit(`order_updated_${restaurantId}`, order);
-      this.server.emit('order_updated', order);
-    }
+      }
+  }
+
+  emitOrderStatusUpdated(restaurantId: string, order: unknown) {
+    this.logger.log(`🔄 Emitiendo evento [order_status_updated] / [order_updated] a sala restaurant_${restaurantId}`);
+    if (this.server) {
+      this.server.to(`restaurant_${restaurantId}`).emit('order_status_updated', order);
+      this.server.to(`restaurant_${restaurantId}`).emit('order_updated', order);
+      }
   }
 }

@@ -32,7 +32,13 @@ interface Order {
   createdAt: string;
 }
 
-const API_URL = 'http://localhost:4000';
+const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
+const SOCKET_URL =
+  typeof window === "undefined"
+    ? API_URL
+    : window.location.port === "3030"
+      ? `${window.location.protocol}//${window.location.hostname}:4000` // acceso directo sin Nginx
+      : "/"; // detrás de Nginx (puerto 80) -> /socket.io/ proxificado
 
 const playOrderChime = () => {
   try {
@@ -125,7 +131,7 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
   useEffect(() => {
     if (!restaurantId) return;
 
-    const socket = io(API_URL, { transports: ['websocket', 'polling'] });
+    const socket = io(SOCKET_URL, { path: "/socket.io/", transports: ["websocket", "polling"] });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -164,10 +170,7 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
     };
 
     socket.on('new_order', handleNewOrder);
-    socket.on(`new_order_${restaurantId}`, handleNewOrder);
     socket.on('order_updated', handleOrderUpdated);
-    socket.on(`order_updated_${restaurantId}`, handleOrderUpdated);
-
     return () => {
       socket.disconnect();
     };

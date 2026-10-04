@@ -26,11 +26,12 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  syncAuth: () => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_URL = 'http://localhost:4000';
+const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const router = useRouter();
@@ -38,22 +39,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Cargar sesión guardada en localStorage al montar
-  useEffect(() => {
+  const syncAuth = useCallback((): boolean => {
     try {
+      if (typeof window === 'undefined') return false;
       const savedToken = localStorage.getItem('koval_token');
       const savedUser = localStorage.getItem('koval_user');
 
-      if (savedToken && savedUser) {
+      if (savedToken && savedToken !== 'undefined' && savedToken !== 'null' && savedUser) {
         setToken(savedToken);
         setUser(JSON.parse(savedUser));
+        return true;
+      } else {
+        if (savedToken === 'undefined' || savedToken === 'null') {
+          localStorage.removeItem('koval_token');
+        }
+        return false;
       }
     } catch (e) {
-      console.error('Error al restaurar sesión:', e);
-    } finally {
-      setIsLoading(false);
+      console.error('Error al sincronizar sesión:', e);
+      return false;
     }
   }, []);
+
+  // Cargar sesión guardada en localStorage al montar
+  useEffect(() => {
+    syncAuth();
+    setIsLoading(false);
+  }, [syncAuth]);
 
   const login = async (email: string, password: string) => {
     const res = await fetch(`${API_URL}/auth/login`, {
@@ -68,7 +80,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const data = await res.json();
-    const { accessToken, user: authUser } = data;
+    const accessToken = data.accessToken || data.access_token;
+    const authUser = data.user;
 
     setToken(accessToken);
     setUser(authUser);
@@ -102,6 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         login,
         logout,
+        syncAuth,
       }}
     >
       {children}

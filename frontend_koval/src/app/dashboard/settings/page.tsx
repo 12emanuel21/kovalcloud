@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import Image from 'next/image';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
 
 interface RestaurantData {
   id: string;

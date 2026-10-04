@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { useCart } from '@/context/CartContext';
 
+const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
+
 interface CartDrawerProps {
   restaurantId: string;
   restaurantName: string;
@@ -67,7 +69,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         })),
       };
 
-      const res = await fetch('http://localhost:4000/orders', {
+      const res = await fetch(`${API_URL}/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

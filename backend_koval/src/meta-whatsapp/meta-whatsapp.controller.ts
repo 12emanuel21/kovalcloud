@@ -81,12 +81,13 @@ export class MetaWhatsAppController {
 
   /**
    * Endpoint Receptor de Eventos y Mensajes de Meta Cloud API
+   * POST /meta/webhook
    * POST /meta/webhook/:verifyToken
    */
-  @Post(':verifyToken')
+  @Post(['', ':verifyToken'])
   @HttpCode(HttpStatus.OK)
   handleIncomingWebhook(
-    @Param('verifyToken') verifyToken: string,
+    @Param('verifyToken') verifyToken: string | undefined,
     @Body() payload: MetaWebhookPayloadDto | any,
   ): { status: string } {
     // Debug: log inmediato para confirmar que el POST llega al controlador
@@ -94,7 +95,7 @@ export class MetaWhatsAppController {
 
     // Procesar en segundo plano de manera asíncrona no bloqueante (<200ms)
     this.metaWhatsAppService
-      .processIncomingWebhook(payload, verifyToken)
+      .processIncomingWebhook(payload, verifyToken || '')
       .catch((error) => {
         this.logger.error(
           `❌ Error no controlado procesando webhook en background: ${error?.message || error}`,

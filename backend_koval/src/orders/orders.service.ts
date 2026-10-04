@@ -2,7 +2,11 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Logger,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
+import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,9 +15,13 @@ import { OrdersGateway } from './orders.gateway';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ordersGateway: OrdersGateway,
+    @Inject(forwardRef(() => MetaWhatsAppService))
+    private readonly metaWhatsAppService: MetaWhatsAppService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto) {
@@ -148,7 +156,62 @@ export class OrdersService {
     return order;
   }
 
+  async updateOrderStatus(orderId: string, status: string) {
+    // 1. Actualizar en Prisma
+    const updatedOrder = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { status: status as OrderStatus },
+      include: {
+        restaurant: true,
+        items: {
+          include: {
+            menuItem: true,
+          },
+        },
+      },
+    });
+
+    // 2. Emitir evento WebSocket para que la tarjeta se mueva en el Kanban del frontend
+    this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, updatedOrder);
+
+    // 3. Notificar al cliente por WhatsApp según el nuevo estado
+    let mensajeCliente = '';
+    if (status === 'PREPARING') {
+      mensajeCliente = '👨‍🍳 ¡Buenas noticias! Tu pedido ya está en la cocina y lo estamos preparando con mucho cariño.';
+    } else if (status === 'DELIVERED') { // O READY
+      mensajeCliente = '🛵 ¡Tu pedido está listo y va en camino! Disfruta tu comida.';
+    }
+
+    if (mensajeCliente && updatedOrder.customerPhone) {
+      // Priorizamos los tokens de BD del restaurante, o fallback a variables de entorno
+      const phoneId = updatedOrder.restaurant?.whatsappPhoneId || process.env.META_PHONE_NUMBER_ID || '';
+      const token = updatedOrder.restaurant?.whatsappToken || process.env.META_ACCESS_TOKEN || '';
+
+      if (phoneId && token) {
+        try {
+          await this.metaWhatsAppService.sendTextMessage(
+            phoneId,
+            token,
+            updatedOrder.customerPhone,
+            mensajeCliente,
+          );
+          this.logger.log(`Notificación de WhatsApp enviada al cliente ${updatedOrder.customerPhone}`);
+        } catch (error) {
+          this.logger.error('Error enviando notificación al cliente:', error);
+        }
+      } else {
+        this.logger.warn(`No se encontraron credenciales de Meta (whatsappPhoneId / whatsappToken) para notificar al cliente ${updatedOrder.customerPhone}`);
+      }
+    }
+
+    return updatedOrder;
+  }
+
   async update(id: string, updateOrderDto: UpdateOrderDto) {
+    if (updateOrderDto.status && Object.keys(updateOrderDto).length === 1) {
+      return this.updateOrderStatus(id, updateOrderDto.status);
+    }
+
     const existingOrder = await this.findOne(id);
 
     const updatedOrder = await this.prisma.order.update({
@@ -161,6 +224,7 @@ export class OrdersService {
         status: updateOrderDto.status,
       },
       include: {
+        restaurant: true,
         items: {
           include: {
             menuItem: true,
@@ -170,16 +234,38 @@ export class OrdersService {
     });
 
     // 1. Emitir evento WebSocket de orden actualizada
-    this.ordersGateway.emitOrderUpdated(existingOrder.restaurantId, updatedOrder);
+    this.ordersGateway.emitOrderStatusUpdated(existingOrder.restaurantId, updatedOrder);
 
     // 2. Notificar al cliente vía WhatsApp si el estado cambió
     if (updateOrderDto.status && updateOrderDto.status !== existingOrder.status) {
-      this.sendOrderStatusNotification(updatedOrder, updateOrderDto.status);
+      let mensajeCliente = '';
+      if (updateOrderDto.status === 'PREPARING') {
+        mensajeCliente = '👨‍🍳 ¡Buenas noticias! Tu pedido ya está en la cocina y lo estamos preparando con mucho cariño.';
+      } else if (updateOrderDto.status === 'DELIVERED') {
+        mensajeCliente = '🛵 ¡Tu pedido está listo y va en camino! Disfruta tu comida.';
+      }
+
+      if (mensajeCliente && updatedOrder.customerPhone) {
+        const phoneId = updatedOrder.restaurant?.whatsappPhoneId || process.env.META_PHONE_NUMBER_ID || '';
+        const token = updatedOrder.restaurant?.whatsappToken || process.env.META_ACCESS_TOKEN || '';
+        if (phoneId && token) {
+          try {
+            await this.metaWhatsAppService.sendTextMessage(
+              phoneId,
+              token,
+              updatedOrder.customerPhone,
+              mensajeCliente,
+            );
+            this.logger.log(`Notificación de WhatsApp enviada al cliente ${updatedOrder.customerPhone}`);
+          } catch (error) {
+            this.logger.error('Error enviando notificación al cliente:', error);
+          }
+        }
+      }
     }
 
     return updatedOrder;
   }
-
   async remove(id: string) {
     await this.findOne(id);
     return await this.prisma.order.delete({

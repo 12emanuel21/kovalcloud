@@ -40,12 +40,20 @@ interface Order {
   updatedAt: string;
 }
 
-const API_URL = 'http://localhost:4000';
+const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
+const SOCKET_URL =
+  typeof window === "undefined"
+    ? API_URL
+    : window.location.port === "3030"
+      ? `${window.location.protocol}//${window.location.hostname}:4000` // acceso directo sin Nginx
+      : "/"; // detrás de Nginx (puerto 80) -> /socket.io/ proxificado
 
 // Reproduce un timbre/chime sonoro para la cocina usando Web Audio API
 const playOrderChime = () => {
   try {
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
 
@@ -82,12 +90,11 @@ const playOrderChime = () => {
 };
 
 export default function OrdersPage() {
-  const { restaurantId , token} = useAuth();
+  const { restaurantId, token } = useAuth();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTab, setSelectedTab] = useState<'ALL' | OrderStatus>('ALL');
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isConnectedWs, setIsConnectedWs] = useState<boolean>(false);
@@ -127,7 +134,8 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!restaurantId) return;
 
-    const socket = io(API_URL, {
+    const socket = io(SOCKET_URL, {
+      path: "/socket.io/",
       transports: ['websocket', 'polling'],
     });
     socketRef.current = socket;
@@ -174,24 +182,25 @@ export default function OrdersPage() {
     };
 
     socket.on('new_order', handleNewOrder);
-    socket.on(`new_order_${restaurantId}`, handleNewOrder);
     socket.on('order_updated', handleOrderUpdated);
-    socket.on(`order_updated_${restaurantId}`, handleOrderUpdated);
-
+    socket.on('order_status_updated', handleOrderUpdated);
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
   }, [restaurantId]);
 
-  // Actualizar estado del pedido (PATCH)
+  // Actualizar estado del pedido (PATCH a /orders/:id/status)
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
     setUpdatingOrderId(orderId);
     try {
-      const res = await fetch(`${API_URL}/orders/${orderId}`, {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
+      const res = await fetch(`${API_URL}/orders/${orderId}/status`, {
         method: 'PATCH',
         headers: {
-        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          Authorization: 'Bearer ' + currentToken,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ status: newStatus }),
       });
 
@@ -212,162 +221,274 @@ export default function OrdersPage() {
     }
   };
 
-  // Filtros
-  const filteredOrders = orders.filter((order) => {
-    const matchesTab = selectedTab === 'ALL' || order.status === selectedTab;
-    const matchesSearch =
-      searchQuery === '' ||
-      order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.customerPhone.includes(searchQuery) ||
-      order.id.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTab && matchesSearch;
-  });
-
-  // Conteo de estados
-  const counts = {
-    ALL: orders.length,
-    PENDING: orders.filter((o) => o.status === 'PENDING').length,
-    PREPARING: orders.filter((o) => o.status === 'PREPARING').length,
-    DELIVERED: orders.filter((o) => o.status === 'DELIVERED').length,
-    CANCELLED: orders.filter((o) => o.status === 'CANCELLED').length,
+  // Filtrado por buscador
+  const filterBySearch = (list: Order[]) => {
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.toLowerCase().trim();
+    return list.filter(
+      (o) =>
+        o.customerName?.toLowerCase().includes(q) ||
+        o.customerPhone?.includes(q) ||
+        o.id?.toLowerCase().includes(q)
+    );
   };
 
-  const getStatusBadge = (status: OrderStatus) => {
-    switch (status) {
-      case 'PENDING':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping" />
-            Pendiente
-          </span>
-        );
-      case 'CONFIRMED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">
-            Confirmado
-          </span>
-        );
-      case 'PREPARING':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
-            <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
-            En Preparación
-          </span>
-        );
-      case 'DELIVERED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            ✓ Entregado
-          </span>
-        );
-      case 'CANCELLED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-            ✕ Cancelado
-          </span>
-        );
-      default:
-        return null;
-    }
-  };
+  // Órdenes distribuidas en las 3 columnas del Kanban
+  const pendingOrders = filterBySearch(orders.filter((o) => o.status === 'PENDING'));
+  const preparingOrders = filterBySearch(orders.filter((o) => o.status === 'PREPARING'));
+  const deliveredOrders = filterBySearch(
+    orders.filter((o) => o.status === 'DELIVERED' || (o.status as string) === 'READY')
+  );
 
-  const formatDate = (isoString: string) => {
+  const formatOrderTime = (dateStr: string) => {
     try {
-      const date = new Date(isoString);
-      return date.toLocaleDateString('es-CO', {
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+      const d = new Date(dateStr);
+      return d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
     } catch {
-      return isoString;
+      return '';
     }
+  };
+
+  // Render de tarjeta de orden
+  const renderOrderCard = (order: Order) => {
+    const isUpdating = updatingOrderId === order.id;
+    const shortId = order.id.slice(0, 8).toUpperCase();
+    const cleanPhone = order.customerPhone?.replace(/\D/g, '');
+    const isWhatsApp = order.channel === 'WHATSAPP';
+
+    return (
+      <div
+        key={order.id}
+        className="bg-slate-800 rounded-lg p-4 shadow-lg border border-slate-700 mb-4 flex flex-col gap-3 transition-all hover:border-slate-600"
+      >
+        {/* Cabecera del Ticket */}
+        <div className="flex items-start justify-between gap-2 border-b border-slate-700/70 pb-2.5">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm font-black text-white tracking-wider">
+                #{shortId}
+              </span>
+              {isWhatsApp ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span>WA</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  <span>Web</span>
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5">{formatOrderTime(order.createdAt)}</p>
+          </div>
+
+          <div className="text-right">
+            <span className="font-mono text-base font-black text-emerald-400">
+              ${order.total.toLocaleString('es-CO')}
+            </span>
+          </div>
+        </div>
+
+        {/* Información del Cliente */}
+        <div className="space-y-1 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-white text-sm truncate" title={order.customerName}>
+              {order.customerName || 'Cliente'}
+            </span>
+            {cleanPhone && (
+              <a
+                href={`https://wa.me/${cleanPhone}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-[10px] font-semibold transition flex items-center gap-1"
+                title="Abrir chat en WhatsApp"
+              >
+                <span>WhatsApp</span>
+                <span className="font-mono">↗</span>
+              </a>
+            )}
+          </div>
+
+          {order.customerPhone && (
+            <p className="text-slate-400 font-mono text-[11px]">{order.customerPhone}</p>
+          )}
+
+          {order.orderType === 'DINE_IN' && order.tableNumber ? (
+            <p className="text-indigo-400 font-semibold text-[11px] flex items-center gap-1 pt-1">
+              <span>🍽️ Mesa: {order.tableNumber}</span>
+            </p>
+          ) : order.deliveryAddress ? (
+            <p className="text-slate-400 text-[11px] truncate pt-0.5" title={order.deliveryAddress}>
+              📍 {order.deliveryAddress}
+            </p>
+          ) : null}
+        </div>
+
+        {/* Notas especiales */}
+        {order.notes && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[11px] text-amber-300">
+            📝 {order.notes}
+          </div>
+        )}
+
+        {/* Lista de Productos del Ticket */}
+        <div className="space-y-1.5 pt-1 border-t border-slate-700/60">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Productos ({order.items?.reduce((acc, it) => acc + it.quantity, 0) || 0})
+          </p>
+          <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+            {order.items?.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between text-xs py-1 border-b border-slate-700/40 last:border-0"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-bold text-amber-400 font-mono shrink-0">
+                    {item.quantity}x
+                  </span>
+                  <span className="text-slate-200 font-medium truncate">
+                    {item.menuItem?.name || 'Producto'}
+                  </span>
+                </div>
+                <span className="text-slate-400 font-mono text-[11px] shrink-0 ml-2">
+                  ${item.subtotal.toLocaleString('es-CO')}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Botones de Acción Condicionales */}
+        <div className="pt-2 border-t border-slate-700/70">
+          {order.status === 'PENDING' && (
+            <button
+              type="button"
+              disabled={isUpdating}
+              onClick={() => handleUpdateStatus(order.id, 'PREPARING')}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition shadow-md shadow-blue-900/40 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+            >
+              {isUpdating ? (
+                <>
+                  <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  <span>Actualizando...</span>
+                </>
+              ) : (
+                <>
+                  <span>👨‍🍳 Iniciar Preparación</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {order.status === 'PREPARING' && (
+            <button
+              type="button"
+              disabled={isUpdating}
+              onClick={() => handleUpdateStatus(order.id, 'DELIVERED')}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition shadow-md shadow-emerald-900/40 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+            >
+              {isUpdating ? (
+                <>
+                  <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  <span>Despachando...</span>
+                </>
+              ) : (
+                <>
+                  <span>🛵 Despachar Pedido</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {(order.status === 'DELIVERED' || (order.status as string) === 'READY') && (
+            <div className="w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold py-2 px-3 rounded-lg text-xs text-center flex items-center justify-center gap-1.5">
+              <span>✓ Pedido Despachado</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
-    <div className="space-y-8 relative">
-      {/* Toast Notificación de Nuevo Pedido en Vivo */}
+    <div className="space-y-6">
+      {/* Toast Flotante de Nuevo Pedido */}
       {newOrderToast && (
-        <div className="fixed top-6 right-6 z-50 animate-in fade-in slide-in-from-top duration-300">
-          <div className="bg-slate-900/95 border-2 border-emerald-500 rounded-2xl p-4 shadow-2xl shadow-emerald-950/80 backdrop-blur-xl flex items-center gap-4 max-w-sm">
-            <div className="h-11 w-11 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black text-lg shadow-lg shadow-emerald-500/30 shrink-0 animate-bounce">
-              🔔
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold text-emerald-400 font-mono">
-                  #{newOrderToast.id}
-                </span>
-                <span className="text-[10px] uppercase font-bold text-slate-400">
-                  ¡Nuevo Pedido!
-                </span>
-              </div>
-              <p className="text-sm font-extrabold text-white truncate">{newOrderToast.customer}</p>
-              <p className="text-xs text-emerald-400 font-mono font-bold">
-                ${newOrderToast.total.toLocaleString('es-CO')} COP
-              </p>
-            </div>
-            <button
-              onClick={() => setNewOrderToast(null)}
-              className="text-slate-400 hover:text-white text-xs p-1"
-            >
-              ✕
-            </button>
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 font-bold px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-400 animate-in slide-in-from-bottom duration-300">
+          <span className="text-xl">🔔</span>
+          <div>
+            <p className="text-sm font-black">¡Nuevo Pedido #{newOrderToast.id}!</p>
+            <p className="text-xs font-semibold opacity-90">
+              {newOrderToast.customer} • ${newOrderToast.total.toLocaleString('es-CO')}
+            </p>
           </div>
+          <button
+            onClick={() => setNewOrderToast(null)}
+            className="ml-3 text-slate-950 hover:opacity-70 text-sm font-black"
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Encabezado */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-6">
+      {/* Cabecera Principal */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-amber-400 uppercase tracking-widest">
-              Live Orders
-            </span>
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-            </span>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition ${
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-black text-white tracking-tight">Tablero Kanban de Pedidos</h1>
+            {/* Indicador WebSocket en vivo */}
+            <div
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition ${
                 isConnectedWs
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                  : 'bg-slate-800 text-slate-400 border-slate-700'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
               }`}
+              title={isConnectedWs ? 'Conectado al servidor WebSocket en tiempo real' : 'Reconectando WebSocket...'}
             >
-              {isConnectedWs ? '⚡ WebSocket Activo' : 'Conectando WebSocket...'}
-            </span>
+              <span
+                className={`h-2 w-2 rounded-full ${isConnectedWs ? 'bg-emerald-400 animate-ping' : 'bg-rose-400'}`}
+              />
+              <span>{isConnectedWs ? 'En vivo' : 'Sin conexión'}</span>
+            </div>
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight mt-1">
-            Gestión de Pedidos en Vivo
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Recepción instantánea de pedidos con alerta sonora para la cocina.
+          <p className="text-xs text-slate-400 mt-1">
+            Gestiona la preparación y despacho de comandas en tiempo real
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          {/* Botón para Probar Alerta Sonora */}
-          <button
-            type="button"
-            onClick={playOrderChime}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-slate-300 hover:text-emerald-400 text-xs font-semibold transition active:scale-95"
-            title="Probar sonido de notificación"
-          >
-            <span>🔔</span>
-            <span>Probar Sonido</span>
-          </button>
+        {/* Buscador y Actualizar */}
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar por cliente o #ID..."
+              className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 outline-none w-56 md:w-64 transition"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2 text-xs text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            )}
+          </div>
 
           <button
             onClick={() => fetchOrders(true)}
             disabled={loading}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-medium transition disabled:opacity-50"
-            title="Recargar pedidos"
+            className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition disabled:opacity-50 cursor-pointer"
+            title="Recargar órdenes"
           >
             <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className={`h-4 w-4 ${loading ? 'animate-spin text-amber-400' : 'text-slate-400'}`}
+              className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -380,416 +501,104 @@ export default function OrdersPage() {
               <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
               <path d="M16 21h5v-5" />
             </svg>
-            <span>{loading ? 'Actualizando...' : 'Actualizar'}</span>
           </button>
         </div>
       </div>
 
-      {/* Barra de Filtros y Búsqueda */}
-      <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 md:pb-0 scrollbar-none">
-          <button
-            onClick={() => setSelectedTab('ALL')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0 ${
-              selectedTab === 'ALL'
-                ? 'bg-slate-100 text-slate-950 shadow-md shadow-slate-100/10'
-                : 'bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>Todos</span>
-            <span
-              className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
-                selectedTab === 'ALL' ? 'bg-slate-300 text-slate-900' : 'bg-slate-800 text-slate-300'
-              }`}
-            >
-              {counts.ALL}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setSelectedTab('PENDING')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0 ${
-              selectedTab === 'PENDING'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-amber-400'
-            }`}
-          >
-            <span>Pendientes</span>
-            <span
-              className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
-                selectedTab === 'PENDING' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-amber-400'
-              }`}
-            >
-              {counts.PENDING}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setSelectedTab('PREPARING')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0 ${
-              selectedTab === 'PREPARING'
-                ? 'bg-blue-500 text-slate-950 shadow-md shadow-blue-500/20'
-                : 'bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-blue-400'
-            }`}
-          >
-            <span>En Preparación</span>
-            <span
-              className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
-                selectedTab === 'PREPARING' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-blue-400'
-              }`}
-            >
-              {counts.PREPARING}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setSelectedTab('DELIVERED')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0 ${
-              selectedTab === 'DELIVERED'
-                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                : 'bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-emerald-400'
-            }`}
-          >
-            <span>Entregados</span>
-            <span
-              className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
-                selectedTab === 'DELIVERED' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-emerald-400'
-              }`}
-            >
-              {counts.DELIVERED}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setSelectedTab('CANCELLED')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0 ${
-              selectedTab === 'CANCELLED'
-                ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
-                : 'bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-rose-400'
-            }`}
-          >
-            <span>Cancelados</span>
-            <span
-              className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
-                selectedTab === 'CANCELLED' ? 'bg-rose-700 text-white' : 'bg-slate-800 text-rose-400'
-              }`}
-            >
-              {counts.CANCELLED}
-            </span>
-          </button>
-        </div>
-
-        <div className="relative min-w-[240px]">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-4 w-4 absolute left-3.5 top-3 text-slate-500"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar por cliente, tel o ID..."
-            className="w-full bg-slate-900/90 border border-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl pl-9 pr-3.5 py-2 text-xs text-white placeholder-slate-500 outline-none transition"
-          />
-        </div>
-      </div>
-
-      {/* Alerta de Error */}
+      {/* Error Banner */}
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3 text-red-300">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-5 w-5 text-red-400 shrink-0 mt-0.5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-red-200">Error al cargar pedidos</p>
-            <p className="text-xs text-red-400/90 mt-0.5">{error}</p>
-          </div>
-          <button
-            onClick={() => fetchOrders(true)}
-            className="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg text-xs font-medium transition"
-          >
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => fetchOrders(true)} className="underline hover:text-rose-300">
             Reintentar
           </button>
         </div>
       )}
 
-      {/* Lista de Pedidos */}
-      {loading && orders.length === 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3].map((n) => (
+      {/* Tablero Kanban (3 Columnas) */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+          {[1, 2, 3].map((col) => (
             <div
-              key={n}
-              className="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 animate-pulse space-y-4"
+              key={col}
+              className="bg-slate-900/50 rounded-xl p-4 border border-slate-800 min-h-[70vh] animate-pulse space-y-4"
             >
-              <div className="h-6 bg-slate-800 rounded w-1/2" />
-              <div className="h-20 bg-slate-800/60 rounded-xl" />
-              <div className="h-10 bg-slate-800 rounded-xl" />
+              <div className="h-6 bg-slate-800 rounded w-1/3 mb-4" />
+              <div className="h-44 bg-slate-800/60 rounded-lg" />
+              <div className="h-44 bg-slate-800/60 rounded-lg" />
             </div>
           ))}
         </div>
-      ) : filteredOrders.length === 0 ? (
-        <div className="bg-slate-900/40 border-2 border-dashed border-slate-800 rounded-3xl p-12 text-center space-y-4">
-          <div className="h-16 w-16 mx-auto rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-slate-400">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-8 w-8"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-              <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
-            </svg>
-          </div>
-          <div>
-            <h3 className="text-base font-bold text-slate-200">No hay pedidos para mostrar</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-              {selectedTab === 'ALL'
-                ? 'Aún no se han recibido pedidos en el menú digital.'
-                : `No hay órdenes con estado "${selectedTab}".`}
-            </p>
-          </div>
-        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredOrders.map((order) => {
-            const isUpdating = updatingOrderId === order.id;
-            const shortId = order.id.slice(0, 8).toUpperCase();
-            const cleanPhone = order.customerPhone.replace(/\D/g, '');
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+          {/* Columna 1: Pendientes */}
+          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-800 min-h-[70vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse" />
+                <h2 className="font-bold text-sm text-white">Pendientes</h2>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold font-mono">
+                {pendingOrders.length}
+              </span>
+            </div>
 
-            return (
-              <article
-                key={order.id}
-                className="bg-slate-900/85 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col justify-between space-y-5 hover:border-slate-700 transition"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono font-bold text-sm text-white">
-                          #{shortId}
-                        </span>
-                        {getStatusBadge(order.status)}
-                        {order.orderType === 'DINE_IN' && (
-                          <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-400 text-[10px] font-bold border border-indigo-500/30">
-                            MESA {order.tableNumber || ''}
-                          </span>
-                        )}
-                        {order.orderType === 'DELIVERY' && (
-                          <span className="px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-400 text-[10px] font-bold border border-purple-500/30">
-                            DOMICILIO
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        {formatDate(order.createdAt)}
-                      </p>
-                    </div>
-
-                    <div className="text-right">
-                      <span className="text-base font-black text-emerald-400 font-mono">
-                        ${order.total.toLocaleString('es-CO')}
-                      </span>
-                      <p className="text-[10px] text-slate-500 font-medium">COP</p>
-                    </div>
-                  </div>
-
-                  {/* Datos del Cliente */}
-                  <div className="bg-slate-950/70 rounded-2xl p-3.5 border border-slate-800/80 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4 text-slate-400 shrink-0"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-                        <circle cx="12" cy="7" r="4" />
-                      </svg>
-                      <span className="text-xs font-bold text-white truncate">
-                        {order.customerName}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-xs text-slate-300">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-3.5 w-3.5 text-slate-400 shrink-0"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                        </svg>
-                        <span>{order.customerPhone}</span>
-                      </div>
-
-                      {cleanPhone && (
-                        <a
-                          href={`https://wa.me/${cleanPhone}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-[10px] font-semibold transition flex items-center gap-1"
-                        >
-                          <span>WhatsApp</span>
-                          <span className="font-mono">↗</span>
-                        </a>
-                      )}
-                    </div>
-
-                    {order.orderType === 'DINE_IN' && order.tableNumber ? (
-                      <div className="flex items-start gap-2 text-xs text-indigo-300 pt-1 border-t border-slate-800/60 font-semibold">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0 mt-0.5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v9"/><path d="M5 12v9"/><path d="M9 3h6"/></svg>
-                        <span className="leading-snug">Consumo en Mesa: {order.tableNumber}</span>
-                      </div>
-                    ) : order.deliveryAddress ? (
-                      <div className="flex items-start gap-2 text-xs text-slate-400 pt-1 border-t border-slate-800/60">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-                          <circle cx="12" cy="10" r="3" />
-                        </svg>
-                        <span className="leading-snug">{order.deliveryAddress}</span>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {/* Notas Especiales */}
-                  {order.notes && (
-                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 text-xs text-amber-300 flex items-start gap-2">
-                      <span className="shrink-0">📝</span>
-                      <span className="leading-relaxed">{order.notes}</span>
-                    </div>
-                  )}
-
-                  {/* Detalle de Productos */}
-                  <div className="space-y-1.5 pt-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                      Productos ({order.items.reduce((sum, i) => sum + i.quantity, 0)})
-                    </p>
-                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
-                      {order.items.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between text-xs py-1 border-b border-slate-800/50 last:border-0"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-bold text-amber-400 font-mono">
-                              {item.quantity}x
-                            </span>
-                            <span className="text-slate-200 truncate">
-                              {item.menuItem?.name || `Producto`}
-                            </span>
-                          </div>
-                          <span className="text-slate-400 font-mono shrink-0">
-                            ${item.subtotal.toLocaleString('es-CO')}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+            <div className="flex-1">
+              {pendingOrders.length === 0 ? (
+                <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-lg text-slate-500 text-xs">
+                  No hay pedidos pendientes
                 </div>
+              ) : (
+                pendingOrders.map(renderOrderCard)
+              )}
+            </div>
+          </div>
 
-                {/* Botones de Cambio de Estado */}
-                <div className="pt-3 border-t border-slate-800 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    {order.status === 'PENDING' && (
-                      <>
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() => handleUpdateStatus(order.id, 'PREPARING')}
-                          className="col-span-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-2.5 px-3 rounded-xl text-xs transition shadow-md shadow-blue-900/30 flex items-center justify-center gap-1.5"
-                        >
-                          <span>👨‍🍳 Iniciar Preparación</span>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() => handleUpdateStatus(order.id, 'CANCELLED')}
-                          className="col-span-2 bg-slate-800 hover:bg-rose-500/20 hover:text-rose-400 disabled:opacity-50 text-slate-400 font-semibold py-1.5 px-3 rounded-xl text-xs transition"
-                        >
-                          <span>Cancelar Orden</span>
-                        </button>
-                      </>
-                    )}
+          {/* Columna 2: En Preparación */}
+          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-800 min-h-[70vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-blue-400" />
+                <h2 className="font-bold text-sm text-white">En Preparación</h2>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-bold font-mono">
+                {preparingOrders.length}
+              </span>
+            </div>
 
-                    {order.status === 'PREPARING' && (
-                      <>
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() => handleUpdateStatus(order.id, 'DELIVERED')}
-                          className="col-span-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-3 rounded-xl text-xs transition shadow-md shadow-emerald-900/30 flex items-center justify-center gap-1.5"
-                        >
-                          <span>🛵 Marcar como Entregado</span>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() => handleUpdateStatus(order.id, 'CANCELLED')}
-                          className="col-span-2 bg-slate-800 hover:bg-rose-500/20 hover:text-rose-400 disabled:opacity-50 text-slate-400 font-semibold py-1.5 px-3 rounded-xl text-xs transition"
-                        >
-                          <span>Cancelar Orden</span>
-                        </button>
-                      </>
-                    )}
-
-                    {order.status === 'DELIVERED' && (
-                      <div className="col-span-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold py-2 px-3 rounded-xl text-center flex items-center justify-center gap-1.5">
-                        <span>✓ Orden completada y entregada</span>
-                      </div>
-                    )}
-
-                    {order.status === 'CANCELLED' && (
-                      <div className="col-span-2 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold py-2 px-3 rounded-xl text-center flex items-center justify-center gap-1.5">
-                        <span>✕ Orden cancelada</span>
-                      </div>
-                    )}
-                  </div>
+            <div className="flex-1">
+              {preparingOrders.length === 0 ? (
+                <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-lg text-slate-500 text-xs">
+                  No hay pedidos en preparación
                 </div>
-              </article>
-            );
-          })}
+              ) : (
+                preparingOrders.map(renderOrderCard)
+              )}
+            </div>
+          </div>
+
+          {/* Columna 3: Listos / Despachados */}
+          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-800 min-h-[70vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                <h2 className="font-bold text-sm text-white">Listos / Despachados</h2>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold font-mono">
+                {deliveredOrders.length}
+              </span>
+            </div>
+
+            <div className="flex-1">
+              {deliveredOrders.length === 0 ? (
+                <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-lg text-slate-500 text-xs">
+                  No hay pedidos despachados
+                </div>
+              ) : (
+                deliveredOrders.map(renderOrderCard)
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

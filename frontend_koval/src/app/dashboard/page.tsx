@@ -23,7 +23,7 @@ interface Category {
   items?: MenuItem[];
 }
 
-const API_URL = 'http://localhost:4000';
+const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -112,10 +112,13 @@ export default function DashboardPage() {
         restaurantId,
       };
 
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
       const res = await fetch(`${API_URL}/categories`, {
         method: 'POST',
         headers: {
-        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          'Authorization': 'Bearer ' + currentToken,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(payload),
       });
 
@@ -160,6 +163,13 @@ export default function DashboardPage() {
     setDishMsg(null);
 
     try {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
+      if (!currentToken || currentToken === 'undefined' || currentToken === 'null') {
+        setDishMsg({ type: 'error', text: 'No se encontró un token de sesión válido. Inicia sesión nuevamente.' });
+        setIsSubmittingDish(false);
+        return;
+      }
+
       const payload = {
         name: dishName.trim(),
         description: dishDescription.trim() || undefined,
@@ -171,7 +181,9 @@ export default function DashboardPage() {
       const res = await fetch(`${API_URL}/menu-items`, {
         method: 'POST',
         headers: {
-        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          'Authorization': 'Bearer ' + currentToken,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(payload),
       });
 
@@ -203,10 +215,13 @@ export default function DashboardPage() {
     setTogglingItemId(item.id);
 
     try {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
       const res = await fetch(`${API_URL}/menu-items/${item.id}`, {
         method: 'PATCH',
         headers: {
-        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          'Authorization': 'Bearer ' + currentToken,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ isAvailable: nextAvailability }),
       });
 
@@ -266,10 +281,13 @@ export default function DashboardPage() {
         isAvailable: editIsAvailable,
       };
 
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
       const res = await fetch(`${API_URL}/menu-items/${editingItem.id}`, {
         method: 'PATCH',
         headers: {
-        'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          'Authorization': 'Bearer ' + currentToken,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(payload),
       });
 
@@ -295,8 +313,12 @@ export default function DashboardPage() {
     setDeletingItemId(item.id);
 
     try {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
       const res = await fetch(`${API_URL}/menu-items/${item.id}`, {
         method: 'DELETE',
+        headers: {
+          'Authorization': 'Bearer ' + currentToken,
+        },
       });
 
       if (!res.ok) {
@@ -329,8 +351,12 @@ export default function DashboardPage() {
     setDeletingCatId(category.id);
 
     try {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
       const res = await fetch(`${API_URL}/categories/${category.id}`, {
         method: 'DELETE',
+        headers: {
+          'Authorization': 'Bearer ' + currentToken,
+        },
       });
 
       if (!res.ok) {

@@ -10,17 +10,24 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, restaurant, isAuthenticated, isLoading, logout } = useAuth();
+  const { user, restaurant, isAuthenticated, isLoading, logout, syncAuth } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push('/login');
+    if (!isLoading) {
+      if (!isAuthenticated) {
+        const synced = syncAuth ? syncAuth() : false;
+        if (!synced) {
+          router.push('/login');
+        }
+      }
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, router, syncAuth]);
 
-  // Pantalla de carga mientras se verifica la sesión
-  if (isLoading) {
+  const hasLocalSession = typeof window !== 'undefined' && Boolean(localStorage.getItem('koval_token'));
+
+  // Pantalla de carga mientras se verifica la sesión o se sincroniza desde localStorage
+  if (isLoading || (!isAuthenticated && hasLocalSession)) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
         <div className="flex flex-col items-center gap-3">
@@ -40,7 +47,7 @@ export default function DashboardLayout({
     );
   }
 
-  // Si no está autenticado, no renderizar el contenido mientras redirige
+  // Si no está autenticado y no hay token en localStorage, no renderizar el contenido mientras redirige
   if (!isAuthenticated) {
     return null;
   }

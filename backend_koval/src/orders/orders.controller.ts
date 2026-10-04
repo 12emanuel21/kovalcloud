@@ -41,6 +41,11 @@ export class OrdersController {
     return this.ordersService.update(id, updateOrderDto);
   }
 
+  @Patch(':id/status')
+  updateStatus(@Param('id') id: string, @Body('status') status: string) {
+    return this.ordersService.updateOrderStatus(id, status);
+  }
+
   // @UseGuards(JwtAuthGuard)
   @Delete(':id')
   remove(@Param('id') id: string) {
