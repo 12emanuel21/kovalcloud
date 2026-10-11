@@ -2,6 +2,7 @@ import { UseGuards } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { KitchenAccess } from '../auth/decorators/kitchen-access.decorator';
 import type { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import {
   Controller,
@@ -29,13 +30,16 @@ export class OrdersController {
     return this.ordersService.create(createOrderDto);
   }
 
-  // A partir de aquí todo exige sesión y queda limitado al restaurante del usuario
+  // A partir de aquí todo exige sesión y queda limitado al restaurante del usuario.
+  // KITCHEN: solo ver pedidos y cambiar su estado (no editar datos ni borrar).
+  @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Get()
   findAll(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
     return this.ordersService.findAll(user, restaurantId);
   }
 
+  @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Get(':id')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
@@ -52,6 +56,7 @@ export class OrdersController {
     return this.ordersService.update(id, updateOrderDto, user);
   }
 
+  @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Patch(':id/status')
   updateStatus(

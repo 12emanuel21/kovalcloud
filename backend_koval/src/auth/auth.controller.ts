@@ -16,6 +16,7 @@ import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/roles.decorator';
+import { KitchenAccess } from './decorators/kitchen-access.decorator';
 import { AuthenticatedUser } from './strategies/jwt.strategy';
 
 type AuthenticatedRequest = { user: AuthenticatedUser };
@@ -38,18 +39,21 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   getProfile(@Request() req: AuthenticatedRequest) {
     return req.user;
   }
 
+  @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Post('2fa/generate')
   async register2FA(@Request() req: AuthenticatedRequest) {
     return this.authService.generateTwoFactorSecret(req.user.id, req.user.email);
   }
 
+  @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Post('2fa/verify')
   async verify2FA(@Request() req: AuthenticatedRequest, @Body('code') code: string) {

@@ -196,14 +196,16 @@ describe('MetaWhatsAppService', () => {
           { role: 'user', message: 'hola' },
           { role: 'model', message: '¡Hola! Bienvenido' },
         ],
+        'Pizzería Nápoles',
       );
 
-      // Debe enviar mensaje de respuesta
+      // Debe enviar mensaje de respuesta (por Meta: isBaileys = false)
       expect(sendSpy).toHaveBeenCalledWith(
         '9988776655',
         'EAAB_TEST_TOKEN',
         '573009876543',
         '¡Hola! Bienvenido',
+        false,
       );
 
       // Debe haber guardado la respuesta del bot/model
@@ -265,6 +267,7 @@ describe('MetaWhatsAppService', () => {
         'EAAB_TEST_TOKEN',
         '573009876543',
         '🧠 Memoria borrada. Contexto limpio. ¿En qué puedo ayudarte de nuevo?',
+        false,
       );
 
       // No debe llamar a la IA

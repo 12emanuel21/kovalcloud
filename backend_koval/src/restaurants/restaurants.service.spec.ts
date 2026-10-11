@@ -1,6 +1,7 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RestaurantsService } from './restaurants.service';
+import { AiService } from '../ai/ai.service';
 
 describe('RestaurantsService', () => {
   let service: RestaurantsService;
@@ -19,7 +20,10 @@ describe('RestaurantsService', () => {
             $transaction: jest.fn(),
           },
         },
-RestaurantsService],
+        // La importación de menús (PDF) usa la IA; en estos tests no se invoca
+        { provide: AiService, useValue: { extractMenuFromPdf: jest.fn() } },
+        RestaurantsService,
+      ],
     }).compile();
 
     service = module.get<RestaurantsService>(RestaurantsService);
