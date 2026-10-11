@@ -17,6 +17,7 @@ import {
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { orderViewFor } from './order-visibility';
 
 @Controller('orders')
 export class OrdersController {
@@ -35,15 +36,16 @@ export class OrdersController {
   @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Get()
-  findAll(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
-    return this.ordersService.findAll(user, restaurantId);
+  async findAll(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
+    // KITCHEN recibe los pedidos sin importes (total, precios, subtotales)
+    return orderViewFor(user.role, await this.ordersService.findAll(user, restaurantId));
   }
 
   @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.ordersService.findOne(id, user);
+  async findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return orderViewFor(user.role, await this.ordersService.findOne(id, user));
   }
 
   @UseGuards(JwtAuthGuard)
@@ -59,13 +61,13 @@ export class OrdersController {
   @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Patch(':id/status')
-  updateStatus(
+  async updateStatus(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body('status') status: string,
     @Body('estimatedMinutes') estimatedMinutes?: number,
   ) {
-    return this.ordersService.updateOrderStatus(id, status, user, estimatedMinutes);
+    return orderViewFor(user.role, await this.ordersService.updateOrderStatus(id, status, user, estimatedMinutes));
   }
 
   @UseGuards(JwtAuthGuard)

@@ -14,8 +14,9 @@ interface OrderItem {
   orderId: string;
   menuItemId: string;
   quantity: number;
-  unitPrice: number;
-  subtotal: number;
+  // null para el rol KITCHEN: el backend no envía importes a la cocina
+  unitPrice: number | null;
+  subtotal: number | null;
   menuItem?: {
     id: string;
     name: string;
@@ -33,7 +34,7 @@ interface Order {
   customerName: string;
   customerPhone: string;
   deliveryAddress?: string;
-  total: number;
+  total: number | null;
   status: OrderStatus;
   notes?: string;
   items: OrderItem[];
@@ -99,7 +100,7 @@ export default function OrdersPage() {
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isConnectedWs, setIsConnectedWs] = useState<boolean>(false);
-  const [newOrderToast, setNewOrderToast] = useState<{ id: string; customer: string; total: number } | null>(null);
+  const [newOrderToast, setNewOrderToast] = useState<{ id: string; customer: string; total: number | null } | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   // Cargar pedidos desde la API REST
@@ -291,9 +292,11 @@ export default function OrdersPage() {
             <span className="block font-mono text-[9px] text-slate-500 tracking-wider" title={`Pedido ${order.id}`}>
               #{shortId}
             </span>
-            <span className="font-mono text-base font-black text-emerald-400">
-              ${order.total.toLocaleString('es-CO')}
-            </span>
+            {order.total != null && (
+              <span className="font-mono text-base font-black text-emerald-400">
+                ${order.total.toLocaleString('es-CO')}
+              </span>
+            )}
           </div>
         </div>
 
@@ -356,9 +359,11 @@ export default function OrdersPage() {
                     {item.menuItem?.name || 'Producto'}
                   </span>
                 </div>
-                <span className="text-slate-400 font-mono text-[11px] shrink-0 ml-2">
-                  ${item.subtotal.toLocaleString('es-CO')}
-                </span>
+                {item.subtotal != null && (
+                  <span className="text-slate-400 font-mono text-[11px] shrink-0 ml-2">
+                    ${item.subtotal.toLocaleString('es-CO')}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -416,7 +421,8 @@ export default function OrdersPage() {
           <div>
             <p className="text-sm font-black">¡Nuevo Pedido #{newOrderToast.id}!</p>
             <p className="text-xs font-semibold opacity-90">
-              {newOrderToast.customer} • ${newOrderToast.total.toLocaleString('es-CO')}
+              {newOrderToast.customer}
+              {newOrderToast.total != null && ` • $${newOrderToast.total.toLocaleString('es-CO')}`}
             </p>
           </div>
           <button

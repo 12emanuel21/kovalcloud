@@ -23,8 +23,9 @@ interface OrderItem {
   orderId: string;
   menuItemId: string;
   quantity: number;
-  unitPrice: number;
-  subtotal: number;
+  // null para el rol KITCHEN (el backend no envía importes a la cocina); el KDS no los muestra
+  unitPrice: number | null;
+  subtotal: number | null;
   menuItem?: {
     id: string;
     name: string;

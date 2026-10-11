@@ -3,22 +3,23 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { homePathForRole } from '@/lib/roles';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isAuthenticated, isLoading: isAuthLoading } = useAuth();
-  
+  const { login, isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Si ya está autenticado, redirigir al dashboard
+  // Si ya está autenticado, redirigir a la zona de su rol
   useEffect(() => {
     if (!isAuthLoading && isAuthenticated) {
-      router.push('/dashboard');
+      router.push(homePathForRole(user?.role));
     }
-  }, [isAuthenticated, isAuthLoading, router]);
+  }, [isAuthenticated, isAuthLoading, router, user?.role]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

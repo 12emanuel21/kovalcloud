@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { homePathForRole, type UserRole } from '@/lib/roles';
 
 export interface Restaurant {
   id: string;
@@ -13,7 +14,8 @@ export interface Restaurant {
 export interface User {
   id: string;
   email: string;
-  role: 'SUPERADMIN' | 'OWNER';
+  name?: string;
+  role: UserRole;
   restaurant?: Restaurant | null;
 }
 
@@ -67,6 +69,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(false);
   }, [syncAuth]);
 
+  // El rol guardado puede estar desactualizado (cambio de rol, renombre de roles):
+  // se refresca una vez desde el backend, que es la fuente de verdad.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    fetch(`${API_URL}/auth/profile`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((freshUser: User) => {
+        if (cancelled || !freshUser?.role) return;
+        setUser(freshUser);
+        localStorage.setItem('koval_user', JSON.stringify(freshUser));
+      })
+      .catch((status) => {
+        // Token caducado o usuario eliminado: cerrar la sesión local
+        if (!cancelled && status === 401) {
+          setToken(null);
+          setUser(null);
+          localStorage.removeItem('koval_token');
+          localStorage.removeItem('koval_user');
+          router.push('/login');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, router]);
+
   const login = async (email: string, password: string) => {
     const res = await fetch(`${API_URL}/auth/login`, {
       method: 'POST',
@@ -89,7 +118,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('koval_token', accessToken);
     localStorage.setItem('koval_user', JSON.stringify(authUser));
 
-    router.push('/dashboard');
+    // Cada rol aterriza en su zona: SUPERADMIN -> /admin, KITCHEN -> pedidos, OWNER -> dashboard
+    router.push(homePathForRole(authUser?.role));
   };
 
   const logout = useCallback(() => {

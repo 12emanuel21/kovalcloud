@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { canAccessDashboardPath, homePathForRole } from '@/lib/roles';
 import { Loader2 } from 'lucide-react';
 import Sidebar from '@/components/layout/Sidebar';
 import TopBar from '@/components/layout/TopBar';
@@ -12,9 +13,13 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isLoading, syncAuth } = useAuth();
+  const { isAuthenticated, isLoading, syncAuth, user } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // RBAC de rutas: SUPERADMIN no usa el dashboard de un restaurante; KITCHEN solo Pedidos
+  const allowedHere = !user || canAccessDashboardPath(user.role, pathname);
 
   useEffect(() => {
     if (!isLoading) {
@@ -23,14 +28,16 @@ export default function DashboardLayout({
         if (!synced) {
           router.push('/login');
         }
+      } else if (!allowedHere) {
+        router.replace(homePathForRole(user?.role));
       }
     }
-  }, [isAuthenticated, isLoading, router, syncAuth]);
+  }, [isAuthenticated, isLoading, router, syncAuth, allowedHere, user?.role]);
 
   const hasLocalSession = typeof window !== 'undefined' && Boolean(localStorage.getItem('koval_token'));
 
-  // Pantalla de carga mientras se verifica la sesión o se sincroniza desde localStorage
-  if (isLoading || (!isAuthenticated && hasLocalSession)) {
+  // Pantalla de carga mientras se verifica la sesión, se sincroniza desde localStorage o se redirige por rol
+  if (isLoading || (!isAuthenticated && hasLocalSession) || (isAuthenticated && !allowedHere)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-slate-950 p-4">
         <div className="flex flex-col items-center gap-3">

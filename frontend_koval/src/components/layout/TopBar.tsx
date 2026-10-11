@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import { LogOut, Menu } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { getPageTitle } from './navigation';
+import { ROLE_LABELS } from '@/lib/roles';
 
 interface TopBarProps {
   /** Solo móvil: abre el sidebar */
@@ -23,7 +24,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
   const { user, restaurant, logout } = useAuth();
 
   const email = user?.email ?? '';
-  const isSuperAdmin = user?.role === 'SUPERADMIN';
+  const roleLabel = user?.role ? ROLE_LABELS[user.role] ?? user.role : '';
   const subtitle = restaurant?.name
     ? `Bienvenido de nuevo · ${restaurant.name}`
     : 'Bienvenido de nuevo';
@@ -53,7 +54,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
             {email}
           </p>
           <p className="text-[11px] font-medium text-slate-500">
-            {isSuperAdmin ? 'Super Admin' : 'Propietario'}
+            {roleLabel}
           </p>
         </div>
         <div

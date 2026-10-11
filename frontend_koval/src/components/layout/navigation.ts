@@ -17,11 +17,21 @@ export interface NavItem {
   external?: boolean;
 }
 
+/** Secciones visibles para el personal de cocina (el backend además les bloquea el resto) */
+const KITCHEN_NAV_HREFS = ['/dashboard/orders', '/kitchen'];
+
 /**
  * Navegación principal del dashboard. Fuente única para Sidebar y TopBar.
  * `restaurantId` se usa para construir rutas que dependen del tenant (KDS).
+ * Con `role` = KITCHEN solo quedan Pedidos y el Monitor KDS (sin Vista General ni Ajustes).
  */
-export function getNavItems(restaurantId?: string): NavItem[] {
+export function getNavItems(restaurantId?: string, role?: string): NavItem[] {
+  const items = getAllNavItems(restaurantId);
+  if (role !== 'KITCHEN') return items;
+  return items.filter((item) => KITCHEN_NAV_HREFS.some((href) => item.href.startsWith(href)));
+}
+
+function getAllNavItems(restaurantId?: string): NavItem[] {
   return [
     { label: 'Vista General', href: '/dashboard', icon: LayoutDashboard },
     { label: 'Gestión de Menú', href: '/dashboard/menu', icon: SquareMenu },

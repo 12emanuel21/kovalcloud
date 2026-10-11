@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { ExternalLink, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { getNavItems, isNavItemActive } from './navigation';
+import { homePathForRole } from '@/lib/roles';
 
 interface SidebarProps {
   /** Solo móvil: el sidebar se muestra como panel deslizante */
@@ -14,8 +15,9 @@ interface SidebarProps {
 
 export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { restaurant, restaurantId } = useAuth();
-  const navItems = getNavItems(restaurantId);
+  const { restaurant, restaurantId, user } = useAuth();
+  const navItems = getNavItems(restaurantId, user?.role);
+  const homeHref = homePathForRole(user?.role);
   const restaurantSlug = restaurant?.slug;
 
   return (
@@ -36,7 +38,7 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
       >
         {/* Marca */}
         <div className="flex h-16 items-center justify-between border-b border-slate-800 px-5">
-          <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onClose}>
+          <Link href={homeHref} className="flex items-center gap-2.5" onClick={onClose}>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 text-sm font-black text-slate-950 shadow-lg shadow-emerald-500/20">
               K
             </span>

@@ -14,8 +14,12 @@ import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import type { TenantUser } from '../auth/tenant-access';
+import { redactOrderFinancials } from './order-visibility';
 
 type SocketUser = TenantUser & { id: string };
+
+/** Sala del personal de cocina: recibe los mismos eventos, sin datos financieros */
+const kitchenRoom = (restaurantId: string) => `restaurant_${restaurantId}_kitchen`;
 
 @WebSocketGateway({
   cors: {
@@ -100,31 +104,35 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return this.reject(client, `Sin acceso a la sala del restaurante ${restaurantId}`);
     }
 
-    const room = `restaurant_${restaurantId}`;
+    // La cocina va a una sala propia que solo recibe pedidos sin importes
+    const room = user.role === Role.KITCHEN ? kitchenRoom(restaurantId) : `restaurant_${restaurantId}`;
     client.join(room);
     this.logger.log(`🏢 Cliente ${client.id} suscrito a sala: ${room}`);
     return { event: 'joined_restaurant', room };
   }
 
+  /** Emite a la sala completa del restaurante y, sin importes, a la sala de cocina */
+  private emitToRestaurant(restaurantId: string, events: string[], order: unknown) {
+    if (!this.server) return;
+    const kitchenOrder = redactOrderFinancials(order as Record<string, any>);
+    for (const event of events) {
+      this.server.to(`restaurant_${restaurantId}`).emit(event, order);
+      this.server.to(kitchenRoom(restaurantId)).emit(event, kitchenOrder);
+    }
+  }
+
   emitNewOrder(restaurantId: string, order: unknown) {
     this.logger.log(`🔔 Emitiendo evento [new_order] a sala restaurant_${restaurantId}`);
-    if (this.server) {
-      this.server.to(`restaurant_${restaurantId}`).emit('new_order', order);
-      }
+    this.emitToRestaurant(restaurantId, ['new_order'], order);
   }
 
   emitOrderUpdated(restaurantId: string, order: unknown) {
     this.logger.log(`🔄 Emitiendo evento [order_updated] a sala restaurant_${restaurantId}`);
-    if (this.server) {
-      this.server.to(`restaurant_${restaurantId}`).emit('order_updated', order);
-      }
+    this.emitToRestaurant(restaurantId, ['order_updated'], order);
   }
 
   emitOrderStatusUpdated(restaurantId: string, order: unknown) {
     this.logger.log(`🔄 Emitiendo evento [order_status_updated] / [order_updated] a sala restaurant_${restaurantId}`);
-    if (this.server) {
-      this.server.to(`restaurant_${restaurantId}`).emit('order_status_updated', order);
-      this.server.to(`restaurant_${restaurantId}`).emit('order_updated', order);
-      }
+    this.emitToRestaurant(restaurantId, ['order_status_updated', 'order_updated'], order);
   }
 }

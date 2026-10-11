@@ -1,0 +1,152 @@
+# KovalCloud · PRODUCCIÓN EN VPS
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml exec backend npx prisma migrate deploy   # primera vez y tras cada migración
+#
+# Tráfico público:  Internet -> Cloudflare -> cloudflared -> nginx:80 -> { backend:4000 | frontend:3000 }
+# En el panel de Cloudflare (Zero Trust > Tunnels > Public Hostname) el "Service URL" debe ser:
+#   http://nginx:80
+#
+# Secretos en .env (no versionado; ver .env.example): POSTGRES_PASSWORD, JWT_SECRET, INTERNAL_API_KEY,
+# GOOGLE_GENERATIVE_AI_API_KEY, FRONTEND_URL, CLOUDFLARE_TUNNEL_TOKEN.
+# Solo nginx publica un puerto (80); db, redis, backend, frontend y baileys quedan dentro de koval_network.
+
+name: kovalcloud
+
+services:
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: koval_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: koval_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U koval_admin -d koval_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - koval_network
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    # AOF: las colas (BullMQ) sobreviven a reinicios
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - koval_network
+
+  backend:
+    build:
+      context: ./backend_koval
+      target: prod
+    restart: always
+    expose:
+      - "4000"
+    volumes:
+      # PDFs de menú subidos por los restaurantes
+      - backend_uploads:/app/uploads
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - DATABASE_URL=postgresql://koval_admin:${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}@db:5432/koval_db?schema=public
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:?Falta JWT_SECRET en .env}
+      - JWT_EXPIRES_IN=7d
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?Falta INTERNAL_API_KEY en .env}
+      - FRONTEND_URL=${FRONTEND_URL:?Falta FRONTEND_URL en .env (ej. https://kovalcloude.autobotsdev.dev)}
+      - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY:?Falta GOOGLE_GENERATIVE_AI_API_KEY en .env}
+      - WHATSAPP_SERVICE_URL=http://baileys:5000/send
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      koval_network:
+        # El SSR del frontend llama a http://koval_backend:4000 (nombre histórico)
+        aliases:
+          - koval_backend
+
+  # Puente de WhatsApp Web (modo QR). Lo usa el backend para enviar mensajes/PDFs.
+  baileys:
+    build:
+      context: ./whatsapp_service
+      target: prod
+    restart: always
+    expose:
+      - "5000"
+    volumes:
+      # Sesión de WhatsApp: sobrevive a rebuilds (evita re-escanear el QR)
+      - baileys_auth:/app/auth_info_baileys
+    environment:
+      - PORT=5000
+      - AUTH_FOLDER=auth_info_baileys
+      - NESTJS_WEBHOOK_URL=http://backend:4000/meta/webhook
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?Falta INTERNAL_API_KEY en .env}
+    depends_on:
+      - backend
+    networks:
+      - koval_network
+
+  frontend:
+    build:
+      context: ./frontend_koval
+      target: prod
+    restart: always
+    # La imagen escucha en 3030 por defecto; en producción, 3000
+    command: ["npm", "start", "--", "-p", "3000"]
+    expose:
+      - "3000"
+    environment:
+      - PORT=3000
+      - BACKEND_INTERNAL_URL=http://backend:4000
+    depends_on:
+      - backend
+    networks:
+      - koval_network
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - koval_network
+
+  # Túnel con nombre de Cloudflare: publica nginx en tu dominio sin abrir puertos en el VPS
+  cloudflared:
+    image: cloudflare/cloudflared:2025.8.1
+    restart: always
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:?Falta CLOUDFLARE_TUNNEL_TOKEN en .env}
+    depends_on:
+      - nginx
+    networks:
+      - koval_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_uploads:
+  baileys_auth:
+
+networks:
+  koval_network:
+    driver: bridge

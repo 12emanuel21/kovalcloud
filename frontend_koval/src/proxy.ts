@@ -13,8 +13,12 @@ import { getTenantSlugFromHost } from '@/lib/tenant';
  * Fase 1 los inicializó iguales). Si algún día difieren, resolver por subdominio en el backend.
  */
 
-/** Rutas que siempre van a la app normal, también desde un subdominio */
-const APP_PREFIXES = ['/dashboard', '/login', '/kitchen', '/menu'];
+/**
+ * Rutas que siempre van a la app normal, también desde un subdominio.
+ * El control por rol (/admin solo SUPERADMIN, /dashboard sin SUPERADMIN) lo hacen los layouts:
+ * la sesión vive en localStorage y aquí (servidor) no es visible.
+ */
+const APP_PREFIXES = ['/admin', '/dashboard', '/login', '/kitchen', '/menu'];
 
 export function proxy(request: NextRequest) {
   const slug = getTenantSlugFromHost(request.headers.get('host'));
