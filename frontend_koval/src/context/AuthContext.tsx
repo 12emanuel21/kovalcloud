@@ -13,7 +13,7 @@ export interface Restaurant {
 export interface User {
   id: string;
   email: string;
-  role: 'SUPERADMIN' | 'RESTAURANT_OWNER';
+  role: 'SUPERADMIN' | 'OWNER';
   restaurant?: Restaurant | null;
 }
 

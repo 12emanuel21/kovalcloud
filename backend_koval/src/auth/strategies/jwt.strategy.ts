@@ -1,13 +1,19 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { sanitizeUser } from '../auth.service';
+import { requireEnv } from '../../config/secrets';
 
 export interface JwtPayload {
   sub: string;
   email: string;
-  role: string;
+  role: Role;
+  restaurantId: string | null;
 }
+
+export type AuthenticatedUser = Awaited<ReturnType<JwtStrategy['validate']>>;
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -15,11 +21,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'koval_cloud_super_secret_jwt_key_2026_x99',
+      secretOrKey: requireEnv('JWT_SECRET'),
     });
   }
 
   async validate(payload: JwtPayload) {
+    // Se consulta la BD en cada request: rol y restaurante siempre actualizados
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       include: {
@@ -31,7 +38,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Usuario no autorizado o no encontrado');
     }
 
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    return sanitizeUser(user);
   }
 }

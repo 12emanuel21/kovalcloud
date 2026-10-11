@@ -32,7 +32,7 @@ interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: 'SUPERADMIN' | 'RESTAURANT_OWNER' | 'SUPERVISOR' | 'STAFF';
+  role: 'SUPERADMIN' | 'OWNER' | 'SUPERVISOR' | 'STAFF';
   status: 'ACTIVE' | 'INVITED';
 }
 
@@ -110,6 +110,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch(`${API_URL}/restaurants/${restaurantId}`, {
         cache: 'no-store',
+        headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) {
         throw new Error('No se pudo cargar la configuración del restaurante');
@@ -132,7 +133,7 @@ export default function SettingsPage() {
           id: '1',
           name: 'Propietario Principal',
           email: email,
-          role: 'RESTAURANT_OWNER',
+          role: 'OWNER',
           status: 'ACTIVE',
         },
         {
@@ -156,7 +157,7 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [restaurantId]);
+  }, [restaurantId, token]);
 
   useEffect(() => {
     fetchRestaurantSettings();
@@ -242,20 +243,12 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-8 max-w-4xl mx-auto">
-      {/* Encabezado Principal */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-6">
-        <div>
-          <span className="text-xs font-semibold text-emerald-400 uppercase tracking-widest">
-            Ajustes de Marca & Administración
-          </span>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight mt-1">
-            Configuración del Restaurante
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Administra los datos de tu marca, menú digital y gestiona los roles de tu equipo.
-          </p>
-        </div>
+    <div className="space-y-6 max-w-4xl mx-auto">
+      {/* Barra de herramientas (el título lo muestra el TopBar) */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <p className="text-sm text-slate-400">
+          Datos de tu marca, menú digital y roles de tu equipo.
+        </p>
 
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -431,6 +424,7 @@ export default function SettingsPage() {
           </div>
         </section>
       </form>
+
       {/* SECCIÓN 2: GESTIÓN DE EQUIPO & ROLES */}
       <section className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl backdrop-blur-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
@@ -532,14 +526,14 @@ export default function SettingsPage() {
                     <td className="p-3.5">
                       <span
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                          member.role === 'RESTAURANT_OWNER'
+                          member.role === 'OWNER'
                             ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
                             : member.role === 'SUPERVISOR'
                             ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
                             : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                         }`}
                       >
-                        {member.role === 'RESTAURANT_OWNER'
+                        {member.role === 'OWNER'
                           ? '👑 Dueño / Admin'
                           : member.role === 'SUPERVISOR'
                           ? '⚡ Supervisor'

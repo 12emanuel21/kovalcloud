@@ -1,7 +1,10 @@
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { UseGuards, Controller, Get, Post, Body, Param, Delete, Query } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
+import { UseGuards, Controller, Get, Post, Patch, Body, Param, Delete, Query } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { UpdateCategoryDto } from './dto/update-category.dto';
 
 @Controller('categories')
 export class CategoriesController {
@@ -9,13 +12,14 @@ export class CategoriesController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  create(@Body() createCategoryDto: CreateCategoryDto) {
-    return this.categoriesService.create(createCategoryDto);
+  create(@CurrentUser() user: AuthenticatedUser, @Body() createCategoryDto: CreateCategoryDto) {
+    return this.categoriesService.create(createCategoryDto, user);
   }
 
+  // Público: menú del cliente (requiere ?restaurantId= o ?slug=)
   @Get()
-  findAll(@Query('restaurantId') restaurantId?: string) {
-    return this.categoriesService.findAll(restaurantId);
+  findAll(@Query('restaurantId') restaurantId?: string, @Query('slug') slug?: string) {
+    return this.categoriesService.findAll({ restaurantId, slug });
   }
 
   @Get(':id')
@@ -24,8 +28,18 @@ export class CategoriesController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Patch(':id')
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() updateCategoryDto: UpdateCategoryDto,
+  ) {
+    return this.categoriesService.update(id, updateCategoryDto, user);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.categoriesService.remove(id);
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.categoriesService.remove(id, user);
   }
 }

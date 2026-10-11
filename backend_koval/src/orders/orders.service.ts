@@ -12,6 +12,8 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderStatus } from '@prisma/client';
 import { OrdersGateway } from './orders.gateway';
+import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/tenant-access';
+import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 
 @Injectable()
 export class OrdersService {
@@ -34,9 +36,10 @@ export class OrdersService {
       customerPhone,
       deliveryAddress,
       notes,
-      status,
       items,
     } = createOrderDto;
+    // Endpoint público: `status` y `unitPrice` del cliente se ignoran.
+    // El pedido nace PENDING y los precios salen siempre de la base de datos.
 
     // 1. Validar que el restaurante exista
     const restaurant = await this.prisma.restaurant.findUnique({
@@ -57,12 +60,14 @@ export class OrdersService {
       where: {
         id: { in: menuItemIds },
         restaurantId,
+        isAvailable: true,
+        deletedAt: null,
       },
     });
 
-    if (menuItems.length !== menuItemIds.length) {
+    if (menuItems.length !== new Set(menuItemIds).size) {
       throw new NotFoundException(
-        'Uno o más productos no pertenecen al restaurante o no existen',
+        'Uno o más productos no pertenecen al restaurante, no existen o no están disponibles',
       );
     }
 
@@ -72,7 +77,7 @@ export class OrdersService {
       if (!menuItem) {
         throw new NotFoundException(`Producto con ID ${item.menuItemId} no encontrado`);
       }
-      const unitPrice = item.unitPrice !== undefined ? item.unitPrice : menuItem.price;
+      const unitPrice = menuItem.price;
       const subtotal = unitPrice * item.quantity;
       calculatedTotal += subtotal;
 
@@ -96,7 +101,7 @@ export class OrdersService {
           customerPhone,
           deliveryAddress,
           notes,
-          status: status ?? OrderStatus.PENDING,
+          status: OrderStatus.PENDING,
           total: calculatedTotal,
           items: {
             create: itemsToCreate.map((item) => ({
@@ -123,7 +128,8 @@ export class OrdersService {
     return createdOrder;
   }
 
-  async findAll(restaurantId?: string) {
+  async findAll(user: TenantUser, requestedRestaurantId?: string) {
+    const restaurantId = resolveTenantFilter(user, requestedRestaurantId);
     return await this.prisma.order.findMany({
       where: restaurantId ? { restaurantId } : {},
       include: {
@@ -137,7 +143,7 @@ export class OrdersService {
     });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: TenantUser) {
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: {
@@ -152,11 +158,26 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException('Pedido no encontrado');
     }
+    assertTenantAccess(user, order.restaurantId);
 
     return order;
   }
 
-  async updateOrderStatus(orderId: string, status: string) {
+  async updateOrderStatus(orderId: string, status: string, user: TenantUser, estimatedMinutes?: unknown) {
+    if (!Object.values(OrderStatus).includes(status as OrderStatus)) {
+      throw new BadRequestException(
+        `Estado inválido. Valores permitidos: ${Object.values(OrderStatus).join(', ')}`,
+      );
+    }
+    let minutes: number | undefined;
+    if (estimatedMinutes !== undefined && estimatedMinutes !== null) {
+      minutes = Number(estimatedMinutes);
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 240) {
+        throw new BadRequestException('estimatedMinutes debe ser un número entero entre 1 y 240');
+      }
+    }
+    await this.findOne(orderId, user);
+
     // 1. Actualizar en Prisma
     const updatedOrder = await this.prisma.order.update({
       where: { id: orderId },
@@ -172,47 +193,23 @@ export class OrdersService {
     });
 
     // 2. Emitir evento WebSocket para que la tarjeta se mueva en el Kanban del frontend
-    this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, updatedOrder);
+    this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, this.toOrderResponse(updatedOrder));
 
-    // 3. Notificar al cliente por WhatsApp según el nuevo estado
-    let mensajeCliente = '';
-    if (status === 'PREPARING') {
-      mensajeCliente = '👨‍🍳 ¡Buenas noticias! Tu pedido ya está en la cocina y lo estamos preparando con mucho cariño.';
-    } else if (status === 'DELIVERED') { // O READY
-      mensajeCliente = '🛵 ¡Tu pedido está listo y va en camino! Disfruta tu comida.';
+    // 3. Notificar al cliente por WhatsApp según el nuevo estado (en segundo plano: no frena al KDS)
+    const mensajeCliente = this.buildStatusMessage(status as OrderStatus, minutes);
+    if (mensajeCliente) {
+      void this.notifyCustomer(updatedOrder, mensajeCliente);
     }
 
-    if (mensajeCliente && updatedOrder.customerPhone) {
-      // Priorizamos los tokens de BD del restaurante, o fallback a variables de entorno
-      const phoneId = updatedOrder.restaurant?.whatsappPhoneId || process.env.META_PHONE_NUMBER_ID || '';
-      const token = updatedOrder.restaurant?.whatsappToken || process.env.META_ACCESS_TOKEN || '';
-
-      if (phoneId && token) {
-        try {
-          await this.metaWhatsAppService.sendTextMessage(
-            phoneId,
-            token,
-            updatedOrder.customerPhone,
-            mensajeCliente,
-          );
-          this.logger.log(`Notificación de WhatsApp enviada al cliente ${updatedOrder.customerPhone}`);
-        } catch (error) {
-          this.logger.error('Error enviando notificación al cliente:', error);
-        }
-      } else {
-        this.logger.warn(`No se encontraron credenciales de Meta (whatsappPhoneId / whatsappToken) para notificar al cliente ${updatedOrder.customerPhone}`);
-      }
-    }
-
-    return updatedOrder;
+    return this.toOrderResponse(updatedOrder);
   }
 
-  async update(id: string, updateOrderDto: UpdateOrderDto) {
+  async update(id: string, updateOrderDto: UpdateOrderDto, user: TenantUser) {
     if (updateOrderDto.status && Object.keys(updateOrderDto).length === 1) {
-      return this.updateOrderStatus(id, updateOrderDto.status);
+      return this.updateOrderStatus(id, updateOrderDto.status, user);
     }
 
-    const existingOrder = await this.findOne(id);
+    const existingOrder = await this.findOne(id, user);
 
     const updatedOrder = await this.prisma.order.update({
       where: { id },
@@ -234,84 +231,77 @@ export class OrdersService {
     });
 
     // 1. Emitir evento WebSocket de orden actualizada
-    this.ordersGateway.emitOrderStatusUpdated(existingOrder.restaurantId, updatedOrder);
+    this.ordersGateway.emitOrderStatusUpdated(existingOrder.restaurantId, this.toOrderResponse(updatedOrder));
 
     // 2. Notificar al cliente vía WhatsApp si el estado cambió
     if (updateOrderDto.status && updateOrderDto.status !== existingOrder.status) {
-      let mensajeCliente = '';
-      if (updateOrderDto.status === 'PREPARING') {
-        mensajeCliente = '👨‍🍳 ¡Buenas noticias! Tu pedido ya está en la cocina y lo estamos preparando con mucho cariño.';
-      } else if (updateOrderDto.status === 'DELIVERED') {
-        mensajeCliente = '🛵 ¡Tu pedido está listo y va en camino! Disfruta tu comida.';
-      }
-
-      if (mensajeCliente && updatedOrder.customerPhone) {
-        const phoneId = updatedOrder.restaurant?.whatsappPhoneId || process.env.META_PHONE_NUMBER_ID || '';
-        const token = updatedOrder.restaurant?.whatsappToken || process.env.META_ACCESS_TOKEN || '';
-        if (phoneId && token) {
-          try {
-            await this.metaWhatsAppService.sendTextMessage(
-              phoneId,
-              token,
-              updatedOrder.customerPhone,
-              mensajeCliente,
-            );
-            this.logger.log(`Notificación de WhatsApp enviada al cliente ${updatedOrder.customerPhone}`);
-          } catch (error) {
-            this.logger.error('Error enviando notificación al cliente:', error);
-          }
-        }
+      const mensajeCliente = this.buildStatusMessage(updateOrderDto.status);
+      if (mensajeCliente) {
+        void this.notifyCustomer(updatedOrder, mensajeCliente);
       }
     }
 
-    return updatedOrder;
+    return this.toOrderResponse(updatedOrder);
   }
-  async remove(id: string) {
-    await this.findOne(id);
+
+  async remove(id: string, user: TenantUser) {
+    await this.findOne(id, user);
     return await this.prisma.order.delete({
       where: { id },
     });
   }
 
-  /**
-   * Envía una notificación por WhatsApp al cliente informando el cambio de estado de su orden
-   */
-  private sendOrderStatusNotification(order: { id: string; customerName: string; customerPhone?: string | null }, newStatus: OrderStatus) {
-    if (!order.customerPhone) return;
+  /** Quita las credenciales de Meta del restaurante incluido antes de responder/emitir */
+  private toOrderResponse<T extends { restaurant: object }>(order: T) {
+    return { ...order, restaurant: sanitizeRestaurant(order.restaurant) };
+  }
 
-    const shortId = order.id.slice(0, 8).toUpperCase();
-    let text = '';
-
-    switch (newStatus) {
+  /** Mensaje de WhatsApp para el cliente según el nuevo estado (vacío = no se notifica) */
+  private buildStatusMessage(status: OrderStatus, estimatedMinutes?: number): string {
+    switch (status) {
       case OrderStatus.PREPARING:
-        text = `👨‍🍳 *¡Tu orden está en preparación!* 🍕\n\nHola ${order.customerName}, la cocina ha iniciado la preparación de tu pedido *#${shortId}*. Te avisaremos cuando vaya en camino.`;
-        break;
+        return estimatedMinutes
+          ? `¡Tu pedido ya está en preparación! 👨‍🍳 Estará listo en aprox. ${estimatedMinutes} minutos.`
+          : '👨‍🍳 ¡Buenas noticias! Tu pedido ya está en la cocina y lo estamos preparando con mucho cariño.';
       case OrderStatus.DELIVERED:
-        text = `🛵 *¡Tu pedido ha sido entregado / despachado!* 🎉\n\nHola ${order.customerName}, tu orden *#${shortId}* está lista. ¡Que lo disfrutes y gracias por elegirnos!`;
-        break;
+        return '🛵 ¡Tu pedido está listo y va en camino! Disfruta tu comida.';
       case OrderStatus.CANCELLED:
-        text = `⚠️ *Actualización de tu pedido*\n\nHola ${order.customerName}, tu orden *#${shortId}* ha sido cancelada. Si tienes alguna duda, escríbenos por aquí.`;
-        break;
+        return 'Hola, lamentamos informarte que tu pedido ha sido cancelado por el restaurante (posiblemente por falta de inventario). Te pedimos disculpas por los inconvenientes. 🙏';
       default:
-        return;
+        return '';
     }
+  }
 
-    // Petición HTTP no bloqueante a whatsapp_service
+  /**
+   * Notifica al cliente por el canal unificado: Meta Cloud API si el restaurante tiene
+   * credenciales oficiales; si no, la sesión de WhatsApp Web (Baileys). Nunca lanza.
+   */
+  private async notifyCustomer(
+    order: {
+      customerPhone?: string | null;
+      restaurant?: { whatsappPhoneId?: string | null; whatsappToken?: string | null } | null;
+    },
+    text: string,
+  ): Promise<void> {
+    if (!order.customerPhone) return;
+    const phoneId = order.restaurant?.whatsappPhoneId || process.env.META_PHONE_NUMBER_ID || '';
+    const token = order.restaurant?.whatsappToken || process.env.META_ACCESS_TOKEN || '';
+    const viaMeta = Boolean(phoneId && token);
+
     try {
-      const whatsappServiceUrl = process.env.WHATSAPP_SERVICE_URL || 'http://localhost:5000/send';
-      fetch(whatsappServiceUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: order.customerPhone,
-          text,
-        }),
-      }).catch((err: Error) => {
-        console.warn(`[WhatsApp Notify] Servicio no disponible (${order.customerPhone}):`, err.message);
-      });
-    } catch (e: unknown) {
-      const error = e as Error;
-      console.warn(`[WhatsApp Notify] Error:`, error.message);
+      // Baileys no usa phoneId real, pero sendTextMessage exige uno no vacío
+      await this.metaWhatsAppService.sendTextMessage(
+        viaMeta ? phoneId : phoneId || 'baileys',
+        token,
+        order.customerPhone,
+        text,
+        !viaMeta,
+      );
+      this.logger.log(
+        `Notificación de WhatsApp (${viaMeta ? 'Meta' : 'Baileys'}) enviada al cliente ${order.customerPhone}`,
+      );
+    } catch (error) {
+      this.logger.error('Error enviando notificación al cliente:', error);
     }
   }
 }

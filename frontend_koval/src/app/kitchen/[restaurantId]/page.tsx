@@ -1,7 +1,19 @@
 'use client';
 
-import React, { useState, useEffect, useRef, use } from 'react';
+import React, { useState, useEffect, useRef, use, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
+import PrepareActions from '@/components/orders/PrepareActions';
+import {
+  ChefHat,
+  CircleAlert,
+  CircleCheck,
+  Clock,
+  Motorbike,
+  ShoppingBag,
+  User,
+  Utensils,
+  type LucideIcon,
+} from 'lucide-react';
 
 type OrderType = 'DINE_IN' | 'DELIVERY' | 'TAKEAWAY';
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'DELIVERED' | 'CANCELLED';
@@ -73,6 +85,9 @@ const playOrderChime = () => {
   }
 };
 
+/** A partir de estos minutos el cronómetro se marca como urgente */
+const URGENT_AFTER_MINUTES = 15;
+
 // Componente para el cronómetro de cada tarjeta
 const OrderTimer: React.FC<{ createdAt: string }> = ({ createdAt }) => {
   const [elapsed, setElapsed] = useState('');
@@ -87,7 +102,37 @@ const OrderTimer: React.FC<{ createdAt: string }> = ({ createdAt }) => {
     return () => clearInterval(interval);
   }, [createdAt]);
 
-  return <span className="font-mono text-xl text-amber-400">{elapsed || '00:00'} min</span>;
+  const minutes = parseInt(elapsed.split(':')[0] || '0', 10);
+  const urgent = minutes >= URGENT_AFTER_MINUTES;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 font-mono text-sm font-medium tabular-nums ${
+        urgent ? 'text-red-400' : 'text-slate-400'
+      }`}
+      title={urgent ? `Más de ${URGENT_AFTER_MINUTES} minutos en espera` : 'Tiempo desde que se recibió'}
+    >
+      <Clock className={`h-4 w-4 ${urgent ? 'animate-pulse' : ''}`} />
+      {elapsed || '00:00'}
+    </span>
+  );
+};
+
+/**
+ * Orden FIFO determinista: el más antiguo primero; si coinciden en createdAt,
+ * desempata por id. Nunca muta el array recibido.
+ */
+const sortOldestFirst = (list: Order[]): Order[] =>
+  [...list].sort((a, b) => {
+    const byDate = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    return byDate !== 0 ? byDate : a.id.localeCompare(b.id);
+  });
+
+/** Presentación del tipo de pedido (solo visual) */
+const ORDER_TYPE_DISPLAY: Record<OrderType, { label: (o: Order) => string; icon: LucideIcon; iconClass: string }> = {
+  DINE_IN: { label: (o) => `Mesa ${o.tableNumber || '?'}`, icon: Utensils, iconClass: 'text-sky-400' },
+  DELIVERY: { label: () => 'Domicilio', icon: Motorbike, iconClass: 'text-emerald-400' },
+  TAKEAWAY: { label: () => 'Para llevar', icon: ShoppingBag, iconClass: 'text-amber-300' },
 };
 
 export default function KitchenPage({ params }: { params: Promise<{ restaurantId: string }> }) {
@@ -95,6 +140,7 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
   
   const [orders, setOrders] = useState<Order[]>([]);
   const [isConnectedWs, setIsConnectedWs] = useState(false);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState('');
   const socketRef = useRef<Socket | null>(null);
 
@@ -107,10 +153,20 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
     return () => clearInterval(timer);
   }, []);
 
+  // La pantalla de cocina usa la sesión del dashboard (mismo navegador)
+  const authHeaders = (): Record<string, string> => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   // Fetch initial orders
   const fetchOrders = async () => {
     try {
-      const res = await fetch(`${API_URL}/orders?restaurantId=${restaurantId}`);
+      const res = await fetch(`${API_URL}/orders?restaurantId=${restaurantId}`, { headers: authHeaders() });
+      if (res.status === 401 || res.status === 403) {
+        console.error('Sesión requerida: inicia sesión en el dashboard de este restaurante para ver la cocina.');
+        return;
+      }
       if (!res.ok) throw new Error('Error fetching orders');
       const data: Order[] = await res.json();
       // Filtrar solo pendientes y preparando
@@ -131,7 +187,12 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
   useEffect(() => {
     if (!restaurantId) return;
 
-    const socket = io(SOCKET_URL, { path: "/socket.io/", transports: ["websocket", "polling"] });
+    const socket = io(SOCKET_URL, {
+      path: "/socket.io/",
+      transports: ["websocket", "polling"],
+      // El gateway rechaza conexiones sin JWT válido
+      auth: { token: typeof window !== 'undefined' ? localStorage.getItem('koval_token') : '' },
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -176,37 +237,61 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
     };
   }, [restaurantId]);
 
-  const updateStatus = async (orderId: string, status: OrderStatus) => {
+  // estimatedMinutes: al pasar a PREPARING el backend avisa al cliente por WhatsApp con ese tiempo
+  const updateStatus = async (orderId: string, status: OrderStatus, estimatedMinutes?: number) => {
+    setUpdatingOrderId(orderId);
     try {
-      await fetch(`${API_URL}/orders/${orderId}`, {
+      const res = await fetch(`${API_URL}/orders/${orderId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ status, estimatedMinutes }),
       });
-      // La actualización local se manejará idealmente a través del websocket, 
+      if (!res.ok) throw new Error(`No se pudo actualizar el pedido (${res.status})`);
+      // La actualización local se manejará idealmente a través del websocket,
       // pero actualizamos optimísticamente:
-      if (status === 'DELIVERED') {
+      if (status === 'DELIVERED' || status === 'CANCELLED') {
         setOrders((prev) => prev.filter((o) => o.id !== orderId));
       } else {
         setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setUpdatingOrderId(null);
     }
   };
 
+  // Copia ordenada para renderizar: el estado `orders` nunca se muta
+  const sortedOrders = useMemo(() => sortOldestFirst(orders), [orders]);
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Header Minimalista KDS */}
-      <header className="bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between shadow-md">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans antialiased">
+      {/* Header KDS */}
+      <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <h1 className="text-3xl font-black text-white tracking-tighter uppercase">KDS COCINA</h1>
-          <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 ${isConnectedWs ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-            <span className={`h-2.5 w-2.5 rounded-full ${isConnectedWs ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
-            {isConnectedWs ? 'EN LÍNEA' : 'DESCONECTADO'}
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <ChefHat className="h-5 w-5" />
+            </span>
+            <div>
+              <h1 className="text-lg font-semibold text-white tracking-tight leading-tight">Monitor de Cocina</h1>
+              <p className="text-xs text-slate-500">
+                {orders.length} {orders.length === 1 ? 'pedido activo' : 'pedidos activos'}
+              </p>
+            </div>
+          </div>
+          <div
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
+              isConnectedWs
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+            }`}
+          >
+            <span className={`h-2 w-2 rounded-full ${isConnectedWs ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+            {isConnectedWs ? 'En línea' : 'Desconectado'}
           </div>
         </div>
-        <div className="text-4xl font-mono font-bold text-white tracking-wider">
+        <div className="font-mono text-2xl font-semibold text-slate-200 tabular-nums tracking-wide">
           {currentTime || '00:00:00'}
         </div>
       </header>
@@ -214,98 +299,94 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
       {/* Grid de Pedidos */}
       <main className="flex-1 p-6 overflow-x-auto">
         {orders.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-slate-500">
-            <h2 className="text-4xl font-bold">No hay pedidos activos</h2>
+          <div className="flex h-full min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-500">
+              <CircleCheck className="h-7 w-7" />
+            </span>
+            <h2 className="text-xl font-semibold text-slate-300">No hay pedidos activos</h2>
+            <p className="text-sm text-slate-500">Los nuevos pedidos aparecerán aquí con un aviso sonoro.</p>
           </div>
         ) : (
-          <div className="flex gap-6 h-full items-start overflow-x-auto pb-4">
-            {/* Sort orders: PENDING first, then PREPARING, oldest first */}
-            {orders
-              .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-              .sort((a, b) => (a.status === 'PENDING' ? -1 : 1))
-              .map((order) => {
-                const isDineIn = order.orderType === 'DINE_IN';
-                
+          <div className="flex gap-5 h-full items-start overflow-x-auto pb-4">
+            {/* Más antiguos primero (FIFO) */}
+            {sortedOrders.map((order) => {
+                const isPending = order.status === 'PENDING';
+                const typeDisplay = ORDER_TYPE_DISPLAY[order.orderType ?? 'DELIVERY'];
+                const TypeIcon = typeDisplay.icon;
+
                 return (
-                  <article 
-                    key={order.id} 
-                    className={`min-w-[400px] w-[400px] flex flex-col rounded-3xl border-2 shrink-0 h-full max-h-[85vh] overflow-hidden ${order.status === 'PENDING' ? 'bg-slate-900 border-amber-500/50 shadow-lg shadow-amber-900/20' : 'bg-slate-900 border-blue-500/50 shadow-lg shadow-blue-900/20'}`}
+                  <article
+                    key={order.id}
+                    className="w-[420px] min-w-[420px] shrink-0 flex flex-col max-h-[85vh] bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg"
                   >
-                    {/* Tarjeta Header */}
-                    <div className={`p-4 border-b-2 flex flex-col gap-2 ${order.status === 'PENDING' ? 'border-amber-500/30 bg-amber-500/10' : 'border-blue-500/30 bg-blue-500/10'}`}>
-                      <div className="flex justify-between items-start">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">
-                            Orden #{order.id.slice(0, 5).toUpperCase()}
-                          </span>
-                          <div className="mt-1">
-                            {isDineIn ? (
-                              <span className="text-5xl font-black text-indigo-400 tracking-tighter">
-                                MESA {order.tableNumber || '?'}
-                              </span>
-                            ) : (
-                              <span className="text-3xl font-black text-purple-400 tracking-tighter flex items-center gap-3">
-                                🛵 DOMICILIO
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-right flex flex-col items-end">
-                          <span className={`px-3 py-1 rounded-lg text-sm font-bold uppercase ${order.status === 'PENDING' ? 'bg-amber-500 text-slate-950' : 'bg-blue-500 text-white'}`}>
-                            {order.status === 'PENDING' ? 'PENDIENTE' : 'PREPARANDO'}
-                          </span>
-                        </div>
+                    {/* Cabecera de la tarjeta */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs text-slate-500">#{order.id.slice(0, 5).toUpperCase()}</p>
+                        <p className="mt-1 flex items-center gap-2.5 text-3xl font-bold tracking-tight text-slate-100">
+                          <TypeIcon className={`h-7 w-7 shrink-0 ${typeDisplay.iconClass}`} />
+                          <span className="truncate">{typeDisplay.label(order)}</span>
+                        </p>
                       </div>
-                      
-                      <div className="flex items-center justify-between bg-slate-950/50 rounded-xl p-3 mt-2 border border-slate-800">
-                        <span className="font-bold text-slate-300 uppercase truncate max-w-[180px]">👤 {order.customerName}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-500 font-bold uppercase">TIEMPO:</span>
-                          <OrderTimer createdAt={order.createdAt} />
-                        </div>
-                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                          isPending
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                        }`}
+                      >
+                        {isPending ? 'Pendiente' : 'Preparando'}
+                      </span>
                     </div>
 
-                    {/* Contenido (Items) */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                      {order.items.map((item, idx) => (
-                        <div key={idx} className="flex items-start gap-4 p-3 bg-slate-950/40 rounded-2xl border border-slate-800/80">
-                          <div className="bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-xl text-2xl font-black font-mono border border-emerald-500/30">
-                            {item.quantity}
-                          </div>
-                          <div className="flex-1 pt-1">
-                            <h3 className="text-2xl font-bold text-white leading-tight">
+                    <div className="mt-3 flex items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                      <span className="flex min-w-0 items-center gap-1.5 text-sm text-slate-300">
+                        <User className="h-4 w-4 shrink-0 text-slate-500" />
+                        <span className="truncate">{order.customerName}</span>
+                      </span>
+                      <OrderTimer createdAt={order.createdAt} />
+                    </div>
+
+                    {/* Contenido (Items y notas) */}
+                    <div className="flex-1 overflow-y-auto py-3 space-y-3 custom-scrollbar">
+                      <ul className="bg-slate-800/50 rounded-lg p-3 space-y-3">
+                        {order.items.map((item, idx) => (
+                          <li key={idx} className="flex items-center gap-3">
+                            <span className="min-w-[3.5rem] rounded-md bg-slate-950/60 px-2 py-0.5 text-center font-mono text-2xl font-bold text-emerald-400">
+                              {item.quantity}x
+                            </span>
+                            <span className="text-xl font-bold text-slate-100 leading-snug">
                               {item.menuItem?.name || 'Producto Desconocido'}
-                            </h3>
-                          </div>
-                        </div>
-                      ))}
-                      
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+
                       {order.notes && (
-                        <div className="mt-4 p-4 bg-amber-500/20 border-2 border-amber-500/40 rounded-2xl">
-                          <h4 className="text-amber-400 font-bold uppercase text-sm mb-1 flex items-center gap-2">
-                            <span>⚠️</span> NOTAS DEL PEDIDO
-                          </h4>
-                          <p className="text-xl font-medium text-amber-200 leading-snug">{order.notes}</p>
+                        <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm rounded-lg p-3">
+                          <CircleAlert className="h-4 w-4 shrink-0 mt-0.5" />
+                          <p className="leading-snug">{order.notes}</p>
                         </div>
                       )}
                     </div>
 
                     {/* Acciones */}
-                    <div className="p-4 bg-slate-950 border-t-2 border-slate-800">
-                      {order.status === 'PENDING' ? (
-                        <button
-                          onClick={() => updateStatus(order.id, 'PREPARING')}
-                          className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-3xl font-black uppercase py-6 rounded-2xl transition-transform active:scale-[0.98] shadow-xl shadow-blue-900/50 border border-blue-400"
-                        >
-                          👨‍🍳 Preparar
-                        </button>
+                    <div className="pt-3 border-t border-slate-800">
+                      {isPending ? (
+                        <PrepareActions
+                          size="lg"
+                          busy={updatingOrderId === order.id}
+                          onPrepare={(minutes) => updateStatus(order.id, 'PREPARING', minutes)}
+                          onReject={() => updateStatus(order.id, 'CANCELLED')}
+                        />
                       ) : (
                         <button
+                          disabled={updatingOrderId === order.id}
                           onClick={() => updateStatus(order.id, 'DELIVERED')}
-                          className="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-3xl font-black uppercase py-6 rounded-2xl transition-transform active:scale-[0.98] shadow-xl shadow-emerald-900/50 border border-emerald-400"
+                          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg py-2.5 font-medium transition-colors"
                         >
-                          ✅ Listo / Despachar
+                          <CircleCheck className="h-4 w-4" />
+                          Entregar
                         </button>
                       )}
                     </div>

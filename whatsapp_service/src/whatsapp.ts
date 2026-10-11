@@ -21,6 +21,11 @@ let currentStatus: ConnectionStatus = 'DISCONNECTED';
 let currentQRCode: string | null = null;
 let connectedUser: { id?: string; name?: string } | null = null;
 
+// Mapa dígitos -> JID original. WhatsApp puede identificar contactos por LID (@lid)
+// en vez de por número (@s.whatsapp.net); el backend solo recibe los dígitos,
+// así que hay que recordar el sufijo real para poder responder.
+const knownJids = new Map<string, string>();
+
 export const getWhatsAppStatus = (): ConnectionStatus => currentStatus;
 export const getQRCode = (): string | null => currentQRCode;
 export const getConnectedUser = () => connectedUser;
@@ -115,6 +120,7 @@ export async function connectToWhatsApp(): Promise<WASocket> {
       if (!messageText.trim()) continue;
 
       const senderNumber = remoteJid.split('@')[0];
+      knownJids.set(senderNumber, remoteJid);
       const pushName = msg.pushName || senderNumber;
 
       console.log(`📩 Mensaje recibido de ${pushName} (${senderNumber}): "${messageText}"`);
@@ -175,15 +181,31 @@ export async function logoutWhatsApp(): Promise<void> {
 /**
  * Enviar mensaje saliente programático a un número o JID
  */
-export async function sendWhatsAppMessage(target: string, text: string) {
+export interface DocumentPayload {
+  buffer: Buffer;
+  filename: string;
+  mimetype: string;
+}
+
+export async function sendWhatsAppMessage(target: string, text: string, document?: DocumentPayload) {
   if (!sock || currentStatus !== 'CONNECTED') {
     throw new Error('El servicio de WhatsApp no está conectado actualmente.');
   }
 
   let jid = target;
-  if (!jid.includes('@s.whatsapp.net')) {
+  if (!jid.includes('@')) {
     const cleanPhone = target.replace(/\D/g, '');
-    jid = `${cleanPhone}@s.whatsapp.net`;
+    jid = knownJids.get(cleanPhone) || `${cleanPhone}@s.whatsapp.net`;
+  }
+
+  if (document) {
+    console.log(`📎 Enviando documento WhatsApp a [${jid}]: ${document.filename} (${document.buffer.length} bytes)`);
+    return await sock.sendMessage(jid, {
+      document: document.buffer,
+      fileName: document.filename,
+      mimetype: document.mimetype,
+      caption: text || undefined,
+    });
   }
 
   console.log(`📤 Enviando notificación WhatsApp a [${jid}]: "${text.replace(/\n/g, ' ')}"`);

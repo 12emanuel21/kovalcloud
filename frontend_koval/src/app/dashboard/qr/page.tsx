@@ -107,20 +107,12 @@ export default function QRGeneratorPage() {
   };
 
   return (
-    <div className="space-y-8">
-      {/* Encabezado */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-6 print:hidden">
-        <div>
-          <span className="text-xs font-semibold text-purple-400 uppercase tracking-widest">
-            Marketing & Mesas
-          </span>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight mt-1">
-            Generador de Códigos QR
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Crea, personaliza y descarga los códigos QR para las mesas y material impreso de tu restaurante.
-          </p>
-        </div>
+    <div className="space-y-6">
+      {/* Barra de herramientas (el título lo muestra el TopBar) */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 print:hidden">
+        <p className="text-sm text-slate-400">
+          Crea, personaliza y descarga los QR para las mesas y el material impreso.
+        </p>
 
         <div className="flex items-center gap-2.5">
           <button

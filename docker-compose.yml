@@ -1,3 +1,10 @@
+# PRODUCCIÓN (por defecto):      docker compose up -d --build
+# DESARROLLO (hot-reload):        docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Secretos en .env (no versionado): POSTGRES_PASSWORD, JWT_SECRET, INTERNAL_API_KEY,
+# GOOGLE_GENERATIVE_AI_API_KEY. Ver .env.example.
+# Único puerto expuesto: 80 (nginx). El resto solo es accesible dentro de koval_network.
+
 services:
   postgres:
     image: postgres:15
@@ -5,10 +12,8 @@ services:
     restart: always
     environment:
       POSTGRES_USER: koval_admin
-      POSTGRES_PASSWORD: koval_password_123
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
       POSTGRES_DB: koval_db
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -17,18 +22,19 @@ services:
   koval_backend:
     build:
       context: ./backend_koval
+      target: prod
     container_name: koval_backend
     restart: always
-    ports:
-      - "4000:4000"
     volumes:
-      - ./backend_koval:/app
-      - /app/node_modules
+      # PDFs de menú subidos por los restaurantes
+      - backend_uploads:/app/uploads
     environment:
       - PORT=4000
-      - DATABASE_URL=postgresql://koval_admin:koval_password_123@postgres:5432/koval_db?schema=public
-      - JWT_SECRET=koval_cloud_super_secret_jwt_key_2026_x99
+      - DATABASE_URL=postgresql://koval_admin:${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}@postgres:5432/koval_db?schema=public
+      - JWT_SECRET=${JWT_SECRET:?Falta JWT_SECRET en .env}
       - JWT_EXPIRES_IN=7d
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?Falta INTERNAL_API_KEY en .env}
+      - FRONTEND_URL=${FRONTEND_URL:-}
       - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY}
       - WHATSAPP_SERVICE_URL=http://koval_baileys:5000/send
     networks:
@@ -37,34 +43,30 @@ services:
       - postgres
 
   whatsapp_baileys:
-    build: 
+    build:
       context: ./whatsapp_service
+      target: prod
     container_name: koval_baileys
     restart: always
-    ports:
-      - "5000:5000"
     volumes:
-      - ./whatsapp_service:/app
-      - /app/node_modules
+      # Sesión de WhatsApp: sobrevive a rebuilds (evita re-escanear el QR)
+      - baileys_auth:/app/auth_info_baileys
     environment:
       - PORT=5000
+      - AUTH_FOLDER=auth_info_baileys
       - NESTJS_WEBHOOK_URL=http://koval_backend:4000/meta/webhook
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?Falta INTERNAL_API_KEY en .env}
     networks:
       - koval_network
     depends_on:
       - koval_backend
 
   koval_frontend:
-    build: 
+    build:
       context: ./frontend_koval
+      target: prod
     container_name: koval_frontend
     restart: always
-    ports:
-      - "3030:3030"
-    volumes:
-      - ./frontend_koval:/app
-      - /app/node_modules
-      - /app/.next
     networks:
       - koval_network
     depends_on:
@@ -86,6 +88,8 @@ services:
 
 volumes:
   postgres_data:
+  backend_uploads:
+  baileys_auth:
 
 networks:
   koval_network:

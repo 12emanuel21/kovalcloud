@@ -3,7 +3,9 @@ import { authenticator } from 'otplib';
 import * as qrcode from 'qrcode';
 import {
   Injectable,
+  BadRequestException,
   ConflictException,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -11,7 +13,21 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { Role } from '@prisma/client';
+import { Restaurant, Role, User } from '@prisma/client';
+import type { JwtPayload } from './strategies/jwt.strategy';
+import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
+
+/**
+ * Elimina campos sensibles antes de devolver un usuario al cliente,
+ * incluidas las credenciales de Meta de su restaurante si viene incluido.
+ */
+export function sanitizeUser<T extends User & { restaurant?: Restaurant | null }>(user: T) {
+  const { password, twoFactorSecret, restaurant, ...safeUser } = user;
+  return {
+    ...safeUser,
+    restaurant: restaurant ? sanitizeRestaurant(restaurant) : restaurant,
+  };
+}
 
 @Injectable()
 export class AuthService {
@@ -20,47 +36,52 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
+  /**
+   * Crea un usuario. Solo invocable por SUPERADMIN (protegido en el controlador):
+   * los restaurantes no se registran solos.
+   */
   async register(registerDto: RegisterDto) {
-    const { email, password, role } = registerDto;
+    const { email, password, name, restaurantId } = registerDto;
+    const role = registerDto.role ?? Role.OWNER;
     const normalizedEmail = email.toLowerCase().trim();
 
-    // 1. Validar unicidad del correo
+    // 1. Validar coherencia rol <-> restaurante
+    if (role === Role.SUPERADMIN && restaurantId) {
+      throw new BadRequestException('Un SUPERADMIN no puede pertenecer a un restaurante');
+    }
+    if (role !== Role.SUPERADMIN) {
+      if (!restaurantId) {
+        throw new BadRequestException(`restaurantId es obligatorio para ${role}`);
+      }
+      const restaurant = await this.prisma.restaurant.findUnique({ where: { id: restaurantId } });
+      if (!restaurant) {
+        throw new NotFoundException('El restaurante indicado no existe');
+      }
+    }
+
+    // 2. Validar unicidad del correo
     const existingUser = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
-
     if (existingUser) {
       throw new ConflictException('El correo electrónico ya se encuentra registrado');
     }
 
-    // 2. Hashear contraseña con bcrypt (10 rounds)
+    // 3. Hashear contraseña con bcrypt (10 rounds) y guardar
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // 3. Guardar usuario
     const user = await this.prisma.user.create({
       data: {
         email: normalizedEmail,
         password: hashedPassword,
-        role: role ?? Role.RESTAURANT_OWNER,
+        name,
+        role,
+        restaurantId: role === Role.SUPERADMIN ? null : restaurantId,
       },
-      include: {
-        restaurant: true,
-      },
+      include: { restaurant: true },
     });
 
-    // 4. Generar token JWT firmado
-    const payload = { sub: user.id, email: user.email, role: user.role };
-    const accessToken = await this.jwtService.signAsync(payload);
-
-    return {
-      accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        restaurant: user.restaurant,
-      },
-    };
+    // No se emite token: quien registra es el SUPERADMIN, no el nuevo usuario
+    return { user: sanitizeUser(user) };
   }
 
   async login(loginDto: LoginDto) {
@@ -70,9 +91,7 @@ export class AuthService {
     // 1. Buscar usuario por correo incluyendo datos del restaurante
     const user = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
-      include: {
-        restaurant: true,
-      },
+      include: { restaurant: true },
     });
 
     if (!user) {
@@ -85,27 +104,22 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales incorrectas (correo o contraseña no válidos)');
     }
 
-    // 3. Generar JWT firmado
-    const payload = { sub: user.id, email: user.email, role: user.role };
+    // 3. Generar JWT firmado (incluye el tenant para filtrar datos por restaurante)
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      restaurantId: user.restaurantId,
+    };
     const accessToken = await this.jwtService.signAsync(payload);
 
     return {
       accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        restaurant: user.restaurant,
-      },
+      user: sanitizeUser(user),
     };
   }
 
-    async generateTwoFactorSecret(userId: string, email: string) {
-    if (!userId) {
-      const admin = await this.prisma.user.findFirst();
-      userId = admin!.id;
-      email = admin!.email;
-    }
+  async generateTwoFactorSecret(userId: string, email: string) {
     const secret = authenticator.generateSecret();
     const otpauthUrl = authenticator.keyuri(email, 'KovalCloud', secret);
 
@@ -120,11 +134,7 @@ export class AuthService {
     };
   }
 
-    async verifyTwoFactorCode(userId: string, code: string) {
-    if (!userId) {
-      const admin = await this.prisma.user.findFirst();
-      userId = admin!.id;
-    }
+  async verifyTwoFactorCode(userId: string, code: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.twoFactorSecret) return false;
 

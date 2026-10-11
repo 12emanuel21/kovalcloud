@@ -1,0 +1,52 @@
+# DESARROLLO con hot-reload. Se superpone a docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Los puertos internos se publican SOLO en 127.0.0.1 (accesibles desde esta
+# máquina para depurar, nunca desde la red).
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  koval_backend:
+    build:
+      target: dev
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ./backend_koval:/app
+      - /app/node_modules
+
+  whatsapp_baileys:
+    build:
+      target: dev
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - ./whatsapp_service:/app
+      - /app/node_modules
+
+  koval_frontend:
+    build:
+      target: dev
+    ports:
+      - "127.0.0.1:3030:3030"
+    volumes:
+      - ./frontend_koval:/app
+      - /app/node_modules
+      - /app/.next
+
+  # Túnel temporal de Cloudflare (quick tunnel): expone nginx en una URL pública
+  # https://<aleatorio>.trycloudflare.com sin abrir puertos ni comprar dominio.
+  # La URL cambia cada vez que se reinicia el contenedor. Verla con:
+  #   docker logs koval_tunnel 2>&1 | grep trycloudflare.com
+  cloudflare_tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: koval_tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://nginx:80
+    networks:
+      - koval_network
+    depends_on:
+      - nginx

@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { Role } from '@prisma/client';
 
 export class RegisterDto {
@@ -7,10 +7,19 @@ export class RegisterDto {
   email: string;
 
   @IsString()
-  @MinLength(6, { message: 'La contraseña debe tener al menos 6 caracteres' })
+  @MinLength(8, { message: 'La contraseña debe tener al menos 8 caracteres' })
   password: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name: string;
 
   @IsEnum(Role, { message: 'El rol especificado no es válido' })
   @IsOptional()
   role?: Role;
+
+  // Obligatorio para OWNER; debe omitirse para SUPERADMIN
+  @IsUUID('4', { message: 'restaurantId no es un UUID válido' })
+  @IsOptional()
+  restaurantId?: string;
 }

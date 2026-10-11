@@ -7,9 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// RBAC: SUPERADMIN (global, sin restaurante) · OWNER (dueño de un restaurante) · KITCHEN (personal de cocina)
 enum Role {
   SUPERADMIN
-  RESTAURANT_OWNER
+  OWNER
+  KITCHEN
 }
 
 enum OrderType {
@@ -30,13 +32,18 @@ model User {
   id                 String   @id @default(uuid())
   email              String   @unique
   password           String
+  name               String
   twoFactorSecret    String?
   isTwoFactorEnabled Boolean  @default(false)
-  role               Role     @default(RESTAURANT_OWNER)
+  role               Role     @default(OWNER)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  restaurant Restaurant?
+  // Un usuario pertenece a un restaurante (null para SUPERADMIN)
+  restaurantId String?
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
 }
 
 model Plan {
@@ -50,6 +57,7 @@ model Restaurant {
   id            String  @id @default(uuid())
   name          String
   slug          String  @unique
+  subdomain     String  @unique // Ej: "pizzeria-napoles" -> pizzeria-napoles.kovalcloud.com
   description   String?
   phone         String?
   logoUrl       String?
@@ -62,9 +70,12 @@ model Restaurant {
   whatsappPhoneId     String?
   whatsappWabaId      String?
   whatsappVerifyToken String? @default(uuid())
+  // BYOA (Bring Your Own App): App Secret de la app de Meta del restaurante.
+  // Verifica la firma x-hub-signature-256 de SUS webhooks. Nunca se devuelve en la API.
+  metaAppSecret       String?
 
-  ownerId String @unique
-  owner   User   @relation(fields: [ownerId], references: [id])
+  // Usuarios del restaurante (dueños, y a futuro staff)
+  users User[]
 
   planId String
   plan   Plan   @relation(fields: [planId], references: [id])
@@ -74,7 +85,7 @@ model Restaurant {
   items      MenuItem[]
 
   // Relaciones del Módulo de Pedidos
-  orders      Order[]
+  orders        Order[]
   autoReplies   AutoReply[]
   chatHistories ChatHistory[]
 
@@ -93,6 +104,9 @@ model MenuCategory {
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   items MenuItem[]
+
+  // Borrado lógico: se conserva para no romper el historial de pedidos
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -114,6 +128,9 @@ model MenuItem {
 
   // Relaciones del Módulo de Pedidos
   orderItems OrderItem[]
+
+  // Borrado lógico: OrderItem -> MenuItem es RESTRICT, el historial debe seguir intacto
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -174,7 +191,7 @@ model ChatHistory {
   restaurantId  String
   restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   customerPhone String
-  role          String     // "user" o "model"
+  role          String // "user" o "model"
   message       String
   createdAt     DateTime   @default(now())
 

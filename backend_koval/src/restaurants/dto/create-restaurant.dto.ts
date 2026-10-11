@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 
 export class CreateRestaurantDto {
   @IsString()
@@ -9,8 +9,19 @@ export class CreateRestaurantDto {
   @IsNotEmpty()
   slug: string; // Ej: "pizzeria-napoles"
 
+  @IsOptional()
+  @Matches(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, {
+    message: 'El subdominio solo admite minúsculas, números y guiones (sin guion al inicio/final)',
+  })
+  subdomain?: string; // Ej: "pizzeria-napoles" (por defecto = slug)
+
   @IsEmail()
   ownerEmail: string; // Correo del dueño
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  ownerName?: string; // Nombre del dueño (por defecto: "Dueño de {name}")
 
   @IsString()
   @MinLength(6)

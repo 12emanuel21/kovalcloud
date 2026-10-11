@@ -5,17 +5,21 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { RolesGuard } from './guards/roles.guard';
+import { requireEnv } from '../config/secrets';
+import { TenantGuard } from './guards/tenant.guard';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'koval_cloud_super_secret_jwt_key_2026_x99',
-      signOptions: { expiresIn: '7d' },
+    JwtModule.registerAsync({
+      useFactory: () => ({
+        secret: requireEnv('JWT_SECRET'),
+        signOptions: { expiresIn: '7d' },
+      }),
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, RolesGuard],
-  exports: [AuthService, JwtStrategy, PassportModule, JwtModule, RolesGuard],
+  providers: [AuthService, JwtStrategy, RolesGuard, TenantGuard],
+  exports: [AuthService, JwtStrategy, PassportModule, JwtModule, RolesGuard, TenantGuard],
 })
 export class AuthModule {}

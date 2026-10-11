@@ -21,20 +21,45 @@ const PdfMenuSchema = z.object({
 });
 
 const OrderIntentSchema = z.object({
-  intent: z.enum(['ORDER', 'QUESTION', 'COMPLAINT', 'GREETING']),
-  items: z.array(
-    z.object({
-      productId: z.string(),
-      quantity: z.number(),
-      notes: z.string().optional(),
-    }),
-  ),
+  intent: z.enum(['ORDER', 'RESERVATION', 'QUESTION', 'COMPLAINT', 'GREETING']),
+  items: z
+    .array(
+      z.object({
+        productId: z.string().describe('ID exacto del inventario'),
+        // Sin tope de cantidad: se aceptan pedidos de cualquier tamaño
+        quantity: z.number().int().positive(),
+        notes: z.string().optional(),
+      }),
+    )
+    .default([])
+    .describe('Pedido COMPLETO acumulado en la conversación'),
+  orderType: z
+    .enum(['DELIVERY', 'DINE_IN', 'TAKEAWAY'])
+    .optional()
+    .describe('DELIVERY = domicilio, DINE_IN = reserva de mesa en el local, TAKEAWAY = recoger'),
+  customerName: z.string().optional(),
+  deliveryAddress: z.string().optional().describe('Dirección completa, solo para DELIVERY'),
+  reservation: z
+    .object({
+      people: z.number().int().positive().describe('Número de personas'),
+      time: z.string().describe('Hora de llegada, ej: "8:00 pm"'),
+    })
+    .optional()
+    .describe('Solo para DINE_IN'),
+  readyToConfirm: z
+    .boolean()
+    .default(false)
+    .describe('True cuando ya se hizo el upselling y están todos los datos del tipo de pedido'),
+  customerConfirmed: z
+    .boolean()
+    .default(false)
+    .describe('True SOLO si el último mensaje del cliente acepta explícitamente la confirmación ("¿Confirmas?") enviada antes'),
   responseToUser: z.string(),
   sendMenuPdf: z
     .boolean()
     .optional()
     .default(false)
-    .describe('True única y estrictamente si el cliente pide el menú, la carta, o pregunta qué venden o qué opciones hay'),
+    .describe('True si el cliente pide el menú, la carta, opciones o qué venden'),
 });
 
 export type OrderIntent = z.infer<typeof OrderIntentSchema>;

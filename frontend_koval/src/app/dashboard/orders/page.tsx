@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { io, Socket } from 'socket.io-client';
+import PrepareActions from '@/components/orders/PrepareActions';
 
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'DELIVERED' | 'CANCELLED';
 
@@ -107,8 +108,10 @@ export default function OrdersPage() {
     if (showLoader) setLoading(true);
     setError(null);
     try {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
       const res = await fetch(`${API_URL}/orders?restaurantId=${restaurantId}`, {
         cache: 'no-store',
+        headers: { Authorization: 'Bearer ' + currentToken },
       });
       if (!res.ok) {
         throw new Error(`Error ${res.status}: No se pudieron cargar los pedidos`);
@@ -121,7 +124,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [restaurantId]);
+  }, [restaurantId, token]);
 
   // Carga inicial
   useEffect(() => {
@@ -137,6 +140,8 @@ export default function OrdersPage() {
     const socket = io(SOCKET_URL, {
       path: "/socket.io/",
       transports: ['websocket', 'polling'],
+      // El gateway rechaza conexiones sin JWT válido
+      auth: { token: token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : '') },
     });
     socketRef.current = socket;
 
@@ -188,10 +193,11 @@ export default function OrdersPage() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [restaurantId]);
+  }, [restaurantId, token]);
 
   // Actualizar estado del pedido (PATCH a /orders/:id/status)
-  const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
+  // estimatedMinutes: al pasar a PREPARING el backend avisa al cliente por WhatsApp con ese tiempo
+  const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus, estimatedMinutes?: number) => {
     setUpdatingOrderId(orderId);
     try {
       const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
@@ -201,7 +207,7 @@ export default function OrdersPage() {
           Authorization: 'Bearer ' + currentToken,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, estimatedMinutes }),
       });
 
       if (!res.ok) {
@@ -261,13 +267,13 @@ export default function OrdersPage() {
         key={order.id}
         className="bg-slate-800 rounded-lg p-4 shadow-lg border border-slate-700 mb-4 flex flex-col gap-3 transition-all hover:border-slate-600"
       >
-        {/* Cabecera del Ticket */}
+        {/* Cabecera del Ticket: el cliente es lo más visible; el ID queda como referencia discreta */}
         <div className="flex items-start justify-between gap-2 border-b border-slate-700/70 pb-2.5">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-sm font-black text-white tracking-wider">
-                #{shortId}
-              </span>
+          <div className="min-w-0">
+            <h3 className="text-lg font-black leading-tight text-white truncate" title={order.customerName}>
+              {order.customerName || 'Cliente'}
+            </h3>
+            <div className="mt-1 flex items-center gap-2">
               {isWhatsApp ? (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <span>WA</span>
@@ -277,11 +283,14 @@ export default function OrdersPage() {
                   <span>Web</span>
                 </span>
               )}
+              <span className="text-[11px] text-slate-400">{formatOrderTime(order.createdAt)}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">{formatOrderTime(order.createdAt)}</p>
           </div>
 
-          <div className="text-right">
+          <div className="shrink-0 text-right">
+            <span className="block font-mono text-[9px] text-slate-500 tracking-wider" title={`Pedido ${order.id}`}>
+              #{shortId}
+            </span>
             <span className="font-mono text-base font-black text-emerald-400">
               ${order.total.toLocaleString('es-CO')}
             </span>
@@ -291,9 +300,11 @@ export default function OrdersPage() {
         {/* Información del Cliente */}
         <div className="space-y-1 text-xs">
           <div className="flex items-center justify-between">
-            <span className="font-bold text-white text-sm truncate" title={order.customerName}>
-              {order.customerName || 'Cliente'}
-            </span>
+            {order.customerPhone ? (
+              <p className="text-slate-400 font-mono text-[11px]">{order.customerPhone}</p>
+            ) : (
+              <span />
+            )}
             {cleanPhone && (
               <a
                 href={`https://wa.me/${cleanPhone}`}
@@ -307,10 +318,6 @@ export default function OrdersPage() {
               </a>
             )}
           </div>
-
-          {order.customerPhone && (
-            <p className="text-slate-400 font-mono text-[11px]">{order.customerPhone}</p>
-          )}
 
           {order.orderType === 'DINE_IN' && order.tableNumber ? (
             <p className="text-indigo-400 font-semibold text-[11px] flex items-center gap-1 pt-1">
@@ -360,26 +367,11 @@ export default function OrdersPage() {
         {/* Botones de Acción Condicionales */}
         <div className="pt-2 border-t border-slate-700/70">
           {order.status === 'PENDING' && (
-            <button
-              type="button"
-              disabled={isUpdating}
-              onClick={() => handleUpdateStatus(order.id, 'PREPARING')}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition shadow-md shadow-blue-900/40 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-            >
-              {isUpdating ? (
-                <>
-                  <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                  </svg>
-                  <span>Actualizando...</span>
-                </>
-              ) : (
-                <>
-                  <span>👨‍🍳 Iniciar Preparación</span>
-                </>
-              )}
-            </button>
+            <PrepareActions
+              busy={isUpdating}
+              onPrepare={(minutes) => handleUpdateStatus(order.id, 'PREPARING', minutes)}
+              onReject={() => handleUpdateStatus(order.id, 'CANCELLED')}
+            />
           )}
 
           {order.status === 'PREPARING' && (
@@ -436,11 +428,10 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Cabecera Principal */}
+      {/* Barra de herramientas (el título lo muestra el TopBar) */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-black text-white tracking-tight">Tablero Kanban de Pedidos</h1>
             {/* Indicador WebSocket en vivo */}
             <div
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition ${
@@ -455,10 +446,8 @@ export default function OrdersPage() {
               />
               <span>{isConnectedWs ? 'En vivo' : 'Sin conexión'}</span>
             </div>
+            <span className="text-xs text-slate-500">Tablero Kanban en tiempo real</span>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Gestiona la preparación y despacho de comandas en tiempo real
-          </p>
         </div>
 
         {/* Buscador y Actualizar */}

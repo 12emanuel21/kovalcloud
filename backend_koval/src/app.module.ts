@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -9,9 +10,20 @@ import { MenuItemsModule } from './menu-items/menu-items.module';
 import { OrdersModule } from './orders/orders.module';
 import { MetaWhatsAppModule } from './meta-whatsapp/meta-whatsapp.module';
 import { AiModule } from './ai/ai.module';
+import { WhatsappGatewayModule } from './whatsapp-gateway/whatsapp-gateway.module';
 
 @Module({
   imports: [
+    // Límite de peticiones por IP. Solo se aplica donde se use ThrottlerGuard (POST /orders).
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          ttl: 60_000,
+          limit: Number(process.env.ORDERS_RATE_LIMIT) || 5,
+        },
+      ],
+      errorMessage: 'Demasiados pedidos desde esta conexión. Intenta de nuevo en un minuto.',
+    }),
     PrismaModule,
     AuthModule,
     RestaurantsModule,
@@ -20,6 +32,7 @@ import { AiModule } from './ai/ai.module';
     OrdersModule,
     MetaWhatsAppModule,
     AiModule,
+    WhatsappGatewayModule,
   ],
   controllers: [AppController],
   providers: [AppService],

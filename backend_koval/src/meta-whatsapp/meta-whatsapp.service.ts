@@ -6,6 +6,19 @@ import { AiService } from '../ai/ai.service';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { OrderStatus } from '@prisma/client';
 import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
+import { internalApiHeaders } from '../config/secrets';
+import {
+  buildConfirmationMessage,
+  buildOrderLines,
+  buildOrderNotes,
+  buildRegisteredMessage,
+  hasRequiredData,
+  orderTotal,
+  toPrismaOrderType,
+} from './order-flow';
+
+/** Ventana para evitar pedidos duplicados si el cliente confirma dos veces */
+const DUPLICATE_ORDER_WINDOW_MS = 10 * 60 * 1000;
 
 export interface BotpressConverseResponse {
   responses: Array<{
@@ -46,22 +59,25 @@ export class MetaWhatsAppService {
     }
 
     const cleanTo = to.replace(/\D/g, '');
-    
+
+    // --- Baileys: se envía el PDF en Base64 ---
     if (isBaileys) {
-      this.logger.log(`📤 [Baileys] Enviando mensaje a [${cleanTo}]: "${body.replace(/\n/g, ' ')}"`);
+      const whatsappServiceUrl = process.env.WHATSAPP_SERVICE_URL || 'http://whatsapp_baileys:5000/send';
+      this.logger.log(`📤 [Baileys] Enviando texto a [${cleanTo}]...`);
       try {
-        const whatsappServiceUrl = process.env.WHATSAPP_SERVICE_URL || 'http://localhost:5000/send';
         const response = await fetch(whatsappServiceUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: internalApiHeaders(),
           body: JSON.stringify({
             to: cleanTo,
             text: body,
           }),
         });
-        return await response.json();
-      } catch (error: any) {
-        this.logger.error(`❌ [Baileys] Error enviando mensaje a ${cleanTo}: ${error.message}`);
+        const result = await response.json();
+        this.logger.log(`✅ [Baileys] Respuesta del envío de texto: ${JSON.stringify(result)}`);
+        return result;
+      } catch (e: any) {
+        this.logger.error(`❌ [Baileys] Fallo envio de texto: ${e.message}`);
         return null;
       }
     }
@@ -131,22 +147,34 @@ export class MetaWhatsAppService {
     try {
       // --- Baileys: se envía el PDF en Base64 ---
       if (isBaileys) {
-        const buffer = isLocalFile
-          ? fsLib.readFileSync(filePathOrUrl)
-          : Buffer.from(await (await fetch(filePathOrUrl)).arrayBuffer());
-        const whatsappServiceUrl = process.env.WHATSAPP_SERVICE_URL || 'http://localhost:5000/send';
-        const response = await fetch(whatsappServiceUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: cleanTo,
-            document: buffer.toString('base64'),
-            filename,
-            mimetype: 'application/pdf',
-            caption,
-          }),
-        });
-        return await response.json();
+        const fs = require('fs');
+        if (fs.existsSync(filePathOrUrl)) {
+          const documentBase64 = fs.readFileSync(filePathOrUrl).toString('base64');
+          const whatsappServiceUrl = process.env.WHATSAPP_SERVICE_URL || 'http://whatsapp_baileys:5000/send';
+          this.logger.log(`📤 [Baileys] Enviando PDF a [${cleanTo}]...`);
+          try {
+              const response = await fetch(whatsappServiceUrl, {
+                method: 'POST',
+                headers: internalApiHeaders(),
+                body: JSON.stringify({
+                  to: cleanTo,
+                  document: documentBase64,
+                  filename: filename,
+                  mimetype: 'application/pdf',
+                  caption: caption
+                }),
+              });
+              const result = await response.json();
+              this.logger.log(`✅ [Baileys] Respuesta del envío de PDF: ${JSON.stringify(result)}`);
+              return result;
+          } catch(e: any) {
+              this.logger.error(`❌ [Baileys] Fallo envio de PDF: ${e.message}`);
+              return null;
+          }
+        } else {
+          this.logger.error(`❌ EL ARCHIVO NO EXISTE EN EL CONTENEDOR: ${filePathOrUrl}`);
+          return null;
+        }
       }
 
       // --- Meta: si es archivo local, se sube primero a Media API ---
@@ -271,7 +299,51 @@ export class MetaWhatsAppService {
    * @param payload Objeto webhook entrante de Meta
    * @param verifyToken Token de verificación recibido en la URL
    */
-  async processIncomingWebhook(payload: MetaWebhookPayloadDto | any, verifyToken: string): Promise<void> {
+  /**
+   * BYOA: identifica a qué restaurantes se refiere un webhook de Meta a partir de su payload
+   * (phone_number_id de cada cambio y WABA id de cada entrada) y devuelve su App Secret.
+   * El payload aún NO es de confianza: solo se usa para saber con qué secreto verificar la firma.
+   */
+  async findWebhookRestaurants(
+    payload: any,
+  ): Promise<Array<{ id: string; name: string; metaAppSecret: string | null }>> {
+    const entries: any[] = Array.isArray(payload?.entry) ? payload.entry : [];
+    const phoneIds = new Set<string>();
+    const wabaIds = new Set<string>();
+
+    for (const entry of entries) {
+      if (typeof entry?.id === 'string' && entry.id) wabaIds.add(entry.id);
+      const changes: any[] = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        const phoneId = change?.value?.metadata?.phone_number_id;
+        if (typeof phoneId === 'string' && phoneId) phoneIds.add(phoneId);
+      }
+    }
+
+    if (phoneIds.size === 0 && wabaIds.size === 0) return [];
+
+    return this.prisma.restaurant.findMany({
+      where: {
+        OR: [
+          ...(phoneIds.size ? [{ whatsappPhoneId: { in: [...phoneIds] } }] : []),
+          ...(wabaIds.size ? [{ whatsappWabaId: { in: [...wabaIds] } }] : []),
+        ],
+      },
+      select: { id: true, name: true, metaAppSecret: true },
+    });
+  }
+
+  /**
+   * @param trustedRestaurantIds Webhooks de Meta: restaurantes cuya firma ya se verificó.
+   *        El mensaje SOLO puede procesarse para uno de ellos (evita que un tenant con su
+   *        propio App Secret inyecte mensajes en otro restaurante vía el verifyToken de la URL).
+   */
+  async processIncomingWebhook(
+    payload: MetaWebhookPayloadDto | any,
+    verifyToken: string,
+    isBaileys: boolean = false,
+    trustedRestaurantIds?: string[],
+  ): Promise<void> {
     try {
       const entry = payload?.entry?.[0];
       const change = entry?.changes?.[0];
@@ -297,7 +369,6 @@ export class MetaWhatsAppService {
       const senderNumber = incomingMsg.from;
       const phoneNumberId = value.metadata?.phone_number_id;
       const displayPhoneNumber = value.metadata?.display_phone_number;
-      const isBaileys = displayPhoneNumber === 'BAILEYS_GATEWAY';
 
       // 1. Búsqueda Multi-Tenant del restaurante en PostgreSQL
       const searchConditions: any[] = [];
@@ -315,9 +386,13 @@ export class MetaWhatsAppService {
       }
 
       const restaurant = await this.prisma.restaurant.findFirst({
-        where: {
-          OR: searchConditions,
-        },
+        where: trustedRestaurantIds
+          ? {
+              // Meta: solo restaurantes con firma verificada, identificados por el payload firmado
+              id: { in: trustedRestaurantIds },
+              ...(phoneNumberId ? { whatsappPhoneId: phoneNumberId } : {}),
+            }
+          : { OR: searchConditions },
       });
 
       if (!restaurant) {
@@ -379,7 +454,8 @@ export class MetaWhatsAppService {
 
       // 4. Obtener el menú disponible del restaurante desde Prisma
       const menuItems = await this.prisma.menuItem.findMany({
-        where: { isAvailable: true, restaurantId: restaurant.id },
+        where: { isAvailable: true, deletedAt: null, restaurantId: restaurant.id },
+        include: { category: { select: { name: true } } },
       });
 
       const lowerMsg = messageText.toLowerCase().trim();
@@ -441,7 +517,8 @@ export class MetaWhatsAppService {
       // --- FIN INTERCEPTOR ---
 
       const menuString = menuItems
-        .map((i) => `ID: ${i.id} | Nombre: ${i.name} | Precio: ${i.price}`)
+        // La categoría permite a la IA distinguir platos principales de bebidas/acompañamientos (upselling)
+        .map((i) => `ID: ${i.id} | Categoría: ${i.category?.name ?? '-'} | Nombre: ${i.name} | Precio: ${i.price}`)
         .join('\n');
 
       // 4.5. Obtener historial de conversación previo (últimos 20 mensajes)
@@ -476,60 +553,67 @@ export class MetaWhatsAppService {
       // Log de la estructura extraída por IA
       console.log('JSON Extraído por IA:', JSON.stringify(aiResult, null, 2));
 
-      // 6. Procesar la orden si la intención es ORDER
+      // 6. Flujo de pedido / reserva con confirmación estricta.
+      //    El backend decide con los datos (no solo con el flag de la IA) y calcula el total con precios de la BD.
       let finalResponse = aiResult.responseToUser;
 
-      if (aiResult.intent === 'ORDER' && aiResult.items && aiResult.items.length > 0) {
-        this.logger.log(`🛒 Procesando pedido real para el restaurante ${restaurant.id}...`);
+      if (aiResult.intent === 'ORDER' || aiResult.intent === 'RESERVATION') {
+        const lines = buildOrderLines(aiResult.items, menuItems);
+        const complete = hasRequiredData(aiResult, lines);
 
-        // 6.1. Calcular el total cruzando los items de la IA con el menú de la BD
-        let totalAmount = 0;
-        const orderItemsData: Array<{
-          menuItemId: string;
-          quantity: number;
-          unitPrice: number;
-          subtotal: number;
-        }> = [];
-
-        for (const item of aiResult.items) {
-          const menuItem = menuItems.find((m) => m.id === item.productId);
-          if (menuItem) {
-            const subtotal = menuItem.price * item.quantity;
-            totalAmount += subtotal;
-            orderItemsData.push({
-              menuItemId: menuItem.id,
-              quantity: item.quantity,
-              unitPrice: menuItem.price,
-              subtotal: subtotal,
-            });
-          }
-        }
-
-        if (orderItemsData.length > 0) {
-          // 6.2. Guardar la orden en Prisma
-          const newOrder = await this.prisma.order.create({
-            data: {
+        if (complete && aiResult.customerConfirmed) {
+          // 6.1. El cliente aceptó la confirmación: registrar el pedido
+          const total = orderTotal(lines);
+          const duplicate = await this.prisma.order.findFirst({
+            where: {
               restaurantId: restaurant.id,
-              customerName: incomingMsg.from || 'Cliente WhatsApp',
               customerPhone: incomingMsg.from,
-              channel: 'WHATSAPP',
-              total: totalAmount,
-              status: OrderStatus.PENDING,
-              items: {
-                create: orderItemsData,
-              },
+              total,
+              orderType: toPrismaOrderType(aiResult),
+              status: { not: OrderStatus.CANCELLED },
+              createdAt: { gte: new Date(Date.now() - DUPLICATE_ORDER_WINDOW_MS) },
             },
-            include: { items: { include: { menuItem: true } } },
           });
 
-          this.logger.log(`✅ Orden guardada en BD: ${newOrder.id}`);
+          if (duplicate) {
+            this.logger.warn(`⚠️ Confirmación duplicada de ${incomingMsg.from}: pedido ${duplicate.id} ya existe`);
+            finalResponse = `✅ Tu pedido #${duplicate.id.slice(0, 8).toUpperCase()} ya está registrado. ¡No te preocupes, no lo duplicamos!`;
+          } else {
+            const newOrder = await this.prisma.order.create({
+              data: {
+                restaurantId: restaurant.id,
+                customerName: aiResult.customerName?.trim() || 'Cliente WhatsApp',
+                customerPhone: incomingMsg.from,
+                channel: 'WHATSAPP',
+                orderType: toPrismaOrderType(aiResult),
+                deliveryAddress: aiResult.orderType === 'DELIVERY' ? aiResult.deliveryAddress?.trim() : undefined,
+                notes: buildOrderNotes(aiResult, lines),
+                total,
+                status: OrderStatus.PENDING,
+                items: {
+                  create: lines.map(({ menuItemId, quantity, unitPrice, subtotal }) => ({
+                    menuItemId,
+                    quantity,
+                    unitPrice,
+                    subtotal,
+                  })),
+                },
+              },
+              include: { items: { include: { menuItem: true } } },
+            });
 
-          // 6.3. Emitir el evento por WebSocket al KDS (Kitchen Display System)
-          this.ordersGateway.emitNewOrder(restaurant.id, newOrder);
+            this.logger.log(`✅ Orden confirmada y guardada en BD: ${newOrder.id} (${newOrder.orderType}, $${total})`);
 
-          // 6.4. Anexar confirmación de precio al usuario
-          finalResponse += `\n\nEl total de su pedido es de $${totalAmount.toLocaleString('es-CO')}. ¡En breve comenzamos a prepararlo!`;
+            // Emitir el evento por WebSocket al KDS (Kitchen Display System)
+            this.ordersGateway.emitNewOrder(restaurant.id, newOrder);
+
+            finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, newOrder.id)}`.trim();
+          }
+        } else if (complete && aiResult.readyToConfirm) {
+          // 6.2. Datos completos: pedir confirmación con el total exacto (aún NO se crea el pedido)
+          finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines)}`.trim();
         }
+        // 6.3. Si faltan datos, la respuesta de la IA ya está pidiendo lo que falta
       }
 
       // 7. Enviar la respuesta generada por IA al cliente vía Meta Graph API v22.0
@@ -553,7 +637,9 @@ export class MetaWhatsAppService {
             this.logger.error(`❌ Falló envío del PDF, se enviará solo texto: ${e?.message || e}`);
           }
         } else {
-          this.logger.warn(`⚠️ PDF de menú no encontrado en ${menuPdfPath}, se envía solo texto.`);
+          this.logger.warn(`⚠️ PDF de menú no encontrado en ${menuPdfPath}, se envía el enlace al menú web.`);
+          const menuUrl = `${process.env.FRONTEND_URL || 'https://kovalcloud.com'}/menu/${restaurant.slug}`;
+          finalResponse += `\n\n📲 Mira nuestro menú aquí: ${menuUrl}`;
         }
       }
 

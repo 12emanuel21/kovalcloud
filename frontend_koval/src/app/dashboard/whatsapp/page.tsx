@@ -5,7 +5,8 @@ import { useAuth } from '@/context/AuthContext';
 import { QRCodeCanvas } from 'qrcode.react';
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
-const WHATSAPP_API_URL = 'http://localhost:5000';
+// Baileys no es accesible desde el navegador: se usa el puente autenticado del backend
+const WHATSAPP_GATEWAY_URL = `${API_URL}/whatsapp-gateway`;
 
 type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'QR_READY' | 'CONNECTED';
 
@@ -16,15 +17,18 @@ interface StatusResponse {
   user?: { id?: string; name?: string } | null;
 }
 
-interface RestaurantData {
+// Respuesta de GET /restaurants/:id/whatsapp-config (el token nunca llega completo)
+interface WhatsappConfigData {
   id: string;
-  name: string;
   slug: string;
   botpressBotId?: string | null;
   whatsappPhoneId?: string | null;
-  whatsappToken?: string | null;
   whatsappWabaId?: string | null;
   whatsappVerifyToken?: string | null;
+  hasWhatsappToken: boolean;
+  whatsappTokenMasked?: string | null;
+  hasMetaAppSecret: boolean;
+  metaAppSecretMasked?: string | null;
 }
 
 export default function WhatsAppDashboardPage() {
@@ -41,8 +45,15 @@ export default function WhatsAppDashboardPage() {
   const [restaurantSlug, setRestaurantSlug] = useState<string>('');
   const [whatsappPhoneId, setWhatsappPhoneId] = useState<string>('');
   const [whatsappToken, setWhatsappToken] = useState<string>('');
+  const [whatsappTokenMasked, setWhatsappTokenMasked] = useState<string | null>(null);
   const [whatsappWabaId, setWhatsappWabaId] = useState<string>('');
+  // BYOA: App Secret de la app de Meta del restaurante (solo escritura, nunca se devuelve)
+  const [metaAppSecret, setMetaAppSecret] = useState<string>('');
+  const [metaAppSecretMasked, setMetaAppSecretMasked] = useState<string | null>(null);
+  const [showAppSecret, setShowAppSecret] = useState<boolean>(false);
   const [whatsappVerifyToken, setWhatsappVerifyToken] = useState<string>('');
+  // Último verify token persistido: Meta solo valida contra lo guardado en BD
+  const [savedVerifyToken, setSavedVerifyToken] = useState<string>('');
   const [botpressBotId, setBotpressBotId] = useState<string>('koval-pizzeria-bot');
 
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
@@ -66,16 +77,22 @@ export default function WhatsAppDashboardPage() {
     if (!restaurantId) return;
     setMetaLoading(true);
     try {
-      const res = await fetch(`${API_URL}/restaurants/${restaurantId}`, {
+      const res = await fetch(`${API_URL}/restaurants/${restaurantId}/whatsapp-config`, {
         cache: 'no-store',
+        headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('No se pudo cargar la configuración de WhatsApp');
-      const data: RestaurantData = await res.json();
+      const data: WhatsappConfigData = await res.json();
       setRestaurantSlug(data.slug || '');
       setWhatsappPhoneId(data.whatsappPhoneId || '');
-      setWhatsappToken(data.whatsappToken || '');
+      // El token guardado no se expone: el campo queda vacío y, si se guarda vacío, no se sobrescribe
+      setWhatsappToken('');
+      setWhatsappTokenMasked(data.hasWhatsappToken ? data.whatsappTokenMasked ?? '••••' : null);
       setWhatsappWabaId(data.whatsappWabaId || '');
+      setMetaAppSecret('');
+      setMetaAppSecretMasked(data.hasMetaAppSecret ? data.metaAppSecretMasked ?? '••••' : null);
       setWhatsappVerifyToken(data.whatsappVerifyToken || data.slug || data.id || '');
+      setSavedVerifyToken(data.whatsappVerifyToken || data.slug || data.id || '');
       setBotpressBotId(data.botpressBotId || 'koval-pizzeria-bot');
     } catch (err) {
       console.error(err);
@@ -83,15 +100,17 @@ export default function WhatsAppDashboardPage() {
     } finally {
       setMetaLoading(false);
     }
-  }, [restaurantId]);
+  }, [restaurantId, token]);
 
   useEffect(() => {
     fetchMetaSettings();
   }, [fetchMetaSettings]);
 
-  // URL del Webhook oficial
+  // URL del Webhook oficial: mismo dominio por el que se accede al dashboard (túnel, dominio final...).
+  // Solo se renderiza tras cargar la config en el cliente, así que no hay desajuste de hidratación.
   const effectiveVerifyToken = whatsappVerifyToken.trim() || restaurantSlug.trim() || restaurantId || 'default';
-  const webhookUrl = `https://kovalcloude.autobotsdev.dev/meta/webhook/${effectiveVerifyToken}`;
+  const baseOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const webhookUrl = `${baseOrigin}/meta/webhook/${effectiveVerifyToken}`;
 
   // Copiar al portapapeles
   const handleCopy = (text: string, type: 'url' | 'token') => {
@@ -121,6 +140,8 @@ export default function WhatsAppDashboardPage() {
         whatsappPhoneId: whatsappPhoneId.trim() || undefined,
         whatsappToken: whatsappToken.trim() || undefined,
         whatsappWabaId: whatsappWabaId.trim() || undefined,
+        // Vacío = conservar el secreto guardado
+        metaAppSecret: metaAppSecret.trim() || undefined,
         whatsappVerifyToken: whatsappVerifyToken.trim() || undefined,
         botpressBotId: botpressBotId.trim() || undefined,
       };
@@ -137,6 +158,16 @@ export default function WhatsAppDashboardPage() {
         throw new Error(errData.message || 'Error al guardar credenciales');
       }
 
+      if (payload.whatsappVerifyToken) setSavedVerifyToken(payload.whatsappVerifyToken);
+      if (payload.metaAppSecret) {
+        setMetaAppSecretMasked(`••••${payload.metaAppSecret.slice(-4)}`);
+        setMetaAppSecret('');
+        setShowAppSecret(false);
+      }
+      if (payload.whatsappToken) {
+        setWhatsappTokenMasked(`••••${payload.whatsappToken.slice(-4)}`);
+        setWhatsappToken('');
+      }
       setMetaFeedback({ type: 'success', text: '¡Credenciales de Meta Cloud API guardadas exitosamente!' });
       setTimeout(() => setMetaFeedback(null), 5000);
     } catch (err: unknown) {
@@ -152,8 +183,9 @@ export default function WhatsAppDashboardPage() {
   // 2. Consultar estado del microservicio Baileys
   const fetchBaileysStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${WHATSAPP_API_URL}/status`, {
+      const res = await fetch(`${WHATSAPP_GATEWAY_URL}/status`, {
         cache: 'no-store',
+        headers: { 'Authorization': `Bearer ${token}` },
       });
 
       if (!res.ok) throw new Error(`Error: ${res.status}`);
@@ -169,7 +201,7 @@ export default function WhatsAppDashboardPage() {
     } finally {
       setBaileysLoading(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (activeTab === 'baileys') {
@@ -183,7 +215,7 @@ export default function WhatsAppDashboardPage() {
     if (!confirm('¿Estás seguro de que deseas cerrar la sesión de WhatsApp Socket?')) return;
     setIsDisconnecting(true);
     try {
-      await fetch(`${WHATSAPP_API_URL}/logout`, { method: 'POST' });
+      await fetch(`${WHATSAPP_GATEWAY_URL}/logout`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
       await fetchBaileysStatus();
     } catch (err) {
       console.error(err);
@@ -194,7 +226,7 @@ export default function WhatsAppDashboardPage() {
 
   const handleConnect = async () => {
     try {
-      await fetch(`${WHATSAPP_API_URL}/connect`, { method: 'POST' });
+      await fetch(`${WHATSAPP_GATEWAY_URL}/connect`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
       await fetchBaileysStatus();
     } catch (err) {
       console.error(err);
@@ -209,7 +241,7 @@ export default function WhatsAppDashboardPage() {
     setTestFeedback(null);
 
     try {
-      const res = await fetch(`${WHATSAPP_API_URL}/send`, {
+      const res = await fetch(`${WHATSAPP_GATEWAY_URL}/send`, {
         method: 'POST',
         headers: {
         'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -218,7 +250,7 @@ export default function WhatsAppDashboardPage() {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Error al enviar mensaje');
+        throw new Error(errData.error || errData.message || 'Error al enviar mensaje');
       }
 
       setTestFeedback({ type: 'success', text: `¡Mensaje enviado correctamente a ${testPhone}!` });
@@ -233,22 +265,7 @@ export default function WhatsAppDashboardPage() {
     }
   };
   return (
-    <div className="space-y-8 max-w-5xl mx-auto">
-      {/* Encabezado Principal */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-6">
-        <div>
-          <span className="text-xs font-semibold text-emerald-400 uppercase tracking-widest">
-            Centro de Conexión WhatsApp
-          </span>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight mt-1">
-            Conexión de Chatbot & WhatsApp
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Conecta tu línea oficial de Meta Cloud API o utiliza el emulador de WhatsApp Web por código QR.
-          </p>
-        </div>
-      </div>
-
+    <div className="space-y-6 max-w-5xl mx-auto">
       {/* Selector de Pestañas */}
       <div className="flex items-center p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl gap-2 backdrop-blur-sm max-w-md">
         <button
@@ -386,6 +403,13 @@ export default function WhatsAppDashboardPage() {
                   </div>
                 </div>
 
+                {effectiveVerifyToken !== savedVerifyToken && (
+                  <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-2.5 text-[11px] text-amber-300">
+                    ⚠️ Este Verify Token todavía <strong>no está guardado</strong>. Pulsa &quot;Guardar Configuración Oficial&quot; antes de
+                    usar &quot;Verificar y guardar&quot; en Meta, o la verificación fallará.
+                  </p>
+                )}
+
                 <p className="text-[11px] text-slate-500">
                   En el panel de Meta: ve a <strong>WhatsApp &gt; Configuration &gt; Webhook</strong>, pega estos valores y suscríbete al campo <code className="text-emerald-300 font-mono">messages</code>.
                 </p>
@@ -447,12 +471,54 @@ export default function WhatsAppDashboardPage() {
                       type={showToken ? 'text' : 'password'}
                       value={whatsappToken}
                       onChange={(e) => setWhatsappToken(e.target.value)}
-                      placeholder="EAABwzLix..."
+                      placeholder={whatsappTokenMasked ? `Token guardado (${whatsappTokenMasked}). Déjalo vacío para conservarlo` : 'EAABwzLix...'}
                       className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm font-mono text-emerald-300 placeholder-slate-600 outline-none transition"
                     />
                     <p className="text-[11px] text-slate-500 mt-1">
                       Token del Usuario del Sistema con permisos <code className="text-emerald-300 font-mono">whatsapp_business_messaging</code> y <code className="text-emerald-300 font-mono">whatsapp_business_management</code>.
                     </p>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label htmlFor="meta-app-secret" className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+                        <span>Meta App Secret (Clave secreta de la app) <span className="text-emerald-400">*</span></span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            metaAppSecretMasked
+                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                              : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                          }`}
+                        >
+                          {metaAppSecretMasked ? `Configurado ${metaAppSecretMasked}` : 'Sin configurar'}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowAppSecret(!showAppSecret)}
+                        className="text-[11px] text-slate-400 hover:text-white transition cursor-pointer"
+                      >
+                        {showAppSecret ? '🙈 Ocultar' : '👁️ Mostrar'}
+                      </button>
+                    </div>
+                    <input
+                      id="meta-app-secret"
+                      type={showAppSecret ? 'text' : 'password'}
+                      value={metaAppSecret}
+                      onChange={(e) => setMetaAppSecret(e.target.value)}
+                      autoComplete="new-password"
+                      spellCheck={false}
+                      placeholder={metaAppSecretMasked ? `Secreto guardado (${metaAppSecretMasked}). Déjalo vacío para conservarlo` : 'Pega aquí el App Secret'}
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm font-mono text-emerald-300 placeholder-slate-600 outline-none transition"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      En Meta for Developers: tu app &gt; Configuración &gt; Básica &gt; &quot;Clave secreta de la app&quot;. Se usa para verificar la firma <code className="text-emerald-300 font-mono">x-hub-signature-256</code> de cada webhook; nunca se vuelve a mostrar.
+                    </p>
+                    {!metaAppSecretMasked && (
+                      <p className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-2.5 text-[11px] text-amber-300">
+                        Mientras no lo configures, los webhooks de Meta Cloud API de este restaurante se rechazan (401). La conexión por QR no se ve afectada.
+                      </p>
+                    )}
                   </div>
 
                   <div className="md:col-span-2">

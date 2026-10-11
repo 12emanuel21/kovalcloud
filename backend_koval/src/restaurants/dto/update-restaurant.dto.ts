@@ -42,4 +42,9 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsOptional()
   @IsString()
   whatsappVerifyToken?: string;
+
+  // BYOA: App Secret de la app de Meta del restaurante (solo escritura, nunca se devuelve)
+  @IsOptional()
+  @IsString()
+  metaAppSecret?: string;
 }

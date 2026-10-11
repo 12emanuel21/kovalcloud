@@ -7,7 +7,7 @@ export async function sendToNestjs(senderPhone: string, messageText: string, mes
     try {
         // ID ficticio o el de tu negocio
         const businessAccountId = '1931931007422144'; 
-        const phoneNumberId = '1124970087377044'; // El configurado en Meta
+        const phoneNumberId = process.env.TIGO_PHONE_NUMBER_ID || '573239999064'; // El configurado en Meta
 
         // Limpiamos el sufijo @s.whatsapp.net
         const cleanSender = senderPhone.replace(/\D/g, '');
@@ -42,7 +42,11 @@ export async function sendToNestjs(senderPhone: string, messageText: string, mes
         };
 
         const response = await axios.post(NESTJS_WEBHOOK_URL, payload, {
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+                'Content-Type': 'application/json',
+                'x-source': 'baileys',
+                'x-api-key': process.env.INTERNAL_API_KEY || '',
+            }
         });
 
         console.log(`[NestJS Bridge] Mensaje enviado a backend. Status: ${response.status}`);
