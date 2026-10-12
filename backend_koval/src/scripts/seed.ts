@@ -33,9 +33,9 @@ async function main() {
 
   // 2. Super Admin maestro
   //    Credenciales desde variables de entorno. Si el usuario ya existe y no se
-  //    pasa SUPER_ADMIN_PASSWORD, se conserva su contraseña actual.
-  const adminEmail = (process.env.SUPER_ADMIN_EMAIL || 'admin@kovalcloud.com').toLowerCase().trim();
-  const envPassword = process.env.SUPER_ADMIN_PASSWORD;
+  //    pasa SUPERADMIN_PASSWORD, se conserva su contraseña actual.
+  const adminEmail = (process.env.SUPERADMIN_EMAIL || 'admin@kovalcloud.com').toLowerCase().trim();
+  const envPassword = process.env.SUPERADMIN_PASSWORD;
   const existingAdmin = await prisma.user.findUnique({ where: { email: adminEmail } });
 
   let generatedPassword: string | null = null;
@@ -76,44 +76,49 @@ async function main() {
     console.log(`🔐 Contraseña en texto plano encriptada para ${u.email}`);
   }
 
-  // 4. Restaurante de prueba con su subdominio y su dueño asociado
-  const testOwner = await prisma.user.upsert({
-    where: { email: 'dueno@napoles.com' },
-    update: {},
-    create: {
-      email: 'dueno@napoles.com',
-      name: 'Dueño Pizzería Nápoles',
-      password: await bcrypt.hash(randomBytes(12).toString('base64url'), BCRYPT_ROUNDS),
-      role: Role.OWNER,
-    },
-  });
+  // 4. Restaurante de prueba con su subdominio y su dueño asociado (solo fuera de producción)
+  let testSummary: string | null = null;
+  if (process.env.NODE_ENV !== 'production') {
+    const testOwner = await prisma.user.upsert({
+      where: { email: 'dueno@napoles.com' },
+      update: {},
+      create: {
+        email: 'dueno@napoles.com',
+        name: 'Dueño Pizzería Nápoles',
+        password: await bcrypt.hash(randomBytes(12).toString('base64url'), BCRYPT_ROUNDS),
+        role: Role.OWNER,
+      },
+    });
 
-  const testRestaurant = await prisma.restaurant.upsert({
-    where: { slug: 'pizzeria-napoles' },
-    update: {},
-    create: {
-      name: 'Pizzería Nápoles',
-      slug: 'pizzeria-napoles',
-      subdomain: 'pizzeria-napoles',
-      planId: planCloud.id,
-    },
-  });
+    const testRestaurant = await prisma.restaurant.upsert({
+      where: { slug: 'pizzeria-napoles' },
+      update: {},
+      create: {
+        name: 'Pizzería Nápoles',
+        slug: 'pizzeria-napoles',
+        subdomain: 'pizzeria-napoles',
+        planId: planCloud.id,
+      },
+    });
 
-  await prisma.user.update({
-    where: { id: testOwner.id },
-    data: { restaurantId: testRestaurant.id },
-  });
+    await prisma.user.update({
+      where: { id: testOwner.id },
+      data: { restaurantId: testRestaurant.id },
+    });
+
+    testSummary = `${testRestaurant.name} -> ${testRestaurant.subdomain} (dueño: ${testOwner.email})`;
+  }
 
   console.log('✅ Seed completado con éxito:');
   console.log(`   Super Admin: ${adminUser.email} (${adminUser.role})`);
   if (generatedPassword) {
     console.log(`   ⚠️  Contraseña generada (guárdala, no se volverá a mostrar): ${generatedPassword}`);
   } else if (envPassword) {
-    console.log('   Contraseña: la indicada en SUPER_ADMIN_PASSWORD');
+    console.log('   Contraseña: la indicada en SUPERADMIN_PASSWORD');
   } else {
-    console.log('   Contraseña: sin cambios (usa SUPER_ADMIN_PASSWORD para cambiarla)');
+    console.log('   Contraseña: sin cambios (usa SUPERADMIN_PASSWORD para cambiarla)');
   }
-  console.log(`   Restaurante de prueba: ${testRestaurant.name} -> ${testRestaurant.subdomain} (dueño: ${testOwner.email})`);
+  console.log(`   Restaurante de prueba: ${testSummary ?? 'omitido (NODE_ENV=production)'}`);
 }
 
 main()
