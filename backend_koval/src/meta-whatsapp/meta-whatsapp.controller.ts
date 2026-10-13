@@ -131,6 +131,7 @@ export class MetaWhatsAppController {
     @Headers('x-api-key') apiKey: string | undefined,
     @Headers('x-hub-signature-256') metaSignature: string | undefined,
     @Req() req: RawBodyRequest<Request>,
+    @Headers('x-restaurant-id') baileysRestaurantId?: string,
   ): Promise<{ status: string }> {
     const isBaileys = source === 'baileys';
     const ids = describeWebhookIds(payload);
@@ -148,6 +149,10 @@ export class MetaWhatsAppController {
       if (!isValidInternalApiKey(apiKey)) {
         this.logger.warn('⛔ Rechazado (401): x-source=baileys sin clave interna x-api-key válida');
         throw new UnauthorizedException('Clave interna inválida');
+      }
+      // Multi-tenant: cada sesión de Baileys indica a qué restaurante pertenece el mensaje
+      if (baileysRestaurantId) {
+        trustedRestaurantIds = [baileysRestaurantId];
       }
     } else {
       // BYOA: cada restaurante tiene su propia app de Meta (y su App Secret).

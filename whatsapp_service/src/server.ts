@@ -4,11 +4,12 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import {
   connectToWhatsApp,
-  getWhatsAppStatus,
-  getQRCode,
-  getConnectedUser,
-  sendWhatsAppMessage,
+  getSessionInfo,
+  isValidRestaurantId,
+  listSessions,
   logoutWhatsApp,
+  restoreSessions,
+  sendWhatsAppMessage,
 } from './whatsapp';
 
 dotenv.config();
@@ -44,14 +45,33 @@ app.use(cors({
 app.use(requireApiKey);
 app.use(express.json({ limit: '50mb' }));
 
-// Endpoint de Salud y Estado con QR
+// Salud del servicio y resumen de sesiones activas
 app.get('/status', (req: Request, res: Response) => {
-  const status = getWhatsAppStatus();
-  const user = getConnectedUser();
-  const qr = getQRCode();
-
   res.json({
     service: 'Koval WhatsApp Gateway',
+    sessions: listSessions(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Todas las rutas de sesión llevan el restaurante en la URL: /sessions/:restaurantId/...
+type SessionRequest = Request<{ restaurantId: string }>;
+const sessions = express.Router({ mergeParams: true });
+
+sessions.use((req: SessionRequest, res: Response, next: NextFunction) => {
+  if (!isValidRestaurantId(req.params.restaurantId)) {
+    res.status(400).json({ success: false, error: 'restaurantId inválido' });
+    return;
+  }
+  next();
+});
+
+// Estado de la sesión del restaurante (incluye el QR si está pendiente de escaneo)
+sessions.get('/status', (req: SessionRequest, res: Response) => {
+  const { status, qr, user } = getSessionInfo(req.params.restaurantId);
+  res.json({
+    service: 'Koval WhatsApp Gateway',
+    restaurantId: req.params.restaurantId,
     status,
     qr,
     user,
@@ -60,9 +80,8 @@ app.get('/status', (req: Request, res: Response) => {
 });
 
 // Endpoint exclusivo para consultar el QR actual
-app.get('/qr', (req: Request, res: Response) => {
-  const qr = getQRCode();
-  const status = getWhatsAppStatus();
+sessions.get('/qr', (req: SessionRequest, res: Response) => {
+  const { status, qr } = getSessionInfo(req.params.restaurantId);
 
   if (!qr && status === 'CONNECTED') {
     res.json({
@@ -81,9 +100,9 @@ app.get('/qr', (req: Request, res: Response) => {
 });
 
 // Endpoint para cerrar sesión y generar nuevo QR
-app.post('/logout', async (req: Request, res: Response) => {
+sessions.post('/logout', async (req: SessionRequest, res: Response) => {
   try {
-    await logoutWhatsApp();
+    await logoutWhatsApp(req.params.restaurantId);
     res.json({ success: true, message: 'Sesión de WhatsApp cerrada. Se reiniciará la conexión para generar un nuevo QR.' });
   } catch (error: unknown) {
     const err = error as { message?: string };
@@ -91,11 +110,11 @@ app.post('/logout', async (req: Request, res: Response) => {
   }
 });
 
-// Endpoint para forzar reconexión
-app.post('/connect', async (req: Request, res: Response) => {
+// Endpoint para iniciar (o reutilizar) la sesión y generar el QR
+sessions.post('/connect', async (req: SessionRequest, res: Response) => {
   try {
-    await connectToWhatsApp();
-    res.json({ success: true, status: getWhatsAppStatus() });
+    const session = await connectToWhatsApp(req.params.restaurantId);
+    res.json({ success: true, status: session.status });
   } catch (error: unknown) {
     const err = error as { message?: string };
     res.status(500).json({ success: false, error: err.message || 'Error al conectar' });
@@ -105,7 +124,7 @@ app.post('/connect', async (req: Request, res: Response) => {
 // Endpoint para envío de mensajes programáticos.
 // Texto: {to, text} o {phone, message}
 // Documento: {to, document (Base64), filename?, mimetype?, caption?}
-app.post('/send', async (req: Request, res: Response): Promise<void> => {
+sessions.post('/send', async (req: SessionRequest, res: Response): Promise<void> => {
   try {
     const target = req.body.to || req.body.phone;
     const documentBase64: string | undefined = req.body.document;
@@ -124,22 +143,23 @@ app.post('/send', async (req: Request, res: Response): Promise<void> => {
         }
       : undefined;
 
-    const result = await sendWhatsAppMessage(target, content, document);
+    const result = await sendWhatsAppMessage(req.params.restaurantId, target, content, document);
     res.json({ success: true, result });
   } catch (error: unknown) {
     const err = error as { message?: string };
-    console.warn(`⚠️ No se pudo entregar mensaje a ${req.body.to || req.body.phone}:`, err.message);
+    console.warn(`⚠️ [${req.params.restaurantId}] No se pudo entregar mensaje a ${req.body.to || req.body.phone}:`, err.message);
     res.status(500).json({ success: false, error: err.message || 'Error al enviar mensaje' });
   }
 });
 
-// Iniciar servidor Express e inicializar conexión a WhatsApp
+app.use('/sessions/:restaurantId', sessions);
+
+// Iniciar servidor Express y restaurar las sesiones ya vinculadas
 app.listen(PORT, async () => {
-  console.log(`\n🚀 Microservicio WhatsApp corriendo en: http://localhost:${PORT}`);
-  console.log(`📡 Conectando a Baileys WhatsApp Socket...\n`);
+  console.log(`\n🚀 Microservicio WhatsApp (multi-tenant) corriendo en: http://localhost:${PORT}`);
   try {
-    await connectToWhatsApp();
+    await restoreSessions();
   } catch (error) {
-    console.error('Error al iniciar Baileys:', error);
+    console.error('Error restaurando sesiones de Baileys:', error);
   }
 });

@@ -13,90 +13,138 @@ import { sendToNestjs } from './nestjsBridge';
 dotenv.config();
 
 const AUTH_FOLDER = process.env.AUTH_FOLDER || 'auth_info_baileys';
+const AUTH_ROOT = path.resolve(process.cwd(), AUTH_FOLDER);
 
 export type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'QR_READY' | 'CONNECTED';
 
-let sock: WASocket | null = null;
-let currentStatus: ConnectionStatus = 'DISCONNECTED';
-let currentQRCode: string | null = null;
-let connectedUser: { id?: string; name?: string } | null = null;
+/**
+ * Una sesión de WhatsApp Web por restaurante (multi-tenant).
+ * Las credenciales de cada una viven en AUTH_FOLDER/<restaurantId>/.
+ */
+interface Session {
+  restaurantId: string;
+  sock: WASocket | null;
+  status: ConnectionStatus;
+  qr: string | null;
+  user: { id?: string; name?: string } | null;
+  // Mapa dígitos -> JID original. WhatsApp puede identificar contactos por LID (@lid)
+  // en vez de por número (@s.whatsapp.net); el backend solo recibe los dígitos,
+  // así que hay que recordar el sufijo real para poder responder.
+  knownJids: Map<string, string>;
+}
 
-// Mapa dígitos -> JID original. WhatsApp puede identificar contactos por LID (@lid)
-// en vez de por número (@s.whatsapp.net); el backend solo recibe los dígitos,
-// así que hay que recordar el sufijo real para poder responder.
-const knownJids = new Map<string, string>();
+const sessions = new Map<string, Session>();
 
-export const getWhatsAppStatus = (): ConnectionStatus => currentStatus;
-export const getQRCode = (): string | null => currentQRCode;
-export const getConnectedUser = () => connectedUser;
+// El restaurantId se usa como nombre de carpeta: solo caracteres seguros (UUID, slug)
+const RESTAURANT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function isValidRestaurantId(restaurantId: string): boolean {
+  return RESTAURANT_ID_PATTERN.test(restaurantId);
+}
+
+const authPathFor = (restaurantId: string) => path.join(AUTH_ROOT, restaurantId);
+
+export function getSessionInfo(restaurantId: string) {
+  const session = sessions.get(restaurantId);
+  return {
+    status: session?.status ?? ('DISCONNECTED' as ConnectionStatus),
+    qr: session?.qr ?? null,
+    user: session?.user ?? null,
+  };
+}
+
+export function listSessions() {
+  return [...sessions.values()].map((s) => ({ restaurantId: s.restaurantId, status: s.status }));
+}
 
 /**
- * Inicializa y gestiona la conexión con WhatsApp mediante Baileys
+ * Inicia (o reutiliza) la sesión de WhatsApp de un restaurante
  */
-export async function connectToWhatsApp(): Promise<WASocket> {
-  currentStatus = 'CONNECTING';
-  const authPath = path.resolve(process.cwd(), AUTH_FOLDER);
+export async function connectToWhatsApp(restaurantId: string): Promise<Session> {
+  if (!isValidRestaurantId(restaurantId)) {
+    throw new Error('restaurantId inválido');
+  }
+
+  const existing = sessions.get(restaurantId);
+  if (existing && existing.status !== 'DISCONNECTED') {
+    return existing;
+  }
+
+  const session: Session = existing ?? {
+    restaurantId,
+    sock: null,
+    status: 'DISCONNECTED',
+    qr: null,
+    user: null,
+    knownJids: new Map(),
+  };
+  session.status = 'CONNECTING';
+  sessions.set(restaurantId, session);
+
+  const authPath = authPathFor(restaurantId);
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
-  const socketLogger = pino({ level: 'silent' });
-
-  sock = makeWASocket({
+  const sock = makeWASocket({
     auth: state,
-    logger: socketLogger,
+    logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
     browser: ['Koval Cloud', 'Chrome', '1.0.0'],
     syncFullHistory: false,
   });
+  session.sock = sock;
+  const tag = `[${restaurantId}]`;
 
   // Guardar credenciales ante cambios
   sock.ev.on('creds.update', saveCreds);
 
   // Manejador de actualizaciones de conexión
   sock.ev.on('connection.update', (update) => {
+    // Un socket reemplazado (logout/reconexión) no debe pisar el estado del actual
+    if (session.sock !== sock) return;
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      currentQRCode = qr;
-      currentStatus = 'QR_READY';
-      console.log('\n==================================================');
-      console.log('📱 ESCANEA ESTE CÓDIGO QR EN TU WHATSAPP:');
-      console.log('==================================================\n');
+      session.qr = qr;
+      session.status = 'QR_READY';
+      console.log(`\n📱 ${tag} Nuevo código QR generado (visible en el Dashboard > WhatsApp):`);
       qrcode.generate(qr, { small: true });
-      console.log('\n(También puedes consultarlo en el Dashboard: http://localhost:3030/dashboard/whatsapp)\n');
     }
 
     if (connection === 'close') {
-      currentQRCode = null;
-      connectedUser = null;
+      session.qr = null;
+      session.user = null;
+      session.status = 'DISCONNECTED';
 
       const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
       if (statusCode === DisconnectReason.loggedOut) {
-        currentStatus = 'DISCONNECTED';
-        console.log('🚫 Sesión cerrada (Logged Out). Limpiando credenciales...');
-        try {
-          if (fs.existsSync(authPath)) {
-            fs.rmSync(authPath, { recursive: true, force: true });
-          }
-        } catch (e) {
-          console.warn('Error limpiando auth folder:', e);
-        }
-      } else {
-        currentStatus = 'DISCONNECTED';
-        console.log(
-          `❌ Conexión de WhatsApp cerrada (${statusCode}). Reconectando en 3s...`
-        );
-        setTimeout(() => {
-          connectToWhatsApp();
-        }, 3000);
+        console.log(`🚫 ${tag} Sesión cerrada (Logged Out). Limpiando credenciales...`);
+        session.sock = null;
+        sessions.delete(restaurantId);
+        removeAuthFolder(restaurantId);
+        return;
       }
+
+      // Sin vincular (QR caducado sin escanear): no se reintenta para no dejar
+      // sockets ociosos; el dueño genera uno nuevo desde el Dashboard.
+      // restartRequired llega justo después de escanear el QR y sí debe reconectar.
+      const isPaired = Boolean(state.creds.me);
+      if (!isPaired && statusCode !== DisconnectReason.restartRequired) {
+        console.log(`⌛ ${tag} QR sin escanear (${statusCode}). Sesión detenida hasta que se solicite de nuevo.`);
+        session.sock = null;
+        return;
+      }
+
+      console.log(`❌ ${tag} Conexión cerrada (${statusCode}). Reconectando en 3s...`);
+      session.sock = null;
+      setTimeout(() => {
+        connectToWhatsApp(restaurantId).catch((e) => console.error(`${tag} Error reconectando:`, e));
+      }, 3000);
     } else if (connection === 'open') {
-      currentQRCode = null;
-      currentStatus = 'CONNECTED';
-      connectedUser = sock?.user || null;
-      console.log('\n✅ ¡Conexión exitosa a WhatsApp establecida!');
-      console.log(`🤖 Usuario: ${sock?.user?.name || sock?.user?.id || 'Bot Koval'}\n`);
+      session.qr = null;
+      session.status = 'CONNECTED';
+      session.user = sock.user || null;
+      console.log(`✅ ${tag} Conexión a WhatsApp establecida: ${sock.user?.name || sock.user?.id || 'Bot Koval'}`);
     }
   });
 
@@ -120,62 +168,85 @@ export async function connectToWhatsApp(): Promise<WASocket> {
       if (!messageText.trim()) continue;
 
       const senderNumber = remoteJid.split('@')[0];
-      knownJids.set(senderNumber, remoteJid);
+      session.knownJids.set(senderNumber, remoteJid);
       const pushName = msg.pushName || senderNumber;
 
-      console.log(`📩 Mensaje recibido de ${pushName} (${senderNumber}): "${messageText}"`);
+      console.log(`📩 ${tag} Mensaje recibido de ${pushName} (${senderNumber}): "${messageText}"`);
 
       try {
-        await sock?.sendPresenceUpdate('composing', remoteJid);
+        await sock.sendPresenceUpdate('composing', remoteJid);
 
         const messageId = msg.key.id || `baileys_${Date.now()}`;
         // Reenvío al adaptador de NestJS emulando Meta Cloud API
-        await sendToNestjs(remoteJid, messageText, messageId);
+        await sendToNestjs(restaurantId, remoteJid, messageText, messageId, pushName);
 
-        await sock?.sendPresenceUpdate('paused', remoteJid);
+        await sock.sendPresenceUpdate('paused', remoteJid);
       } catch (err) {
-        console.error(`Error procesando mensaje para ${remoteJid}:`, err);
+        console.error(`${tag} Error procesando mensaje para ${remoteJid}:`, err);
       }
     }
   });
 
-  return sock;
+  return session;
 }
 
-/**
- * Cierra la sesión de WhatsApp y limpia credenciales para permitir nuevo escaneo
- */
-export async function logoutWhatsApp(): Promise<void> {
-  console.log('🔄 Cerrando sesión de WhatsApp solicitada...');
-  try {
-    if (sock) {
-      try {
-        await sock.logout();
-      } catch {
-        sock.end(undefined);
-      }
-    }
-  } catch (e) {
-    console.warn('Error al cerrar socket:', e);
-  }
-
-  sock = null;
-  currentStatus = 'DISCONNECTED';
-  currentQRCode = null;
-  connectedUser = null;
-
-  const authPath = path.resolve(process.cwd(), AUTH_FOLDER);
+function removeAuthFolder(restaurantId: string) {
+  const authPath = authPathFor(restaurantId);
   try {
     if (fs.existsSync(authPath)) {
       fs.rmSync(authPath, { recursive: true, force: true });
     }
   } catch (e) {
-    console.warn('Error eliminando auth folder:', e);
+    console.warn(`[${restaurantId}] Error eliminando credenciales:`, e);
+  }
+}
+
+/**
+ * Cierra la sesión de WhatsApp de un restaurante, limpia sus credenciales
+ * y arranca una nueva para que pueda escanear otro QR
+ */
+export async function logoutWhatsApp(restaurantId: string): Promise<void> {
+  console.log(`🔄 [${restaurantId}] Cerrando sesión de WhatsApp solicitada...`);
+  const session = sessions.get(restaurantId);
+  const sock = session?.sock;
+  if (session) session.sock = null;
+  sessions.delete(restaurantId);
+
+  if (sock) {
+    try {
+      await sock.logout();
+    } catch {
+      sock.end(undefined);
+    }
   }
 
+  removeAuthFolder(restaurantId);
+
   setTimeout(() => {
-    connectToWhatsApp();
+    connectToWhatsApp(restaurantId).catch((e) => console.error(`[${restaurantId}] Error reconectando:`, e));
   }, 1000);
+}
+
+/**
+ * Al arrancar, reabre las sesiones ya vinculadas (carpetas con creds.json)
+ */
+export async function restoreSessions(): Promise<void> {
+  if (!fs.existsSync(AUTH_ROOT)) return;
+
+  const restaurantIds = fs
+    .readdirSync(AUTH_ROOT, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && isValidRestaurantId(d.name))
+    .filter((d) => fs.existsSync(path.join(AUTH_ROOT, d.name, 'creds.json')))
+    .map((d) => d.name);
+
+  console.log(`📡 Restaurando ${restaurantIds.length} sesión(es) de WhatsApp...`);
+  for (const restaurantId of restaurantIds) {
+    try {
+      await connectToWhatsApp(restaurantId);
+    } catch (e) {
+      console.error(`[${restaurantId}] Error restaurando sesión:`, e);
+    }
+  }
 }
 
 /**
@@ -187,10 +258,17 @@ export interface DocumentPayload {
   mimetype: string;
 }
 
-export async function sendWhatsAppMessage(target: string, text: string, document?: DocumentPayload) {
-  if (!sock || currentStatus !== 'CONNECTED') {
-    throw new Error('El servicio de WhatsApp no está conectado actualmente.');
+export async function sendWhatsAppMessage(
+  restaurantId: string,
+  target: string,
+  text: string,
+  document?: DocumentPayload,
+) {
+  const session = sessions.get(restaurantId);
+  if (!session?.sock || session.status !== 'CONNECTED') {
+    throw new Error('El WhatsApp de este restaurante no está conectado actualmente.');
   }
+  const { sock, knownJids } = session;
 
   let jid = target;
   if (!jid.includes('@')) {
@@ -199,7 +277,7 @@ export async function sendWhatsAppMessage(target: string, text: string, document
   }
 
   if (document) {
-    console.log(`📎 Enviando documento WhatsApp a [${jid}]: ${document.filename} (${document.buffer.length} bytes)`);
+    console.log(`📎 [${restaurantId}] Enviando documento a [${jid}]: ${document.filename} (${document.buffer.length} bytes)`);
     return await sock.sendMessage(jid, {
       document: document.buffer,
       fileName: document.filename,
@@ -208,6 +286,6 @@ export async function sendWhatsAppMessage(target: string, text: string, document
     });
   }
 
-  console.log(`📤 Enviando notificación WhatsApp a [${jid}]: "${text.replace(/\n/g, ' ')}"`);
+  console.log(`📤 [${restaurantId}] Enviando mensaje a [${jid}]: "${text.replace(/\n/g, ' ')}"`);
   return await sock.sendMessage(jid, { text });
 }

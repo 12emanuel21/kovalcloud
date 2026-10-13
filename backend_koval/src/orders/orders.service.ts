@@ -279,6 +279,7 @@ export class OrdersService {
   private async notifyCustomer(
     order: {
       customerPhone?: string | null;
+      restaurantId?: string | null;
       restaurant?: { whatsappPhoneId?: string | null; whatsappToken?: string | null } | null;
     },
     text: string,
@@ -288,10 +289,12 @@ export class OrdersService {
     const token = order.restaurant?.whatsappToken || process.env.META_ACCESS_TOKEN || '';
     const viaMeta = Boolean(phoneId && token);
 
+    if (!viaMeta && !order.restaurantId) return;
+
     try {
-      // Baileys no usa phoneId real, pero sendTextMessage exige uno no vacío
+      // Baileys: la sesión de WhatsApp Web se identifica por el restaurantId
       await this.metaWhatsAppService.sendTextMessage(
-        viaMeta ? phoneId : phoneId || 'baileys',
+        viaMeta ? phoneId : order.restaurantId!,
         token,
         order.customerPhone,
         text,

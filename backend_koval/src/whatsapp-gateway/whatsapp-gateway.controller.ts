@@ -1,11 +1,14 @@
 import {
   BadGatewayException,
+  BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpException,
   Logger,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
@@ -20,8 +23,9 @@ import { internalApiHeaders } from '../config/secrets';
  * Puente autenticado entre el dashboard y el microservicio Baileys.
  * El navegador nunca habla con Baileys ni conoce INTERNAL_API_KEY.
  *
- * La sesión de Baileys es única para toda la instalación, así que las acciones
- * que la controlan (QR, conectar, cerrar sesión, enviar) son solo de SUPERADMIN.
+ * Cada restaurante tiene su propia sesión de WhatsApp Web (multi-tenant).
+ * El OWNER controla la de su restaurante (QR, conectar, cerrar sesión, enviar);
+ * el SUPERADMIN puede operar la de cualquiera indicando ?restaurantId=.
  */
 @Controller('whatsapp-gateway')
 @UseGuards(JwtAuthGuard)
@@ -34,10 +38,30 @@ export class WhatsappGatewayController {
     return sendUrl.replace(/\/send\/?$/, '');
   }
 
-  private async callBaileys(path: string, method: 'GET' | 'POST', body?: unknown) {
+  /**
+   * Restaurante cuya sesión se opera: el del usuario, o el indicado por un SUPERADMIN.
+   * Un usuario de restaurante no puede pedir la sesión de otro.
+   */
+  private resolveRestaurantId(user: AuthenticatedUser, requested?: string): string {
+    if (user.role === Role.SUPERADMIN) {
+      if (!requested) {
+        throw new BadRequestException('Indica ?restaurantId= para operar la sesión de un restaurante');
+      }
+      return requested;
+    }
+    if (!user.restaurantId) {
+      throw new ForbiddenException('El usuario no pertenece a ningún restaurante');
+    }
+    if (requested && requested !== user.restaurantId) {
+      throw new ForbiddenException('No puedes acceder a la sesión de WhatsApp de otro restaurante');
+    }
+    return user.restaurantId;
+  }
+
+  private async callBaileys(restaurantId: string, path: string, method: 'GET' | 'POST', body?: unknown) {
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, {
+      response = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(restaurantId)}${path}`, {
         method,
         headers: internalApiHeaders(),
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -54,34 +78,38 @@ export class WhatsappGatewayController {
   }
 
   @Get('status')
-  async status(@CurrentUser() user: AuthenticatedUser) {
-    const data = await this.callBaileys('/status', 'GET');
-    // El QR permite vincular la sesión: solo lo ve el SUPERADMIN
-    if (user.role !== Role.SUPERADMIN) {
+  async status(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
+    const data = await this.callBaileys(this.resolveRestaurantId(user, restaurantId), '/status', 'GET');
+    // El QR permite vincular la sesión: solo lo ven el dueño y el SUPERADMIN
+    if (user.role !== Role.SUPERADMIN && user.role !== Role.OWNER) {
       return { ...data, qr: null };
     }
     return data;
   }
 
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles(Role.SUPERADMIN, Role.OWNER)
   @Post('connect')
-  connect() {
-    return this.callBaileys('/connect', 'POST');
+  connect(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
+    return this.callBaileys(this.resolveRestaurantId(user, restaurantId), '/connect', 'POST');
   }
 
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles(Role.SUPERADMIN, Role.OWNER)
   @Post('logout')
-  logout() {
-    return this.callBaileys('/logout', 'POST');
+  logout(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
+    return this.callBaileys(this.resolveRestaurantId(user, restaurantId), '/logout', 'POST');
   }
 
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles(Role.SUPERADMIN, Role.OWNER)
   @Post('send')
-  send(@Body() body: { phone?: string; message?: string; to?: string; text?: string }) {
-    return this.callBaileys('/send', 'POST', {
+  send(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: { phone?: string; message?: string; to?: string; text?: string },
+    @Query('restaurantId') restaurantId?: string,
+  ) {
+    return this.callBaileys(this.resolveRestaurantId(user, restaurantId), '/send', 'POST', {
       to: body.to || body.phone,
       text: body.text || body.message,
     });

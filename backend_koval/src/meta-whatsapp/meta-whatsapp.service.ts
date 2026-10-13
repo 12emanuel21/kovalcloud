@@ -17,6 +17,15 @@ import {
   toPrismaOrderType,
 } from './order-flow';
 
+/**
+ * Endpoint de envío de la sesión Baileys de un restaurante (multi-tenant).
+ * WHATSAPP_SERVICE_URL apunta a ".../send"; la sesión se elige por restaurantId.
+ */
+function baileysSendUrl(restaurantId: string): string {
+  const base = (process.env.WHATSAPP_SERVICE_URL || 'http://whatsapp_baileys:5000/send').replace(/\/send\/?$/, '');
+  return `${base}/sessions/${encodeURIComponent(restaurantId)}/send`;
+}
+
 /** Ventana para evitar pedidos duplicados si el cliente confirma dos veces */
 const DUPLICATE_ORDER_WINDOW_MS = 10 * 60 * 1000;
 
@@ -42,6 +51,7 @@ export class MetaWhatsAppService {
   /**
    * Envía un mensaje de texto oficial a WhatsApp utilizando Meta Graph API v22.0
    * @param phoneNumberId ID del número de teléfono del restaurante en Meta Cloud API
+   *        (con Baileys: el restaurantId, que identifica su sesión de WhatsApp Web)
    * @param token Token de acceso permanente del restaurante
    * @param to Número de WhatsApp del destinatario (formato internacional)
    * @param body Texto del mensaje a enviar
@@ -62,7 +72,7 @@ export class MetaWhatsAppService {
 
     // --- Baileys: se envía el PDF en Base64 ---
     if (isBaileys) {
-      const whatsappServiceUrl = process.env.WHATSAPP_SERVICE_URL || 'http://whatsapp_baileys:5000/send';
+      const whatsappServiceUrl = baileysSendUrl(phoneNumberId);
       this.logger.log(`📤 [Baileys] Enviando texto a [${cleanTo}]...`);
       try {
         const response = await fetch(whatsappServiceUrl, {
@@ -119,7 +129,7 @@ export class MetaWhatsAppService {
 
   /**
    * Envía un documento (PDF, etc.) a WhatsApp utilizando Meta Graph API v22.0
-   * @param phoneId ID del número de teléfono en Meta Cloud API
+   * @param phoneId ID del número de teléfono en Meta Cloud API (con Baileys: el restaurantId)
    * @param token Token de acceso permanente
    * @param to Número de WhatsApp del destinatario
    * @param documentUrl URL pública del documento
@@ -150,7 +160,7 @@ export class MetaWhatsAppService {
         const fs = require('fs');
         if (fs.existsSync(filePathOrUrl)) {
           const documentBase64 = fs.readFileSync(filePathOrUrl).toString('base64');
-          const whatsappServiceUrl = process.env.WHATSAPP_SERVICE_URL || 'http://whatsapp_baileys:5000/send';
+          const whatsappServiceUrl = baileysSendUrl(phoneId);
           this.logger.log(`📤 [Baileys] Enviando PDF a [${cleanTo}]...`);
           try {
               const response = await fetch(whatsappServiceUrl, {
@@ -388,9 +398,10 @@ export class MetaWhatsAppService {
       const restaurant = await this.prisma.restaurant.findFirst({
         where: trustedRestaurantIds
           ? {
-              // Meta: solo restaurantes con firma verificada, identificados por el payload firmado
+              // Meta: solo restaurantes con firma verificada, identificados por el payload firmado.
+              // Baileys: el restaurante dueño de la sesión (x-restaurant-id con clave interna).
               id: { in: trustedRestaurantIds },
-              ...(phoneNumberId ? { whatsappPhoneId: phoneNumberId } : {}),
+              ...(phoneNumberId && !isBaileys ? { whatsappPhoneId: phoneNumberId } : {}),
             }
           : { OR: searchConditions },
       });
@@ -402,11 +413,13 @@ export class MetaWhatsAppService {
         return;
       }
 
-      // 2. Validar que el restaurante tenga configuradas sus credenciales oficiales de Meta
-      const targetToken = restaurant.whatsappToken;
-      const targetPhoneId = restaurant.whatsappPhoneId || phoneNumberId;
+      // 2. Validar que el restaurante tenga configuradas sus credenciales oficiales de Meta.
+      //    Baileys no las necesita: responde por la sesión del restaurante, cuya llave
+      //    (restaurantId) viaja en targetPhoneId.
+      const targetToken = isBaileys ? '' : restaurant.whatsappToken || '';
+      const targetPhoneId = isBaileys ? restaurant.id : restaurant.whatsappPhoneId || phoneNumberId;
 
-      if (!targetToken || !targetPhoneId) {
+      if (!isBaileys && (!targetToken || !targetPhoneId)) {
         this.logger.warn(
           `⚠️ [Multi-Tenant] El restaurante "${restaurant.name}" (${restaurant.slug}) no tiene configurado whatsappToken o whatsappPhoneId en el Dashboard. Abortando despacho.`,
         );

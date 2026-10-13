@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { QRCodeCanvas } from 'qrcode.react';
 
@@ -180,10 +180,15 @@ export default function WhatsAppDashboardPage() {
     }
   };
 
+  // Cada restaurante tiene su propia sesión de WhatsApp Web; el backend valida que sea la del usuario
+  const sessionQuery = restaurantId ? `?restaurantId=${encodeURIComponent(restaurantId)}` : '';
+  // La sesión se inicia sola la primera vez que se abre la pestaña sin sesión activa
+  const autoConnectRequested = useRef(false);
+
   // 2. Consultar estado del microservicio Baileys
   const fetchBaileysStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${WHATSAPP_GATEWAY_URL}/status`, {
+      const res = await fetch(`${WHATSAPP_GATEWAY_URL}/status${sessionQuery}`, {
         cache: 'no-store',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -195,13 +200,21 @@ export default function WhatsAppDashboardPage() {
       setQrCode(data.qr || null);
       setUser(data.user || null);
       setIsServiceOnline(true);
+
+      if (data.status === 'DISCONNECTED' && !autoConnectRequested.current) {
+        autoConnectRequested.current = true;
+        fetch(`${WHATSAPP_GATEWAY_URL}/connect${sessionQuery}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        }).catch((err) => console.error(err));
+      }
     } catch {
       setIsServiceOnline(false);
       setStatus('DISCONNECTED');
     } finally {
       setBaileysLoading(false);
     }
-  }, [token]);
+  }, [token, sessionQuery]);
 
   useEffect(() => {
     if (activeTab === 'baileys') {
@@ -215,7 +228,7 @@ export default function WhatsAppDashboardPage() {
     if (!confirm('¿Estás seguro de que deseas cerrar la sesión de WhatsApp Socket?')) return;
     setIsDisconnecting(true);
     try {
-      await fetch(`${WHATSAPP_GATEWAY_URL}/logout`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+      await fetch(`${WHATSAPP_GATEWAY_URL}/logout${sessionQuery}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
       await fetchBaileysStatus();
     } catch (err) {
       console.error(err);
@@ -226,7 +239,7 @@ export default function WhatsAppDashboardPage() {
 
   const handleConnect = async () => {
     try {
-      await fetch(`${WHATSAPP_GATEWAY_URL}/connect`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+      await fetch(`${WHATSAPP_GATEWAY_URL}/connect${sessionQuery}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
       await fetchBaileysStatus();
     } catch (err) {
       console.error(err);
@@ -241,7 +254,7 @@ export default function WhatsAppDashboardPage() {
     setTestFeedback(null);
 
     try {
-      const res = await fetch(`${WHATSAPP_GATEWAY_URL}/send`, {
+      const res = await fetch(`${WHATSAPP_GATEWAY_URL}/send${sessionQuery}`, {
         method: 'POST',
         headers: {
         'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -779,49 +792,37 @@ export default function WhatsAppDashboardPage() {
             </div>
           )}
 
-          {/* El backend solo envía el QR al SUPERADMIN; el resto de roles lo recibe en null */}
-          {isServiceOnline && status === 'QR_READY' && !qrCode && (
-            <div className="bg-amber-500/5 border border-amber-500/30 rounded-3xl p-8 md:p-10 text-center space-y-4 max-w-xl mx-auto shadow-xl">
-              <div className="h-14 w-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="4" y="11" width="16" height="10" rx="2" />
-                  <path d="M8 11V7a4 4 0 018 0v4" />
-                </svg>
-              </div>
-              <div className="space-y-2">
-                <span className="text-xs font-bold text-amber-400 uppercase tracking-widest">
-                  Acción restringida
-                </span>
-                <h3 className="text-base font-bold text-white">
-                  Solo el administrador de KovalCloud puede vincular el número de WhatsApp por QR para este local.
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Contacta al equipo de KovalCloud para completar la vinculación.
-                </p>
-              </div>
-            </div>
-          )}
-
           {isServiceOnline && status !== 'CONNECTED' && status !== 'QR_READY' && (
             <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-10 text-center space-y-4 max-w-xl mx-auto">
-              <div className="h-14 w-14 mx-auto rounded-2xl bg-slate-800 flex items-center justify-center text-slate-400">
-                <svg className="animate-spin h-6 w-6 text-emerald-400" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-base font-bold text-white">Iniciando sesión de WhatsApp Socket...</h3>
-                <p className="text-xs text-slate-400">
-                  El código QR aparecerá automáticamente en breve.
-                </p>
-              </div>
+              {status === 'CONNECTING' ? (
+                <>
+                  <div className="h-14 w-14 mx-auto rounded-2xl bg-slate-800 flex items-center justify-center text-slate-400">
+                    <svg className="animate-spin h-6 w-6 text-emerald-400" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-white">Iniciando sesión de WhatsApp Socket...</h3>
+                    <p className="text-xs text-slate-400">
+                      El código QR aparecerá automáticamente en breve.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-1">
+                  <h3 className="text-base font-bold text-white">WhatsApp no vinculado</h3>
+                  <p className="text-xs text-slate-400">
+                    No hay una sesión activa o el código QR expiró sin escanearse. Genera uno nuevo para vincular el número de este local.
+                  </p>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={handleConnect}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs transition cursor-pointer"
               >
-                Forzar Inicialización
+                {status === 'CONNECTING' ? 'Forzar Inicialización' : 'Generar Código QR'}
               </button>
             </div>
           )}
