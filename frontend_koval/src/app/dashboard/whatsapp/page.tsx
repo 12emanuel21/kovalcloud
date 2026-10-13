@@ -779,6 +779,29 @@ export default function WhatsAppDashboardPage() {
             </div>
           )}
 
+          {/* El backend solo envía el QR al SUPERADMIN; el resto de roles lo recibe en null */}
+          {isServiceOnline && status === 'QR_READY' && !qrCode && (
+            <div className="bg-amber-500/5 border border-amber-500/30 rounded-3xl p-8 md:p-10 text-center space-y-4 max-w-xl mx-auto shadow-xl">
+              <div className="h-14 w-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="4" y="11" width="16" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 018 0v4" />
+                </svg>
+              </div>
+              <div className="space-y-2">
+                <span className="text-xs font-bold text-amber-400 uppercase tracking-widest">
+                  Acción restringida
+                </span>
+                <h3 className="text-base font-bold text-white">
+                  Solo el administrador de KovalCloud puede vincular el número de WhatsApp por QR para este local.
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Contacta al equipo de KovalCloud para completar la vinculación.
+                </p>
+              </div>
+            </div>
+          )}
+
           {isServiceOnline && status !== 'CONNECTED' && status !== 'QR_READY' && (
             <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-10 text-center space-y-4 max-w-xl mx-auto">
               <div className="h-14 w-14 mx-auto rounded-2xl bg-slate-800 flex items-center justify-center text-slate-400">
