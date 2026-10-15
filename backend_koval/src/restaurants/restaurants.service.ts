@@ -34,8 +34,10 @@ export class RestaurantsService {
           where: { deletedAt: null },
           orderBy: { order: 'asc' },
           include: {
+            // Los agotados (isAvailable=false) se muestran en la carta marcados como "Agotado";
+            // solo se ocultan los borrados. POST /orders sigue rechazando platos agotados.
             items: {
-              where: { isAvailable: true, deletedAt: null },
+              where: { deletedAt: null },
             },
           },
         },

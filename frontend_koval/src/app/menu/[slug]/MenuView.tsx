@@ -33,6 +33,7 @@ export const MenuView: React.FC<{ restaurant: RestaurantData, tableNumber?: stri
   const [addedItemIds, setAddedItemIds] = useState<{ [key: string]: boolean }>({});
 
   const handleAddItem = (item: MenuItem) => {
+    if (!item.isAvailable) return;
     addItem({
       id: item.id,
       name: item.name,
@@ -107,13 +108,24 @@ export const MenuView: React.FC<{ restaurant: RestaurantData, tableNumber?: stri
                   {category.items.map((item) => {
                     const quantityInCart = getItemCartQuantity(item.id);
                     const isJustAdded = addedItemIds[item.id];
+                    const isSoldOut = !item.isAvailable;
 
                     return (
                       <article
                         key={item.id}
-                        className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-4 flex justify-between items-start gap-4 hover:border-slate-700 transition shadow-sm"
+                        aria-disabled={isSoldOut}
+                        className={`relative bg-slate-900/80 border border-slate-800/80 rounded-2xl p-4 flex justify-between items-start gap-4 transition shadow-sm ${
+                          isSoldOut ? '' : 'hover:border-slate-700'
+                        }`}
                       >
-                        <div className="space-y-1.5 flex-1 min-w-0">
+                        {/* Fuera del contenido atenuado para que conserve su color */}
+                        {isSoldOut && (
+                          <span className="absolute -top-2.5 right-4 bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md shadow-lg shadow-rose-950/50 ring-1 ring-rose-400/40">
+                            Agotado
+                          </span>
+                        )}
+
+                        <div className={`space-y-1.5 flex-1 min-w-0 ${isSoldOut ? 'opacity-50 grayscale' : ''}`}>
                           <div className="flex items-center gap-2">
                             <h3 className="font-bold text-white text-sm md:text-base leading-snug">
                               {item.name}
@@ -131,7 +143,11 @@ export const MenuView: React.FC<{ restaurant: RestaurantData, tableNumber?: stri
                             </p>
                           )}
 
-                          <p className="text-emerald-400 font-extrabold text-sm pt-1 font-mono">
+                          <p
+                            className={`font-extrabold text-sm pt-1 font-mono ${
+                              isSoldOut ? 'text-slate-500 line-through' : 'text-emerald-400'
+                            }`}
+                          >
                             ${item.price.toLocaleString('es-CO')} COP
                           </p>
                         </div>
@@ -139,26 +155,32 @@ export const MenuView: React.FC<{ restaurant: RestaurantData, tableNumber?: stri
                         <button
                           type="button"
                           onClick={() => handleAddItem(item)}
-                          className={`shrink-0 text-xs font-bold px-3.5 py-2 rounded-xl transition shadow-md active:scale-95 flex items-center gap-1.5 ${
-                            isJustAdded
-                              ? 'bg-emerald-400 text-slate-950 scale-105'
-                              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50'
+                          disabled={isSoldOut}
+                          aria-label={isSoldOut ? `${item.name} agotado` : `Agregar ${item.name}`}
+                          className={`shrink-0 text-xs font-bold px-3.5 py-2 rounded-xl transition shadow-md flex items-center gap-1.5 ${
+                            isSoldOut
+                              ? 'bg-slate-800 text-slate-500 cursor-not-allowed shadow-none opacity-50 grayscale'
+                              : isJustAdded
+                              ? 'bg-emerald-400 text-slate-950 scale-105 active:scale-95'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/50 active:scale-95'
                           }`}
                         >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="h-3.5 w-3.5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M12 5v14" />
-                            <path d="M5 12h14" />
-                          </svg>
-                          <span>{isJustAdded ? '¡Listo!' : 'Agregar'}</span>
+                          {!isSoldOut && (
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              className="h-3.5 w-3.5"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M12 5v14" />
+                              <path d="M5 12h14" />
+                            </svg>
+                          )}
+                          <span>{isSoldOut ? 'Sin stock' : isJustAdded ? '¡Listo!' : 'Agregar'}</span>
                         </button>
                       </article>
                     );
