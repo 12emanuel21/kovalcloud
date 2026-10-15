@@ -37,6 +37,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user) {
       throw new UnauthorizedException('Usuario no autorizado o no encontrado');
     }
+    // Desactivación en tiempo real: un token aún vigente deja de servir en la siguiente petición
+    if (!user.isActive) {
+      throw new UnauthorizedException('Tu acceso al sistema fue desactivado');
+    }
 
     return sanitizeUser(user);
   }

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, use, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from '@/context/AuthContext';
 import PrepareActions from '@/components/orders/PrepareActions';
 import {
   ChefHat,
@@ -138,7 +139,8 @@ const ORDER_TYPE_DISPLAY: Record<OrderType, { label: (o: Order) => string; icon:
 
 export default function KitchenPage({ params }: { params: Promise<{ restaurantId: string }> }) {
   const { restaurantId } = use(params);
-  
+  const { logout } = useAuth();
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [isConnectedWs, setIsConnectedWs] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
@@ -205,6 +207,9 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
       setIsConnectedWs(false);
     });
 
+    // El backend expulsa el socket si el acceso fue desactivado (Ajustes > Equipo): cerrar sesión
+    socket.on('unauthorized', () => logout());
+
     const handleNewOrder = (newOrder: Order) => {
       if (newOrder.restaurantId === restaurantId && (newOrder.status === 'PENDING' || newOrder.status === 'PREPARING')) {
         playOrderChime();
@@ -236,7 +241,7 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
     return () => {
       socket.disconnect();
     };
-  }, [restaurantId]);
+  }, [restaurantId, logout]);
 
   // estimatedMinutes: al pasar a PREPARING el backend avisa al cliente por WhatsApp con ese tiempo
   const updateStatus = async (orderId: string, status: OrderStatus, estimatedMinutes?: number) => {

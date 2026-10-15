@@ -5,6 +5,7 @@ import {
   Injectable,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -102,6 +103,12 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Credenciales incorrectas (correo o contraseña no válidos)');
+    }
+
+    // Cuenta revocada por el dueño (Ajustes > Equipo). Tras validar la contraseña para no
+    // revelar a terceros si el correo existe.
+    if (!user.isActive) {
+      throw new ForbiddenException('Tu acceso al sistema fue desactivado. Contacta al administrador del local.');
     }
 
     // 3. Generar JWT firmado (incluye el tenant para filtrar datos por restaurante)

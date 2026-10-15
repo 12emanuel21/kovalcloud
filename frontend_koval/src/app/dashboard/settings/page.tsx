@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import Image from 'next/image';
+import { TeamSection } from './TeamSection';
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
 
@@ -28,14 +29,6 @@ interface RestaurantData {
   };
 }
 
-interface TeamMember {
-  id: string;
-  name: string;
-  email: string;
-  role: 'SUPERADMIN' | 'OWNER' | 'SUPERVISOR' | 'STAFF';
-  status: 'ACTIVE' | 'INVITED';
-}
-
 export default function SettingsPage() {
   const { restaurantId , token} = useAuth();
 
@@ -54,11 +47,6 @@ export default function SettingsPage() {
   const [ownerEmail, setOwnerEmail] = useState<string>('');
   const [planName, setPlanName] = useState<string>('Plan Pro');
 
-  // Estado del Módulo de Equipo
-  const [inviteEmail, setInviteEmail] = useState<string>('');
-  const [inviteRole, setInviteRole] = useState<'SUPERVISOR' | 'STAFF'>('STAFF');
-  const [showInviteModal, setShowInviteModal] = useState<boolean>(false);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
 
   
   // 2FA States
@@ -126,31 +114,6 @@ export default function SettingsPage() {
       const email = data.owner?.email || 'admin@kovalcloud.com';
       setOwnerEmail(email);
       if (data.plan?.name) setPlanName(data.plan.name);
-
-      // Inicializar lista de equipo con el dueño
-      setTeamMembers([
-        {
-          id: '1',
-          name: 'Propietario Principal',
-          email: email,
-          role: 'OWNER',
-          status: 'ACTIVE',
-        },
-        {
-          id: '2',
-          name: 'Supervisor de Turno',
-          email: 'supervisor@pizzeria.com',
-          role: 'SUPERVISOR',
-          status: 'ACTIVE',
-        },
-        {
-          id: '3',
-          name: 'Cajero / Mesero',
-          email: 'caja@pizzeria.com',
-          role: 'STAFF',
-          status: 'ACTIVE',
-        },
-      ]);
     } catch (err) {
       console.error(err);
       setFeedback({ type: 'error', text: 'Error al conectar con la API de configuración.' });
@@ -209,25 +172,6 @@ export default function SettingsPage() {
     }
   };
 
-  // Simular invitación de miembro
-  const handleInviteMember = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail.trim()) return;
-
-    const newMember: TeamMember = {
-      id: String(Date.now()),
-      name: inviteEmail.split('@')[0],
-      email: inviteEmail.trim(),
-      role: inviteRole,
-      status: 'INVITED',
-    };
-
-    setTeamMembers((prev) => [...prev, newMember]);
-    setInviteEmail('');
-    setShowInviteModal(false);
-    setFeedback({ type: 'success', text: `Invitación enviada a ${newMember.email}` });
-    setTimeout(() => setFeedback(null), 4000);
-  };
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] gap-3">
@@ -425,169 +369,8 @@ export default function SettingsPage() {
         </section>
       </form>
 
-      {/* SECCIÓN 2: GESTIÓN DE EQUIPO & ROLES */}
-      <section className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl backdrop-blur-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-sm border border-blue-500/20">
-              👥
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white">Gestión de Equipo & Roles</h2>
-              <p className="text-xs text-slate-400">Control de accesos y permisos para administradores, supervisores y personal</p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowInviteModal(!showInviteModal)}
-            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer self-start sm:self-auto"
-          >
-            <span>+ Invitar Miembro</span>
-          </button>
-        </div>
-
-        {/* Modal/Formulario de Invitación */}
-        {showInviteModal && (
-          <form onSubmit={handleInviteMember} className="p-4 rounded-2xl bg-slate-950/80 border border-blue-500/30 space-y-4 animate-in fade-in duration-200">
-            <h4 className="text-xs font-bold text-blue-400 uppercase tracking-wider">
-              Invitar Nuevo Usuario al Local
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-              <div className="sm:col-span-2">
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                  Correo Electrónico
-                </label>
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="colaborador@restaurante.com"
-                  required
-                  className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                  Rol Asignado
-                </label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as any)}
-                  className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                >
-                  <option value="SUPERVISOR">Supervisor / Cajero</option>
-                  <option value="STAFF">Mesero / Empleado</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowInviteModal(false)}
-                className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white transition cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition cursor-pointer"
-              >
-                Enviar Invitación
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* Lista de Miembros */}
-        <div className="space-y-3">
-          <div className="overflow-hidden border border-slate-800/80 rounded-2xl bg-slate-950/40">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/60 border-b border-slate-800 text-slate-400">
-                <tr>
-                  <th className="p-3.5 font-semibold">Usuario / Nombre</th>
-                  <th className="p-3.5 font-semibold">Correo</th>
-                  <th className="p-3.5 font-semibold">Rol</th>
-                  <th className="p-3.5 font-semibold text-right">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {teamMembers.map((member) => (
-                  <tr key={member.id} className="hover:bg-slate-900/40 transition">
-                    <td className="p-3.5 font-medium text-white flex items-center gap-2">
-                      <div className="h-7 w-7 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center font-bold text-xs uppercase">
-                        {member.name.charAt(0)}
-                      </div>
-                      <span>{member.name}</span>
-                    </td>
-                    <td className="p-3.5 text-slate-400 font-mono text-[11px]">{member.email}</td>
-                    <td className="p-3.5">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                          member.role === 'OWNER'
-                            ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
-                            : member.role === 'SUPERVISOR'
-                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
-                            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                        }`}
-                      >
-                        {member.role === 'OWNER'
-                          ? '👑 Dueño / Admin'
-                          : member.role === 'SUPERVISOR'
-                          ? '⚡ Supervisor'
-                          : '👨‍🍳 Empleado'}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-right">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
-                          member.status === 'ACTIVE'
-                            ? 'bg-emerald-500/10 text-emerald-400'
-                            : 'bg-amber-500/10 text-amber-400'
-                        }`}
-                      >
-                        {member.status === 'ACTIVE' ? 'Activo' : 'Pendiente'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Guía de Permisos */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-          <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/80 space-y-1">
-            <span className="text-[11px] font-bold text-purple-400 flex items-center gap-1">
-              <span>👑 Dueño / Admin</span>
-            </span>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Acceso total a finanzas, facturación, WhatsApp, Botpress y administración de usuarios.
-            </p>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/80 space-y-1">
-            <span className="text-[11px] font-bold text-blue-400 flex items-center gap-1">
-              <span>⚡ Supervisor</span>
-            </span>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Gestión de pedidos en vivo, actualización de precios, productos agotados y reportes diarios.
-            </p>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/80 space-y-1">
-            <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
-              <span>👨‍🍳 Empleado / Mesero</span>
-            </span>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Visualización de comandas en cocina, cambio de estados de pedidos y confirmación de entregas.
-            </p>
-          </div>
-        </div>
-      </section>
+      {/* SECCIÓN 2: EQUIPO DE COCINA (cuentas KITCHEN, acceso revocable) */}
+      <TeamSection />
 
       {/* SECCIÓN 3: INFORMACIÓN DE LA CUENTA */}
       <section className="bg-slate-900/40 border border-slate-800/80 rounded-3xl p-6 space-y-4">

@@ -59,9 +59,10 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        select: { id: true, role: true, restaurantId: true },
+        select: { id: true, role: true, restaurantId: true, isActive: true },
       });
-      return user;
+      if (!user?.isActive) return null;
+      return { id: user.id, role: user.role, restaurantId: user.restaurantId };
     } catch {
       return null;
     }
@@ -109,6 +110,16 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.join(room);
     this.logger.log(`🏢 Cliente ${client.id} suscrito a sala: ${room}`);
     return { event: 'joined_restaurant', room };
+  }
+
+  /** Cierra en el acto los WebSockets de un usuario (p. ej. al desactivar su acceso) */
+  disconnectUser(userId: string) {
+    if (!this.server) return;
+    for (const client of this.server.sockets.sockets.values()) {
+      if ((client.data.user as SocketUser | undefined)?.id === userId) {
+        this.reject(client, 'Tu acceso al sistema fue desactivado');
+      }
+    }
   }
 
   /** Emite a la sala completa del restaurante y, sin importes, a la sala de cocina */

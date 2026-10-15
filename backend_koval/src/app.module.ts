@@ -12,6 +12,7 @@ import { MetaWhatsAppModule } from './meta-whatsapp/meta-whatsapp.module';
 import { AiModule } from './ai/ai.module';
 import { WhatsappGatewayModule } from './whatsapp-gateway/whatsapp-gateway.module';
 import { AdminModule } from './admin/admin.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { AdminModule } from './admin/admin.module';
     AiModule,
     WhatsappGatewayModule,
     AdminModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
