@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { ShiftExtensionPanel } from '@/components/orders/ShiftExtensionPanel';
 import { io, Socket } from 'socket.io-client';
 import PrepareActions from '@/components/orders/PrepareActions';
 
@@ -502,6 +503,9 @@ export default function OrdersPage() {
           </button>
         </div>
       </div>
+
+      {/* Turno / Horario: prórroga rápida (solo OWNER) */}
+      <ShiftExtensionPanel />
 
       {/* Error Banner */}
       {error && (

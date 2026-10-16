@@ -199,6 +199,20 @@ export class RestaurantsService {
     });
   }
 
+  /**
+   * Prórroga de horario: abre el local durante `minutes` minutos desde ahora,
+   * por encima del horario y del cierre de emergencia. null/0 la cancela.
+   */
+  async extendHours(id: string, minutes: number | null | undefined) {
+    await this.findOne(id);
+    const extendedUntil = minutes ? new Date(Date.now() + minutes * 60_000) : null;
+    return this.prisma.restaurant.update({
+      where: { id },
+      data: { extendedUntil },
+      select: { id: true, extendedUntil: true },
+    });
+  }
+
   async remove(id: string) {
     await this.findOne(id);
     const deleted = await this.prisma.restaurant.delete({

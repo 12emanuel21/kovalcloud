@@ -112,11 +112,24 @@ export function isWithinBusinessHours(hours: BusinessHours | null, now = new Dat
   return openToday || openFromYesterday;
 }
 
-/** Estado de atención del local: cierre de emergencia o fuera de horario */
+/** ¿Hay una prórroga de horario vigente? (extendedUntil en el futuro) */
+export function hasActiveExtension(extendedUntil: Date | string | null | undefined, now = new Date()): boolean {
+  if (!extendedUntil) return false;
+  const until = new Date(extendedUntil).getTime();
+  return Number.isFinite(until) && until > now.getTime();
+}
+
+/**
+ * Estado de atención del local.
+ * 1. Prórroga vigente (extendedUntil > ahora): ABIERTO, ignora el horario y el cierre de emergencia.
+ * 2. Si no: cerrado por botón de emergencia o por estar fuera de horario.
+ * Una prórroga vencida se ignora (equivale a null).
+ */
 export function isRestaurantClosed(
-  restaurant: { isTemporarilyClosed?: boolean | null; businessHours?: unknown },
+  restaurant: { isTemporarilyClosed?: boolean | null; businessHours?: unknown; extendedUntil?: Date | string | null },
   now = new Date(),
 ): boolean {
+  if (hasActiveExtension(restaurant.extendedUntil, now)) return false;
   return Boolean(restaurant.isTemporarilyClosed) || !isWithinBusinessHours(readBusinessHours(restaurant.businessHours), now);
 }
 

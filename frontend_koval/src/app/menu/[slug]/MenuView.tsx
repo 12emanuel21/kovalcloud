@@ -30,6 +30,7 @@ export interface RestaurantData {
   businessHours?: BusinessHours | null;
   isTemporarilyClosed?: boolean;
   closedMessage?: string | null;
+  extendedUntil?: string | null;
   categories: Category[];
 }
 

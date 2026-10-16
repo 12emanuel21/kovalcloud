@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   buildClosedMessage,
+  hasActiveExtension,
   isRestaurantClosed,
   isWithinBusinessHours,
   parseBusinessHours,
@@ -75,5 +76,31 @@ describe('isWithinBusinessHours / isRestaurantClosed (zona America/Bogota, UTC-5
   it('mensaje de cierre: el del dueño o uno con el horario', () => {
     expect(buildClosedMessage({ name: 'X', closedMessage: '  Volvemos mañana  ' })).toBe('Volvemos mañana');
     expect(buildClosedMessage({ name: 'X', businessHours: hours })).toContain('Mié 11:00–22:00');
+  });
+});
+
+describe('prórroga de horario (extendedUntil)', () => {
+  const now = new Date('2026-10-14T23:30:00-05:00'); // miércoles 23:30 en Bogotá
+  const hours = { wednesday: [{ open: '11:00', close: '22:00' }] };
+  const in30 = new Date(now.getTime() + 30 * 60_000);
+  const past = new Date(now.getTime() - 60_000);
+
+  it('una prórroga vigente abre el local aunque esté fuera de horario', () => {
+    expect(isRestaurantClosed({ businessHours: hours }, now)).toBe(true);
+    expect(isRestaurantClosed({ businessHours: hours, extendedUntil: in30 }, now)).toBe(false);
+  });
+
+  it('la prórroga gana incluso sobre el cierre de emergencia', () => {
+    expect(isRestaurantClosed({ isTemporarilyClosed: true, businessHours: hours, extendedUntil: in30 }, now)).toBe(false);
+  });
+
+  it('una prórroga vencida se ignora (como si fuera null)', () => {
+    expect(isRestaurantClosed({ businessHours: hours, extendedUntil: past }, now)).toBe(true);
+    expect(hasActiveExtension(past, now)).toBe(false);
+  });
+
+  it('acepta la fecha como string ISO (así llega desde el JSON de la API)', () => {
+    expect(hasActiveExtension(in30.toISOString(), now)).toBe(true);
+    expect(hasActiveExtension('no-es-fecha', now)).toBe(false);
   });
 });

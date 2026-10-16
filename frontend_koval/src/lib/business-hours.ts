@@ -64,11 +64,36 @@ export function isWithinBusinessHours(
   return openToday || openFromYesterday;
 }
 
+/** ¿Hay una prórroga de horario vigente? (extendedUntil en el futuro) */
+export function hasActiveExtension(extendedUntil: string | Date | null | undefined, now = new Date()): boolean {
+  if (!extendedUntil) return false;
+  const until = new Date(extendedUntil).getTime();
+  return Number.isFinite(until) && until > now.getTime();
+}
+
+/**
+ * Prórroga vigente = ABIERTO (gana sobre el horario y el cierre de emergencia).
+ * Si no hay prórroga (o ya venció): cerrado por emergencia o por estar fuera de horario.
+ */
 export function isRestaurantClosed(
-  restaurant: { isTemporarilyClosed?: boolean | null; businessHours?: BusinessHours | null },
+  restaurant: {
+    isTemporarilyClosed?: boolean | null;
+    businessHours?: BusinessHours | null;
+    extendedUntil?: string | Date | null;
+  },
   now = new Date(),
 ): boolean {
+  if (hasActiveExtension(restaurant.extendedUntil, now)) return false;
   return Boolean(restaurant.isTemporarilyClosed) || !isWithinBusinessHours(restaurant.businessHours, now);
+}
+
+/** Hora en la zona del local, ej. "12:30 a. m." */
+export function formatLocalTime(date: string | Date): string {
+  return new Date(date).toLocaleTimeString('es-CO', {
+    timeZone: RESTAURANT_TIMEZONE,
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 /** Horario en texto ("Lun 11:00–22:00 · Mar cerrado · ...") */

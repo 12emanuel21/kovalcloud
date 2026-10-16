@@ -3,13 +3,14 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { TenantGuard } from '../auth/guards/tenant.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantParam } from '../auth/decorators/tenant-param.decorator';
-import { UseGuards, Controller, Get, Post, Body, Patch, Param, Delete , UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { UseGuards, Controller, Get, Post, Body, Patch, Param, Delete , UseInterceptors, UploadedFile, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
 import { RestaurantsService } from './restaurants.service';
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
+import { ExtendHoursDto } from './dto/extend-hours.dto';
 
 @Controller('restaurants')
 export class RestaurantsController {
@@ -58,6 +59,16 @@ export class RestaurantsController {
   @Patch(':id/config')
   updateConfig(@Param('id') id: string, @Body() dto: UpdateRestaurantConfigDto) {
     return this.restaurantsService.updateConfig(id, dto);
+  }
+
+  // Prórroga de horario (botones rápidos del Kanban): solo el OWNER del local o el SUPERADMIN
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(Role.OWNER, Role.SUPERADMIN)
+  @TenantParam('id')
+  @Post(':id/extend-hours')
+  @HttpCode(HttpStatus.OK)
+  extendHours(@Param('id') id: string, @Body() dto: ExtendHoursDto) {
+    return this.restaurantsService.extendHours(id, dto.minutes);
   }
 
   @UseGuards(JwtAuthGuard, TenantGuard)
