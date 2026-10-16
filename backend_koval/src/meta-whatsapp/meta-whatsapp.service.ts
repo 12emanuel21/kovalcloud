@@ -7,12 +7,14 @@ import { OrdersGateway } from '../orders/orders.gateway';
 import { OrderStatus } from '@prisma/client';
 import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
 import { internalApiHeaders } from '../config/secrets';
+import { buildClosedMessage, isRestaurantClosed } from '../restaurants/business-hours';
 import {
   buildConfirmationMessage,
   buildOrderLines,
   buildOrderNotes,
   buildRegisteredMessage,
   hasRequiredData,
+  isReservation,
   orderTotal,
   toPrismaOrderType,
 } from './order-flow';
@@ -426,6 +428,14 @@ export class MetaWhatsAppService {
         return;
       }
 
+      // 2.5. Escudo de horario: con el local cerrado (botón de emergencia o fuera de horario)
+      //      no se transcribe audio ni se llama a la IA; se responde con el mensaje de cierre.
+      if (isRestaurantClosed(restaurant)) {
+        this.logger.log(`🌙 [${restaurant.name}] Local cerrado: respuesta estática a [${senderNumber}] sin IA`);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, buildClosedMessage(restaurant), isBaileys);
+        return;
+      }
+
       // 3. Extraer el texto del mensaje según su tipo
       let messageText = '';
       if (incomingMsg.text?.body) {
@@ -621,6 +631,11 @@ export class MetaWhatsAppService {
             this.ordersGateway.emitNewOrder(restaurant.id, newOrder);
 
             finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, newOrder.id)}`.trim();
+
+            // Cobro: datos de pago del local (Nequi, etc.) para que el cliente sepa a dónde transferir
+            if (!isReservation(aiResult) && restaurant.paymentDetails?.trim()) {
+              finalResponse += `\n\n💳 *Datos de pago:*\n${restaurant.paymentDetails.trim()}`;
+            }
           }
         } else if (complete && aiResult.readyToConfirm) {
           // 6.2. Datos completos: pedir confirmación con el total exacto (aún NO se crea el pedido)

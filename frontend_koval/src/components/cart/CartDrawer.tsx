@@ -7,16 +7,19 @@ const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4
 
 interface CartDrawerProps {
   restaurantId: string;
-  restaurantName: string;
   restaurantPhone?: string;
   tableNumber?: string;
+  /** Local cerrado (emergencia u horario): no se pueden enviar pedidos */
+  isClosed?: boolean;
+  closedNotice?: string;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
   restaurantId,
-  restaurantName,
   restaurantPhone = '', // Strict usage
   tableNumber,
+  isClosed = false,
+  closedNotice = 'En este momento estamos cerrados.',
 }) => {
   const { items, totalCount, totalAmount, updateQuantity, removeItem, clearCart } = useCart();
   const [isOpen, setIsOpen] = useState(false);
@@ -35,6 +38,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isClosed) {
+      setErrorMsg(closedNotice);
+      return;
+    }
     if (!customerName.trim()) {
       setErrorMsg('Por favor ingresa tu nombre.');
       return;
@@ -80,35 +87,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         throw new Error(errorData.message || `Error al procesar el pedido (${res.status})`);
       }
 
-      const createdOrder = await res.json();
-      const orderShortId = (createdOrder.id || 'NUEVA').slice(0, 8).toUpperCase();
+      const createdOrder: { id: string } = await res.json();
 
-      // 2. Construir detalle de items para WhatsApp
-      const itemsDetail = items
-        .map(
-          (item) =>
-            `• ${item.quantity}x ${item.name} ($${(item.price * item.quantity).toLocaleString('es-CO')} COP)`
-        )
-        .join('\n');
-
-      // 3. Construir mensaje preformateado para WhatsApp
-      const whatsappMessage = `👋 ¡Hola! Acabo de hacer un pedido desde el menú digital de *${restaurantName}*:
-
-🧾 *Orden:* #${orderShortId}
-👤 *Cliente:* ${customerName.trim()}
-📞 *Teléfono:* ${customerPhone.trim()}
-${tableNumber ? `📍 *Mesa:* ${tableNumber} (Consumo en Local)` : `📍 *Dirección:* ${deliveryAddress.trim() || 'Para recoger / No especificada'}`}
-
-🛒 *Detalle del Pedido:*
-${itemsDetail}
-
-💰 *Total a Pagar:* ${formatCOP(totalAmount)}
-📝 *Notas:* ${notes.trim() || 'Ninguna'}`;
-
-      // 4. Redirigir a WhatsApp
+      // Carrito Híbrido: el pedido ya quedó registrado en el sistema (KDS); el cliente abre el
+      // chat del local con la referencia del pedido. Número = "Teléfono" del local (Ajustes).
       const cleanPhone = restaurantPhone.replace(/\D/g, '');
-      const encodedMsg = encodeURIComponent(whatsappMessage);
-      const whatsappUrl = `https://wa.me/${cleanPhone || '573239999064'}?text=${encodedMsg}`;
+      const whatsappText = encodeURIComponent(`Hola, acabo de hacer el pedido #${createdOrder.id}`);
+      const whatsappUrl = `https://wa.me/${cleanPhone}?text=${whatsappText}`;
 
       // Limpiar y resetear
       clearCart();
@@ -118,8 +103,10 @@ ${itemsDetail}
       setNotes('');
       setIsOpen(false);
 
-      // Abrir WhatsApp en nueva pestaña
-      window.open(whatsappUrl, '_blank');
+      // Abrir WhatsApp en nueva pestaña. Tras un await, Safari/iOS suelen bloquear el popup:
+      // en ese caso se navega en la misma pestaña (el pedido ya está guardado).
+      const popup = window.open(whatsappUrl, '_blank');
+      if (!popup) window.location.href = whatsappUrl;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error inesperado al crear el pedido';
       setErrorMsg(message);
@@ -409,10 +396,12 @@ ${itemsDetail}
                 <button
                   type="submit"
                   form="checkout-form"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isClosed}
                   className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 disabled:opacity-50 text-white font-bold py-3.5 px-4 rounded-xl transition shadow-lg shadow-green-900/40 active:scale-[0.98] flex items-center justify-center gap-2.5"
                 >
-                  {isSubmitting ? (
+                  {isClosed ? (
+                    <span>🔒 Local cerrado: no estamos recibiendo pedidos</span>
+                  ) : isSubmitting ? (
                     <>
                       <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />

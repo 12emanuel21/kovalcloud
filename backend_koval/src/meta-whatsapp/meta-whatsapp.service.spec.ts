@@ -309,4 +309,94 @@ describe('MetaWhatsAppService', () => {
       expect(sendSpy).not.toHaveBeenCalled();
     });
   });
+
+  describe('horarios y cobros', () => {
+    const textPayload = (body: string) => ({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '123456',
+          changes: [
+            {
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: { display_phone_number: '15550234567', phone_number_id: '9988776655' },
+                messages: [{ from: '573009876543', id: 'wamid.200', timestamp: '1700000000', type: 'text', text: { body } }],
+              },
+              field: 'messages',
+            },
+          ],
+        },
+      ],
+    });
+
+    const baseRestaurant = {
+      id: 'rest-1',
+      name: 'Pizzería Nápoles',
+      slug: 'pizzeria-napoles',
+      whatsappVerifyToken: 'napoles-verify-token',
+      whatsappPhoneId: '9988776655',
+      whatsappToken: 'EAAB_TEST_TOKEN',
+    };
+
+    it('con cierre de emergencia responde el closedMessage y NO llama a la IA', async () => {
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce({
+        ...baseRestaurant,
+        isTemporarilyClosed: true,
+        closedMessage: 'Hoy cerramos por inventario 🙏',
+      } as any);
+      const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+      await service.processIncomingWebhook(textPayload('Quiero una pizza'), 'napoles-verify-token');
+
+      expect(sendSpy).toHaveBeenCalledWith('9988776655', 'EAAB_TEST_TOKEN', '573009876543', 'Hoy cerramos por inventario 🙏', false);
+      expect(aiService.parseOrderIntent).not.toHaveBeenCalled();
+      expect(prismaService.chatHistory.create).not.toHaveBeenCalled();
+    });
+
+    it('fuera de horario (día sin franjas) tampoco llama a la IA', async () => {
+      const allClosed = { monday: [], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] };
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce({
+        ...baseRestaurant,
+        isTemporarilyClosed: false,
+        businessHours: allClosed,
+      } as any);
+      const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+      await service.processIncomingWebhook(textPayload('hola'), 'napoles-verify-token');
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        '9988776655',
+        'EAAB_TEST_TOKEN',
+        '573009876543',
+        expect.stringContaining('está cerrado'),
+        false,
+      );
+      expect(aiService.parseOrderIntent).not.toHaveBeenCalled();
+    });
+
+    it('al registrar un pedido concatena los datos de pago del local', async () => {
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce({
+        ...baseRestaurant,
+        paymentDetails: 'Nequi 300 123 4567 (Juan)',
+      } as any);
+      (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(null);
+      (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({
+        intent: 'ORDER',
+        orderType: 'TAKEAWAY',
+        items: [{ productId: 'item-1', quantity: 1 }],
+        customerConfirmed: true,
+        readyToConfirm: true,
+        customerName: 'Ana',
+        responseToUser: '¡Perfecto!',
+      });
+      const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+      await service.processIncomingWebhook(textPayload('sí, confirmo'), 'napoles-verify-token');
+
+      const sentText = sendSpy.mock.calls[0][3];
+      expect(sentText).toContain('Pedido confirmado');
+      expect(sentText).toContain('💳 *Datos de pago:*\nNequi 300 123 4567 (Juan)');
+    });
+  });
 });
