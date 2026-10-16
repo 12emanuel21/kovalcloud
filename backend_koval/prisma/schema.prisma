@@ -66,6 +66,13 @@ model Restaurant {
   currency      String  @default("COP")
   botpressBotId String? @default("koval-pizzeria-bot")
 
+  // Configuración operativa del local
+  address             String?
+  paymentDetails      String?
+  businessHours       Json?
+  isTemporarilyClosed Boolean @default(false)
+  closedMessage       String?
+
   // Integración Meta WhatsApp Cloud API (Multi-Tenant)
   whatsappToken       String?
   whatsappPhoneId     String?
