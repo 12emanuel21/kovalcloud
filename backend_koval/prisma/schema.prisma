@@ -70,8 +70,9 @@ model Restaurant {
   address             String?
   paymentDetails      String?
   businessHours       Json?
-  isTemporarilyClosed Boolean @default(false)
+  isTemporarilyClosed Boolean   @default(false)
   closedMessage       String?
+  extendedUntil       DateTime?
 
   // Integración Meta WhatsApp Cloud API (Multi-Tenant)
   whatsappToken       String?
