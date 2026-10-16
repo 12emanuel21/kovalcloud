@@ -181,6 +181,8 @@ export class RestaurantsService {
         paymentDetails: text(dto.paymentDetails),
         closedMessage: text(dto.closedMessage),
         isTemporarilyClosed: dto.isTemporarilyClosed,
+        // Kill switch: activar la emergencia destruye cualquier prórroga vigente
+        ...(dto.isTemporarilyClosed === true ? { extendedUntil: null } : {}),
         businessHours:
           dto.businessHours === undefined
             ? undefined
@@ -204,7 +206,11 @@ export class RestaurantsService {
    * por encima del horario y del cierre de emergencia. null/0 la cancela.
    */
   async extendHours(id: string, minutes: number | null | undefined) {
-    await this.findOne(id);
+    const restaurant = await this.findOne(id);
+    // Con el cierre de emergencia activo no se puede prorrogar (cancelar sí está permitido)
+    if (minutes && restaurant.isTemporarilyClosed) {
+      throw new ConflictException('El cierre de emergencia está activo: desactívalo antes de prorrogar el horario');
+    }
     const extendedUntil = minutes ? new Date(Date.now() + minutes * 60_000) : null;
     return this.prisma.restaurant.update({
       where: { id },

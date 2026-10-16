@@ -105,13 +105,15 @@ export function ShiftExtensionPanel() {
     extend(minutes);
   };
 
-  const extensionActive = shift ? hasActiveExtension(shift.extendedUntil, now) : false;
+  // Kill switch: con la emergencia activa no hay prórroga posible (el backend la borra y rechaza nuevas)
+  const emergency = Boolean(shift?.isTemporarilyClosed);
+  const extensionActive = shift && !emergency ? hasActiveExtension(shift.extendedUntil, now) : false;
   const status = !shift
     ? { tone: 'muted', text: 'Cargando estado del turno...' }
-    : extensionActive
-      ? { tone: 'extended', text: `🟢 Prórroga activa hasta las ${formatLocalTime(shift.extendedUntil!)}` }
-      : shift.isTemporarilyClosed
-        ? { tone: 'closed', text: '🔴 Cierre de emergencia activo: no se reciben pedidos' }
+    : emergency
+      ? { tone: 'closed', text: '🔴 Cierre de emergencia activo: no se reciben pedidos' }
+      : extensionActive
+        ? { tone: 'extended', text: `🟢 Prórroga activa hasta las ${formatLocalTime(shift.extendedUntil!)}` }
         : isWithinBusinessHours(shift.businessHours, now)
           ? { tone: 'open', text: '🟢 Abierto según el horario' }
           : { tone: 'closed', text: '🌙 Fuera de horario: no se reciben pedidos' };
@@ -132,7 +134,9 @@ export function ShiftExtensionPanel() {
       className={`rounded-2xl border p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 transition ${
         extensionActive
           ? 'bg-emerald-500/10 border-emerald-500/40 shadow-lg shadow-emerald-950/30'
-          : 'bg-slate-900/80 border-slate-800'
+          : emergency
+            ? 'bg-rose-500/10 border-rose-500/40 shadow-lg shadow-rose-950/30'
+            : 'bg-slate-900/80 border-slate-800'
       }`}
     >
       <div className="min-w-0 space-y-0.5">
@@ -141,57 +145,63 @@ export function ShiftExtensionPanel() {
         {error && <p className="text-[11px] text-rose-400">{error}</p>}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => extend(30)}
-          disabled={busy || !shift}
-          className={`${quickButton} bg-slate-800 border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-300`}
-        >
-          +30 min
-        </button>
-        <button
-          type="button"
-          onClick={() => extend(60)}
-          disabled={busy || !shift}
-          className={`${quickButton} bg-slate-800 border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-300`}
-        >
-          +1 hora
-        </button>
-
-        <form onSubmit={handleCustom} className="flex items-center gap-1.5">
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={MAX_EXTENSION_MINUTES}
-            step={1}
-            value={customMinutes}
-            onChange={(e) => setCustomMinutes(e.target.value)}
-            placeholder="min"
-            aria-label="Minutos de prórroga personalizados"
-            className="w-16 bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-lg px-2 py-1.5 text-[11px] text-white outline-none [color-scheme:dark]"
-          />
-          <button
-            type="submit"
-            disabled={busy || !shift || !customMinutes}
-            className={`${quickButton} bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-500`}
-          >
-            Aplicar
-          </button>
-        </form>
-
-        {extensionActive && (
+      {emergency ? (
+        <p className="text-[11px] text-rose-200/80 lg:text-right">
+          Desactiva el cierre de emergencia en Ajustes para poder prorrogar el horario.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => extend(null)}
-            disabled={busy}
-            className={`${quickButton} bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20`}
+            onClick={() => extend(30)}
+            disabled={busy || !shift}
+            className={`${quickButton} bg-slate-800 border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-300`}
           >
-            Cancelar Prórroga
+            +30 min
           </button>
-        )}
-      </div>
+          <button
+            type="button"
+            onClick={() => extend(60)}
+            disabled={busy || !shift}
+            className={`${quickButton} bg-slate-800 border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-300`}
+          >
+            +1 hora
+          </button>
+
+          <form onSubmit={handleCustom} className="flex items-center gap-1.5">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={MAX_EXTENSION_MINUTES}
+              step={1}
+              value={customMinutes}
+              onChange={(e) => setCustomMinutes(e.target.value)}
+              placeholder="min"
+              aria-label="Minutos de prórroga personalizados"
+              className="w-16 bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-lg px-2 py-1.5 text-[11px] text-white outline-none [color-scheme:dark]"
+            />
+            <button
+              type="submit"
+              disabled={busy || !shift || !customMinutes}
+              className={`${quickButton} bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-500`}
+            >
+              Aplicar
+            </button>
+          </form>
+
+          {extensionActive && (
+            <button
+              type="button"
+              onClick={() => extend(null)}
+              disabled={busy}
+              className={`${quickButton} bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20`}
+            >
+              Cancelar Prórroga
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

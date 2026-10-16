@@ -90,8 +90,14 @@ describe('prórroga de horario (extendedUntil)', () => {
     expect(isRestaurantClosed({ businessHours: hours, extendedUntil: in30 }, now)).toBe(false);
   });
 
-  it('la prórroga gana incluso sobre el cierre de emergencia', () => {
-    expect(isRestaurantClosed({ isTemporarilyClosed: true, businessHours: hours, extendedUntil: in30 }, now)).toBe(false);
+  it('el cierre de emergencia es un kill switch: gana sobre una prórroga vigente', () => {
+    expect(isRestaurantClosed({ isTemporarilyClosed: true, businessHours: hours, extendedUntil: in30 }, now)).toBe(true);
+  });
+
+  it('el cierre de emergencia gana también dentro del horario regular', () => {
+    const lunch = new Date('2026-10-14T13:00:00-05:00');
+    expect(isRestaurantClosed({ isTemporarilyClosed: true, businessHours: hours }, lunch)).toBe(true);
+    expect(isRestaurantClosed({ isTemporarilyClosed: false, businessHours: hours }, lunch)).toBe(false);
   });
 
   it('una prórroga vencida se ignora (como si fuera null)', () => {

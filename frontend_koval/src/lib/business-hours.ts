@@ -72,8 +72,10 @@ export function hasActiveExtension(extendedUntil: string | Date | null | undefin
 }
 
 /**
- * Prórroga vigente = ABIERTO (gana sobre el horario y el cierre de emergencia).
- * Si no hay prórroga (o ya venció): cerrado por emergencia o por estar fuera de horario.
+ * Prioridad (igual que el backend):
+ * 1. Cierre de emergencia = CERRADO siempre (kill switch absoluto).
+ * 2. Prórroga vigente = ABIERTO aunque esté fuera de horario.
+ * 3. Horario regular (una prórroga vencida se ignora).
  */
 export function isRestaurantClosed(
   restaurant: {
@@ -83,8 +85,9 @@ export function isRestaurantClosed(
   },
   now = new Date(),
 ): boolean {
+  if (restaurant.isTemporarilyClosed) return true;
   if (hasActiveExtension(restaurant.extendedUntil, now)) return false;
-  return Boolean(restaurant.isTemporarilyClosed) || !isWithinBusinessHours(restaurant.businessHours, now);
+  return !isWithinBusinessHours(restaurant.businessHours, now);
 }
 
 /** Hora en la zona del local, ej. "12:30 a. m." */
