@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import Image from 'next/image';
 import { TeamSection } from './TeamSection';
+import { RestaurantProfileSection } from './RestaurantProfileSection';
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
 
@@ -368,6 +369,9 @@ export default function SettingsPage() {
           </div>
         </section>
       </form>
+
+      {/* PERFIL DEL LOCAL: dirección, pagos, horarios y cierre de emergencia */}
+      <RestaurantProfileSection />
 
       {/* SECCIÓN 2: EQUIPO DE COCINA (cuentas KITCHEN, acceso revocable) */}
       <TeamSection />

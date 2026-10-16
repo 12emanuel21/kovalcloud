@@ -5,9 +5,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { maskSecret, sanitizeRestaurant } from './sanitize-restaurant';
+import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
+import { parseBusinessHours } from './business-hours';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
 
@@ -162,6 +164,39 @@ export class RestaurantsService {
       },
     });
     return toRestaurantResponse(updated);
+  }
+
+  /** Configuración operativa del local: dirección, pagos, horarios y cierre de emergencia */
+  async updateConfig(id: string, dto: UpdateRestaurantConfigDto) {
+    await this.findOne(id);
+
+    // Texto vacío o null = borrar; ausente (undefined) = no tocar
+    const text = (value: string | null | undefined) =>
+      value === undefined ? undefined : value?.trim() || null;
+
+    return this.prisma.restaurant.update({
+      where: { id },
+      data: {
+        address: text(dto.address),
+        paymentDetails: text(dto.paymentDetails),
+        closedMessage: text(dto.closedMessage),
+        isTemporarilyClosed: dto.isTemporarilyClosed,
+        businessHours:
+          dto.businessHours === undefined
+            ? undefined
+            : dto.businessHours === null
+              ? Prisma.DbNull
+              : (parseBusinessHours(dto.businessHours) as Prisma.InputJsonValue),
+      },
+      select: {
+        id: true,
+        address: true,
+        paymentDetails: true,
+        businessHours: true,
+        isTemporarilyClosed: true,
+        closedMessage: true,
+      },
+    });
   }
 
   async remove(id: string) {

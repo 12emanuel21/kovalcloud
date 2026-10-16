@@ -9,6 +9,7 @@ import { Role } from '@prisma/client';
 import { RestaurantsService } from './restaurants.service';
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
+import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 
 @Controller('restaurants')
 export class RestaurantsController {
@@ -48,6 +49,15 @@ export class RestaurantsController {
   @Get(':id/whatsapp-config')
   findWhatsappConfig(@Param('id') id: string) {
     return this.restaurantsService.findWhatsappConfig(id);
+  }
+
+  // Perfil del local: solo el OWNER de este restaurante (TenantGuard) o el SUPERADMIN
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(Role.OWNER, Role.SUPERADMIN)
+  @TenantParam('id')
+  @Patch(':id/config')
+  updateConfig(@Param('id') id: string, @Body() dto: UpdateRestaurantConfigDto) {
+    return this.restaurantsService.updateConfig(id, dto);
   }
 
   @UseGuards(JwtAuthGuard, TenantGuard)
