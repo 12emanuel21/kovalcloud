@@ -2,38 +2,19 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { WEEK_DAYS, type BusinessHours, type WeekDay } from '@/lib/business-hours';
+import {
+  DAY_PILLS,
+  blocksToHours,
+  createBlock,
+  describeDays,
+  hoursToBlocks,
+  uncoveredDays,
+  validateBlocks,
+  type ScheduleBlock,
+} from './schedule-blocks';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
-
-// Mismo formato que valida el backend (restaurants/business-hours.ts)
-const WEEK_DAYS = [
-  { key: 'monday', label: 'Lunes' },
-  { key: 'tuesday', label: 'Martes' },
-  { key: 'wednesday', label: 'Miércoles' },
-  { key: 'thursday', label: 'Jueves' },
-  { key: 'friday', label: 'Viernes' },
-  { key: 'saturday', label: 'Sábado' },
-  { key: 'sunday', label: 'Domingo' },
-] as const;
-
-type WeekDay = (typeof WEEK_DAYS)[number]['key'];
-
-interface TimeRange {
-  open: string;
-  close: string;
-}
-
-type BusinessHours = Partial<Record<WeekDay, TimeRange[]>>;
-
-/** Estado del editor por día: el MVP edita una franja; las adicionales se conservan */
-interface DayState {
-  enabled: boolean;
-  open: string;
-  close: string;
-  extraRanges: TimeRange[];
-}
-
-type HoursState = Record<WeekDay, DayState>;
 
 interface RestaurantConfig {
   address?: string | null;
@@ -41,43 +22,6 @@ interface RestaurantConfig {
   businessHours?: BusinessHours | null;
   isTemporarilyClosed?: boolean;
   closedMessage?: string | null;
-}
-
-const DEFAULT_OPEN = '11:00';
-const DEFAULT_CLOSE = '22:00';
-
-function toHoursState(hours: BusinessHours | null | undefined): HoursState {
-  const state = {} as HoursState;
-  for (const { key } of WEEK_DAYS) {
-    const [first, ...rest] = hours?.[key] ?? [];
-    state[key] = {
-      enabled: Boolean(first),
-      open: first?.open ?? DEFAULT_OPEN,
-      close: first?.close ?? DEFAULT_CLOSE,
-      extraRanges: rest,
-    };
-  }
-  return state;
-}
-
-function toBusinessHours(state: HoursState): BusinessHours {
-  const hours: BusinessHours = {};
-  for (const { key } of WEEK_DAYS) {
-    const day = state[key];
-    hours[key] = day.enabled ? [{ open: day.open, close: day.close }, ...day.extraRanges] : [];
-  }
-  return hours;
-}
-
-/** Devuelve el primer error del horario, o null si es válido */
-function validateHours(state: HoursState): string | null {
-  for (const { key, label } of WEEK_DAYS) {
-    const day = state[key];
-    if (!day.enabled) continue;
-    if (!day.open || !day.close) return `${label}: indica la hora de apertura y de cierre`;
-    if (day.open === day.close) return `${label}: la apertura y el cierre no pueden ser iguales`;
-  }
-  return null;
 }
 
 /** Mensaje legible de un error de la API (ValidationPipe devuelve message como arreglo) */
@@ -105,7 +49,7 @@ export function RestaurantProfileSection() {
   const [paymentDetails, setPaymentDetails] = useState('');
   const [isTemporarilyClosed, setIsTemporarilyClosed] = useState(false);
   const [closedMessage, setClosedMessage] = useState('');
-  const [hours, setHours] = useState<HoursState>(() => toHoursState(null));
+  const [blocks, setBlocks] = useState<ScheduleBlock[]>([]);
 
   // Carga inicial: setState solo en callbacks de la promesa (nunca síncrono en el efecto)
   useEffect(() => {
@@ -125,7 +69,7 @@ export function RestaurantProfileSection() {
         setPaymentDetails(data.paymentDetails ?? '');
         setIsTemporarilyClosed(Boolean(data.isTemporarilyClosed));
         setClosedMessage(data.closedMessage ?? '');
-        setHours(toHoursState(data.businessHours));
+        setBlocks(hoursToBlocks(data.businessHours));
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -140,12 +84,28 @@ export function RestaurantProfileSection() {
     };
   }, [restaurantId, token]);
 
-  const updateDay = (key: WeekDay, patch: Partial<DayState>) =>
-    setHours((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  const updateBlock = (id: string, patch: Partial<Omit<ScheduleBlock, 'id'>>) =>
+    setBlocks((prev) => prev.map((block) => (block.id === id ? { ...block, ...patch } : block)));
+
+  const toggleDay = (id: string, day: WeekDay) =>
+    setBlocks((prev) =>
+      prev.map((block) => {
+        if (block.id !== id) return block;
+        const selected = block.days.includes(day);
+        // Se conserva el orden L→D para que el resumen y el JSON sean estables
+        const days = WEEK_DAYS.filter((d) => (d === day ? !selected : block.days.includes(d)));
+        return { ...block, days };
+      }),
+    );
+
+  // El nuevo bloque preselecciona los días que aún no tienen horario (ej. tras L–V, propone S y D)
+  const addBlock = () => setBlocks((prev) => [...prev, createBlock({ days: prev.length ? uncoveredDays(prev) : undefined })]);
+
+  const removeBlock = (id: string) => setBlocks((prev) => prev.filter((block) => block.id !== id));
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const hoursError = validateHours(hours);
+    const hoursError = validateBlocks(blocks);
     if (hoursError) {
       setFeedback({ type: 'error', text: hoursError });
       return;
@@ -157,7 +117,7 @@ export function RestaurantProfileSection() {
       const payload: RestaurantConfig = {
         address: address.trim(),
         paymentDetails: paymentDetails.trim(),
-        businessHours: toBusinessHours(hours),
+        businessHours: blocksToHours(blocks),
         isTemporarilyClosed,
         closedMessage: closedMessage.trim(),
       };
@@ -282,59 +242,110 @@ export function RestaurantProfileSection() {
         </div>
       </div>
 
-      {/* Horarios */}
-      <div className="space-y-2">
-        <h3 className="text-sm font-bold text-white">Horarios de Atención</h3>
-        <p className="text-[11px] text-slate-400">
-          Si el cierre es menor que la apertura (ej. 18:00 → 02:00), se entiende que cierra pasada la medianoche.
-        </p>
-        <div className="border border-slate-800/80 rounded-2xl divide-y divide-slate-800/60 bg-slate-950/40">
-          {WEEK_DAYS.map(({ key, label }) => {
-            const day = hours[key];
-            return (
-              <div key={key} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-                <label className="flex items-center gap-2 w-32 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={day.enabled}
-                    onChange={(e) => updateDay(key, { enabled: e.target.checked })}
-                    className="h-4 w-4 accent-emerald-500"
-                  />
-                  <span className={`text-xs font-semibold ${day.enabled ? 'text-white' : 'text-slate-500'}`}>{label}</span>
-                </label>
-                {day.enabled ? (
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <input
-                      type="time"
-                      value={day.open}
-                      onChange={(e) => updateDay(key, { open: e.target.value })}
-                      aria-label={`${label}: apertura`}
-                      required
-                      className="bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg px-2 py-1 text-white outline-none [color-scheme:dark]"
-                    />
-                    <span>a</span>
-                    <input
-                      type="time"
-                      value={day.close}
-                      onChange={(e) => updateDay(key, { close: e.target.value })}
-                      aria-label={`${label}: cierre`}
-                      required
-                      className="bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg px-2 py-1 text-white outline-none [color-scheme:dark]"
-                    />
-                    {day.extraRanges.length > 0 && (
-                      <span className="text-[10px] text-slate-500">
-                        +{day.extraRanges.length} franja{day.extraRanges.length > 1 ? 's' : ''} adicional
-                        {day.extraRanges.length > 1 ? 'es' : ''}
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-xs text-slate-500">Cerrado</span>
-                )}
-              </div>
-            );
-          })}
+      {/* Horarios: bloques tipo alarma (franja + días) */}
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-sm font-bold text-white">Horarios de Atención</h3>
+          <p className="text-[11px] text-slate-400">
+            Crea un bloque por cada franja y marca los días en que aplica. Para turnos partidos o fines de
+            semana distintos, agrega otro bloque.
+          </p>
         </div>
+
+        {blocks.length === 0 ? (
+          <div className="p-5 rounded-2xl border border-dashed border-slate-700 bg-slate-950/40 text-center space-y-1">
+            <p className="text-xs font-semibold text-slate-300">Sin horario configurado</p>
+            <p className="text-[11px] text-slate-500">
+              La carta y el bot consideran el local abierto siempre (salvo el cierre de emergencia).
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {blocks.map((block, index) => {
+              const overnight = Boolean(block.open && block.close && block.close < block.open);
+              return (
+                <div
+                  key={block.id}
+                  className="p-4 rounded-2xl border border-slate-800/80 bg-slate-950/60 space-y-4 shadow-inner"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                        Horario {index + 1}
+                      </p>
+                      <p className="text-xs text-slate-400 truncate">
+                        {describeDays(block.days)} · {block.open || '--:--'} – {block.close || '--:--'}
+                        {overnight && ' (cierra al día siguiente)'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeBlock(block.id)}
+                      aria-label={`Eliminar horario ${index + 1}`}
+                      className="shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-rose-300 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition cursor-pointer"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="space-y-1">
+                      <span className="block text-[11px] font-semibold text-slate-400">Abre</span>
+                      <input
+                        type="time"
+                        value={block.open}
+                        onChange={(e) => updateBlock(block.id, { open: e.target.value })}
+                        required
+                        className="bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-sm font-mono text-white outline-none [color-scheme:dark]"
+                      />
+                    </label>
+                    <span className="pb-2 text-slate-600">→</span>
+                    <label className="space-y-1">
+                      <span className="block text-[11px] font-semibold text-slate-400">Cierra</span>
+                      <input
+                        type="time"
+                        value={block.close}
+                        onChange={(e) => updateBlock(block.id, { close: e.target.value })}
+                        required
+                        className="bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-sm font-mono text-white outline-none [color-scheme:dark]"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2" role="group" aria-label={`Días del horario ${index + 1}`}>
+                    {WEEK_DAYS.map((day) => {
+                      const selected = block.days.includes(day);
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => toggleDay(block.id, day)}
+                          aria-pressed={selected}
+                          title={DAY_PILLS[day].label}
+                          className={`h-9 w-9 rounded-full text-xs font-bold border transition cursor-pointer ${
+                            selected
+                              ? 'bg-emerald-500 border-emerald-400 text-slate-950 shadow-md shadow-emerald-950/50'
+                              : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                          }`}
+                        >
+                          {DAY_PILLS[day].short}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={addBlock}
+          className="w-full py-2.5 rounded-2xl border border-dashed border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/5 hover:border-emerald-400 text-xs font-bold transition cursor-pointer"
+        >
+          {blocks.length === 0 ? '+ Agregar horario' : '+ Agregar otro horario'}
+        </button>
       </div>
 
       <div className="flex justify-end pt-2">
