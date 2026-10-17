@@ -13,7 +13,7 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderStatus } from '@prisma/client';
 import { OrdersGateway } from './orders.gateway';
-import { buildClosedMessage, isRestaurantClosed } from '../restaurants/business-hours';
+import { buildClosedNotice, isRestaurantClosed } from '../restaurants/business-hours';
 import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/tenant-access';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 
@@ -53,7 +53,7 @@ export class OrdersService {
 
     // 1.5. El endpoint es público: la carta deshabilita el botón, pero se valida también aquí
     if (isRestaurantClosed(restaurant)) {
-      throw new ConflictException(buildClosedMessage(restaurant));
+      throw new ConflictException(buildClosedNotice(restaurant));
     }
 
     // 2. Validar que la orden contenga al menos un item

@@ -369,7 +369,7 @@ describe('MetaWhatsAppService', () => {
         '9988776655',
         'EAAB_TEST_TOKEN',
         '573009876543',
-        expect.stringContaining('está cerrado'),
+        expect.stringContaining('se encuentra cerrado. 🌙'),
         false,
       );
       expect(aiService.parseOrderIntent).not.toHaveBeenCalled();

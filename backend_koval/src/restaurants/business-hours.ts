@@ -52,14 +52,14 @@ export function parseBusinessHours(value: unknown): BusinessHours {
  */
 export const RESTAURANT_TIMEZONE = process.env.RESTAURANT_TIMEZONE || 'America/Bogota';
 
-const DAY_LABELS: Record<WeekDay, string> = {
-  monday: 'Lun',
-  tuesday: 'Mar',
-  wednesday: 'Mié',
-  thursday: 'Jue',
-  friday: 'Vie',
-  saturday: 'Sáb',
-  sunday: 'Dom',
+const DAY_NAMES: Record<WeekDay, string> = {
+  monday: 'Lunes',
+  tuesday: 'Martes',
+  wednesday: 'Miércoles',
+  thursday: 'Jueves',
+  friday: 'Viernes',
+  saturday: 'Sábado',
+  sunday: 'Domingo',
 };
 
 const toMinutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
@@ -135,24 +135,80 @@ export function isRestaurantClosed(
   return !isWithinBusinessHours(readBusinessHours(restaurant.businessHours), now);
 }
 
-/** Horario en texto para mensajes ("Lun 11:00–22:00 · Mar cerrado · ...") */
-export function formatBusinessHours(hours: BusinessHours | null): string {
-  if (!hours) return '';
-  return WEEK_DAYS.map((day) => {
-    const ranges = hours[day] ?? [];
-    return `${DAY_LABELS[day]} ${ranges.length ? ranges.map((r) => `${r.open}–${r.close}`).join(', ') : 'cerrado'}`;
-  }).join(' · ');
+/** "16:00" -> "4:00 p. m." (formato de hora colombiano) */
+export function formatTime12h(time: string): string {
+  const hours = Number(time.slice(0, 2));
+  const minutes = time.slice(3, 5);
+  return `${hours % 12 || 12}:${minutes} ${hours < 12 ? 'a. m.' : 'p. m.'}`;
 }
 
-/** Mensaje para el cliente cuando el local está cerrado: el del dueño o uno con el horario */
+/** Une con comas y "y": ["Lunes", "Miércoles", "Viernes"] -> "Lunes, Miércoles y Viernes" */
+function joinSpanish(parts: string[]): string {
+  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`;
+}
+
+/**
+ * Nombre de un grupo de días: tramos seguidos de 3+ días se escriben como rango.
+ * ["monday".."friday"] -> "Lunes a Viernes"; [sábado, domingo] -> "Sábado y Domingo";
+ * [lunes, martes, miércoles, viernes] -> "Lunes a Miércoles y Viernes".
+ */
+function describeDayGroup(days: WeekDay[]): string {
+  const runs: WeekDay[][] = [];
+  for (const day of days) {
+    const last = runs[runs.length - 1];
+    if (last && WEEK_DAYS.indexOf(day) === WEEK_DAYS.indexOf(last[last.length - 1]) + 1) last.push(day);
+    else runs.push([day]);
+  }
+  return joinSpanish(
+    runs.flatMap((run) =>
+      run.length >= 3 ? [`${DAY_NAMES[run[0]]} a ${DAY_NAMES[run[run.length - 1]]}`] : run.map((day) => DAY_NAMES[day]),
+    ),
+  );
+}
+
+/**
+ * Horario para WhatsApp: una viñeta por grupo de días con exactamente las mismas franjas.
+ *   • *Lunes a Viernes:* 12:00 p. m. – 3:00 p. m. y 6:00 p. m. – 10:00 p. m.
+ *   • *Domingo:* Cerrado
+ */
+export function formatScheduleLines(hours: BusinessHours): string[] {
+  const groups = new Map<string, { days: WeekDay[]; ranges: TimeRange[] }>();
+  for (const day of WEEK_DAYS) {
+    const ranges = [...(hours[day] ?? [])].sort((a, b) => a.open.localeCompare(b.open));
+    const key = ranges.map((r) => `${r.open}-${r.close}`).join(',');
+    const group = groups.get(key) ?? { days: [], ranges };
+    group.days.push(day);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map(({ days, ranges }) => {
+    const time = ranges.length
+      ? ranges.map((r) => `${formatTime12h(r.open)} – ${formatTime12h(r.close)}`).join(' y ')
+      : 'Cerrado';
+    return `• *${describeDayGroup(days)}:* ${time}`;
+  });
+}
+
+/**
+ * Mensaje de WhatsApp cuando el local está cerrado: el personalizado del dueño o,
+ * si no hay, uno con saludo, aviso de cierre y el horario agrupado.
+ */
 export function buildClosedMessage(restaurant: {
   name: string;
   closedMessage?: string | null;
   businessHours?: unknown;
+  isTemporarilyClosed?: boolean | null;
 }): string {
   if (restaurant.closedMessage?.trim()) return restaurant.closedMessage.trim();
-  const schedule = formatBusinessHours(readBusinessHours(restaurant.businessHours));
-  return schedule
-    ? `Hola 👋 En este momento ${restaurant.name} está cerrado. Nuestro horario es: ${schedule}.`
-    : `Hola 👋 En este momento ${restaurant.name} está cerrado. ¡Escríbenos más tarde!`;
+
+  const status = restaurant.isTemporarilyClosed ? 'se encuentra cerrado temporalmente' : 'se encuentra cerrado';
+  const greeting = `¡Hola! 👋 En este momento ${restaurant.name} ${status}. 🌙`;
+  const hours = readBusinessHours(restaurant.businessHours);
+  if (!hours) return `${greeting}\n\n¡Escríbenos más tarde y con gusto te atenderemos!`;
+
+  return `${greeting}\n\n🕒 *Nuestro horario de atención es:*\n${formatScheduleLines(hours).join('\n')}`;
+}
+
+/** Aviso de cierre en texto plano (respuestas HTTP que muestra la carta web, sin formato de WhatsApp) */
+export function buildClosedNotice(restaurant: { name: string; closedMessage?: string | null }): string {
+  return restaurant.closedMessage?.trim() || `${restaurant.name} está cerrado en este momento y no está recibiendo pedidos.`;
 }

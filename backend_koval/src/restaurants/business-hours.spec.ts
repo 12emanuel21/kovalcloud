@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   buildClosedMessage,
+  buildClosedNotice,
+  formatScheduleLines,
+  formatTime12h,
   hasActiveExtension,
   isRestaurantClosed,
   isWithinBusinessHours,
@@ -75,7 +78,7 @@ describe('isWithinBusinessHours / isRestaurantClosed (zona America/Bogota, UTC-5
 
   it('mensaje de cierre: el del dueño o uno con el horario', () => {
     expect(buildClosedMessage({ name: 'X', closedMessage: '  Volvemos mañana  ' })).toBe('Volvemos mañana');
-    expect(buildClosedMessage({ name: 'X', businessHours: hours })).toContain('Mié 11:00–22:00');
+    expect(buildClosedMessage({ name: 'X', businessHours: hours })).toContain('• *Miércoles:* 11:00 a. m. – 10:00 p. m.');
   });
 });
 
@@ -108,5 +111,67 @@ describe('prórroga de horario (extendedUntil)', () => {
   it('acepta la fecha como string ISO (así llega desde el JSON de la API)', () => {
     expect(hasActiveExtension(in30.toISOString(), now)).toBe(true);
     expect(hasActiveExtension('no-es-fecha', now)).toBe(false);
+  });
+});
+
+describe('mensaje de local cerrado (WhatsApp)', () => {
+  const everyDay = (open: string, close: string) =>
+    Object.fromEntries(
+      ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((d) => [d, [{ open, close }]]),
+    );
+
+  it('convierte la hora militar a formato a. m. / p. m.', () => {
+    expect(formatTime12h('16:00')).toBe('4:00 p. m.');
+    expect(formatTime12h('00:30')).toBe('12:30 a. m.');
+    expect(formatTime12h('12:00')).toBe('12:00 p. m.');
+    expect(formatTime12h('09:05')).toBe('9:05 a. m.');
+  });
+
+  it('formato completo cuando todos los días tienen el mismo horario', () => {
+    expect(buildClosedMessage({ name: 'Pizzería Nápoles', businessHours: everyDay('16:00', '23:00') })).toBe(
+      '¡Hola! 👋 En este momento Pizzería Nápoles se encuentra cerrado. 🌙\n\n' +
+        '🕒 *Nuestro horario de atención es:*\n' +
+        '• *Lunes a Domingo:* 4:00 p. m. – 11:00 p. m.',
+    );
+  });
+
+  it('agrupa días con las mismas franjas, incluidos turnos partidos y días cerrados', () => {
+    const split = [
+      { open: '18:00', close: '22:00' },
+      { open: '12:00', close: '15:00' },
+    ];
+    const lines = formatScheduleLines({
+      monday: split,
+      tuesday: split,
+      wednesday: split,
+      thursday: split,
+      friday: split,
+      saturday: [{ open: '12:00', close: '02:00' }],
+      sunday: [],
+    });
+    expect(lines).toEqual([
+      '• *Lunes a Viernes:* 12:00 p. m. – 3:00 p. m. y 6:00 p. m. – 10:00 p. m.',
+      '• *Sábado:* 12:00 p. m. – 2:00 a. m.',
+      '• *Domingo:* Cerrado',
+    ]);
+  });
+
+  it('días no consecutivos con el mismo horario se listan con comas e "y"', () => {
+    const same = [{ open: '10:00', close: '20:00' }];
+    expect(
+      formatScheduleLines({ monday: same, tuesday: same, wednesday: same, thursday: [], friday: same, saturday: [], sunday: same }),
+    ).toEqual(['• *Lunes a Miércoles, Viernes y Domingo:* 10:00 a. m. – 8:00 p. m.', '• *Jueves y Sábado:* Cerrado']);
+  });
+
+  it('sin horario configurado, o con cierre de emergencia, ajusta el texto', () => {
+    expect(buildClosedMessage({ name: 'X' })).toBe(
+      '¡Hola! 👋 En este momento X se encuentra cerrado. 🌙\n\n¡Escríbenos más tarde y con gusto te atenderemos!',
+    );
+    expect(buildClosedMessage({ name: 'X', isTemporarilyClosed: true })).toContain('se encuentra cerrado temporalmente');
+  });
+
+  it('el aviso HTTP para la carta web es texto plano (sin formato de WhatsApp)', () => {
+    expect(buildClosedNotice({ name: 'X' })).toBe('X está cerrado en este momento y no está recibiendo pedidos.');
+    expect(buildClosedNotice({ name: 'X', closedMessage: ' Volvemos mañana ' })).toBe('Volvemos mañana');
   });
 });
