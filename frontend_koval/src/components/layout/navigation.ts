@@ -4,6 +4,7 @@ import {
   ShoppingBag,
   MonitorPlay,
   MessageSquare,
+  MessagesSquare,
   Settings,
   QrCode,
   type LucideIcon,
@@ -36,6 +37,7 @@ function getAllNavItems(restaurantId?: string): NavItem[] {
     { label: 'Vista General', href: '/dashboard', icon: LayoutDashboard },
     { label: 'Gestión de Menú', href: '/dashboard/menu', icon: SquareMenu },
     { label: 'Pedidos', href: '/dashboard/orders', icon: ShoppingBag },
+    { label: 'Chats', href: '/dashboard/chats', icon: MessagesSquare },
     { label: 'Códigos QR', href: '/dashboard/qr', icon: QrCode },
     {
       label: 'Monitor KDS',
