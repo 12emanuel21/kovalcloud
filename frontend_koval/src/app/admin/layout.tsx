@@ -2,10 +2,18 @@
 
 import React, { useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Loader2, LogOut, ShieldCheck } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Building2, LifeBuoy, Loader2, LogOut, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { homePathForRole } from '@/lib/roles';
+
+const ADMIN_TABS = [
+  { label: 'Restaurantes', href: '/admin', icon: Building2 },
+  { label: 'Soporte Global', href: '/admin/tickets', icon: LifeBuoy },
+];
+
+const isTabActive = (pathname: string, href: string) =>
+  href === '/admin' ? pathname === '/admin' : pathname === href || pathname.startsWith(`${href}/`);
 
 /**
  * Zona global de plataforma: solo SUPERADMIN. Layout propio, sin el sidebar de restaurante.
@@ -14,6 +22,7 @@ import { homePathForRole } from '@/lib/roles';
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, syncAuth, user, logout } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const isSuperAdmin = user?.role === 'SUPERADMIN';
 
   useEffect(() => {
@@ -68,6 +77,27 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </button>
           </div>
         </div>
+
+        <nav aria-label="Secciones del panel" className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 md:px-6">
+          {ADMIN_TABS.map(({ label, href, icon: Icon }) => {
+            const active = isTabActive(pathname, href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? 'page' : undefined}
+                className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors ${
+                  active
+                    ? 'border-violet-400 text-white'
+                    : 'border-transparent text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-8 md:px-6">{children}</main>

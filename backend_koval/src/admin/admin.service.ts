@@ -22,6 +22,14 @@ const UNIQUE_MESSAGES: Record<string, string> = {
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Todos los tickets de soporte de la plataforma con su restaurante, del más reciente al más antiguo */
+  findAllTickets() {
+    return this.prisma.supportTicket.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { restaurant: { select: { id: true, name: true, slug: true } } },
+    });
+  }
+
   /** Todos los restaurantes con sus usuarios (y el dueño destacado), sin credenciales de Meta */
   async findAllRestaurants() {
     const restaurants = await this.prisma.restaurant.findMany({

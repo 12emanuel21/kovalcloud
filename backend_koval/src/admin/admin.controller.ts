@@ -18,6 +18,12 @@ export class AdminController {
     return this.adminService.findAllRestaurants();
   }
 
+  // Soporte global: los cambios de estado/prioridad usan PATCH /restaurants/:id/tickets/:ticketId
+  @Get('tickets')
+  findAllTickets() {
+    return this.adminService.findAllTickets();
+  }
+
   @Post('restaurants')
   // transform: aplica los @Transform del DTO (trim, slug y email en minúsculas) solo en este endpoint
   createRestaurant(@Body(new ValidationPipe({ whitelist: true, transform: true })) dto: CreateTenantDto) {

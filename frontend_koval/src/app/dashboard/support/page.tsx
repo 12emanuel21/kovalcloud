@@ -3,62 +3,25 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, LifeBuoy, Plus, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { RESTAURANT_TIMEZONE } from '@/lib/business-hours';
+import {
+  TICKET_PRIORITIES as PRIORITIES,
+  TICKET_PRIORITY_STYLES as PRIORITY_STYLES,
+  TICKET_STATUSES as STATUSES,
+  TICKET_STATUS_STYLES as STATUS_STYLES,
+  formatTicketDate as formatDate,
+  isTicketPending,
+  type SupportTicket as Ticket,
+  type TicketPriority,
+  type TicketStatus,
+} from '@/lib/support-tickets';
+import { TicketPriorityBadge, TicketStatusBadge } from '@/components/support/TicketBadges';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
-
-/** Deben coincidir con backend_koval/src/support/ticket-constants.ts */
-const STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as const;
-const PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
-type TicketStatus = (typeof STATUSES)[number];
-type TicketPriority = (typeof PRIORITIES)[number];
-
-interface Ticket {
-  id: string;
-  subject: string;
-  description: string;
-  status: TicketStatus;
-  priority: TicketPriority;
-  createdAt: string;
-  updatedAt: string;
-}
-
-const STATUS_STYLES: Record<TicketStatus, { label: string; className: string }> = {
-  OPEN: { label: 'Abierto', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
-  IN_PROGRESS: { label: 'En progreso', className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
-  RESOLVED: { label: 'Resuelto', className: 'bg-slate-500/15 text-slate-300 border-slate-500/30' },
-  CLOSED: { label: 'Cerrado', className: 'bg-slate-800 text-slate-500 border-slate-700' },
-};
-
-const PRIORITY_STYLES: Record<TicketPriority, { label: string; className: string }> = {
-  LOW: { label: 'Baja', className: 'bg-slate-500/10 text-slate-400 border-slate-600/40' },
-  NORMAL: { label: 'Normal', className: 'bg-sky-500/10 text-sky-300 border-sky-500/30' },
-  HIGH: { label: 'Alta', className: 'bg-orange-500/15 text-orange-300 border-orange-500/30' },
-  URGENT: { label: 'Urgente', className: 'bg-rose-500/15 text-rose-300 border-rose-500/40' },
-};
-
-const formatDate = (iso: string) =>
-  new Date(iso).toLocaleString('es-CO', {
-    timeZone: RESTAURANT_TIMEZONE,
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 
 async function apiErrorMessage(res: Response, fallback: string): Promise<string> {
   const data = await res.json().catch(() => ({}));
   const message = Array.isArray(data.message) ? data.message.join('. ') : data.message;
   return message || fallback;
-}
-
-function Badge({ className, children }: { className: string; children: React.ReactNode }) {
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${className}`}>
-      {children}
-    </span>
-  );
 }
 
 const fieldClass =
@@ -161,7 +124,7 @@ export default function SupportPage() {
     }
   };
 
-  const openCount = tickets.filter((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS').length;
+  const openCount = tickets.filter(isTicketPending).length;
 
   return (
     <div className="space-y-5">
@@ -277,12 +240,8 @@ export default function SupportPage() {
                       <p className="text-[11px] text-slate-500">{formatDate(ticket.createdAt)}</p>
                     </div>
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                      <Badge className={PRIORITY_STYLES[ticket.priority]?.className ?? ''}>
-                        {PRIORITY_STYLES[ticket.priority]?.label ?? ticket.priority}
-                      </Badge>
-                      <Badge className={STATUS_STYLES[ticket.status]?.className ?? ''}>
-                        {STATUS_STYLES[ticket.status]?.label ?? ticket.status}
-                      </Badge>
+                      <TicketPriorityBadge priority={ticket.priority} />
+                      <TicketStatusBadge status={ticket.status} />
                     </div>
                     <ChevronDown
                       className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${expanded ? 'rotate-180' : ''}`}
