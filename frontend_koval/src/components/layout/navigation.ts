@@ -7,6 +7,7 @@ import {
   MessagesSquare,
   Settings,
   QrCode,
+  LifeBuoy,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -47,6 +48,7 @@ function getAllNavItems(restaurantId?: string): NavItem[] {
     },
     { label: 'WhatsApp API', href: '/dashboard/whatsapp', icon: MessageSquare },
     { label: 'Ajustes', href: '/dashboard/settings', icon: Settings },
+    { label: 'Soporte', href: '/dashboard/support', icon: LifeBuoy },
   ];
 }
 

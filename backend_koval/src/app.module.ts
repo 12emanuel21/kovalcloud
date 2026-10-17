@@ -14,6 +14,7 @@ import { WhatsappGatewayModule } from './whatsapp-gateway/whatsapp-gateway.modul
 import { AdminModule } from './admin/admin.module';
 import { UsersModule } from './users/users.module';
 import { ChatsModule } from './chats/chats.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { ChatsModule } from './chats/chats.module';
     AdminModule,
     UsersModule,
     ChatsModule,
+    SupportModule,
   ],
   controllers: [AppController],
   providers: [AppService],
