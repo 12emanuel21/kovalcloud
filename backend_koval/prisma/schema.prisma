@@ -94,9 +94,10 @@ model Restaurant {
   items      MenuItem[]
 
   // Relaciones del Módulo de Pedidos
-  orders        Order[]
-  autoReplies   AutoReply[]
-  chatHistories ChatHistory[]
+  orders         Order[]
+  autoReplies    AutoReply[]
+  supportTickets SupportTicket[]
+  chatHistories  ChatHistory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -205,4 +206,17 @@ model ChatHistory {
   createdAt     DateTime   @default(now())
 
   @@index([restaurantId, customerPhone])
+}
+
+model SupportTicket {
+  id           String   @id @default(uuid())
+  restaurantId String
+  subject      String
+  description  String
+  status       String   @default("OPEN") // Estados: OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  priority     String   @default("NORMAL") // Prioridades: LOW, NORMAL, HIGH, URGENT
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
 }
