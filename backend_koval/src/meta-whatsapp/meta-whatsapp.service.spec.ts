@@ -62,6 +62,7 @@ describe('MetaWhatsAppService', () => {
             },
             chatHistory: {
               findMany: jest.fn().mockResolvedValue([]),
+              findFirst: jest.fn().mockResolvedValue(null),
               create: jest.fn().mockResolvedValue({}),
               deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
             },
@@ -173,6 +174,7 @@ describe('MetaWhatsAppService', () => {
         where: {
           restaurantId: 'rest-1',
           customerPhone: '573009876543',
+          role: { in: ['user', 'model'] },
         },
         orderBy: { createdAt: 'desc' },
         take: 20,
@@ -219,7 +221,55 @@ describe('MetaWhatsAppService', () => {
       });
     });
 
-    it('should delete chat history on "reset" command and reply with confirmation', async () => {
+    it('solo envía a la IA el historial posterior al último reset', async () => {
+      const resetAt = new Date('2026-10-17T10:00:00Z');
+      (prismaService.chatHistory.findFirst as jest.Mock).mockResolvedValueOnce({ createdAt: resetAt });
+      jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+      (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({
+        intent: 'GREETING',
+        items: [],
+        responseToUser: 'Hola de nuevo',
+      });
+
+      await service.processIncomingWebhook(
+        {
+          object: 'whatsapp_business_account',
+          entry: [
+            {
+              id: '1',
+              changes: [
+                {
+                  value: {
+                    metadata: { phone_number_id: '9988776655' },
+                    messages: [{ from: '573009876543', id: 'w1', timestamp: '1', type: 'text', text: { body: 'hola' } }],
+                  },
+                  field: 'messages',
+                },
+              ],
+            },
+          ],
+        },
+        'napoles-verify-token',
+      );
+
+      expect(prismaService.chatHistory.findFirst).toHaveBeenCalledWith({
+        where: {
+          restaurantId: 'rest-1',
+          customerPhone: '573009876543',
+          role: 'system',
+          message: '[SYSTEM_RESET_CONTEXT]',
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      expect(prismaService.chatHistory.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ createdAt: { gt: resetAt }, role: { in: ['user', 'model'] } }),
+        }),
+      );
+    });
+
+    it('"reset" NO borra el historial: registra el intercambio y un marcador de sistema', async () => {
       const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
 
       const payload = {
@@ -254,13 +304,19 @@ describe('MetaWhatsAppService', () => {
 
       await service.processIncomingWebhook(payload, 'napoles-verify-token');
 
-      // Debe haber borrado el historial del usuario
-      expect(prismaService.chatHistory.deleteMany).toHaveBeenCalledWith({
-        where: {
+      // Auditoría: sin borrado físico, el marcador queda al final
+      expect(prismaService.chatHistory.deleteMany).not.toHaveBeenCalled();
+      const created = (prismaService.chatHistory.create as jest.Mock).mock.calls.map(([arg]) => arg.data);
+      expect(created).toEqual([
+        { restaurantId: 'rest-1', customerPhone: '573009876543', role: 'user', message: 'reset' },
+        {
           restaurantId: 'rest-1',
           customerPhone: '573009876543',
+          role: 'model',
+          message: '🧠 Memoria borrada. Contexto limpio. ¿En qué puedo ayudarte de nuevo?',
         },
-      });
+        { restaurantId: 'rest-1', customerPhone: '573009876543', role: 'system', message: '[SYSTEM_RESET_CONTEXT]' },
+      ]);
 
       expect(sendSpy).toHaveBeenCalledWith(
         '9988776655',
@@ -351,7 +407,12 @@ describe('MetaWhatsAppService', () => {
 
       expect(sendSpy).toHaveBeenCalledWith('9988776655', 'EAAB_TEST_TOKEN', '573009876543', 'Hoy cerramos por inventario 🙏', false);
       expect(aiService.parseOrderIntent).not.toHaveBeenCalled();
-      expect(prismaService.chatHistory.create).not.toHaveBeenCalled();
+      // El Inbox debe reflejar el mensaje del cliente y la respuesta de cierre
+      const created = (prismaService.chatHistory.create as jest.Mock).mock.calls.map(([arg]) => arg.data);
+      expect(created).toEqual([
+        { restaurantId: 'rest-1', customerPhone: '573009876543', role: 'user', message: 'Quiero una pizza' },
+        { restaurantId: 'rest-1', customerPhone: '573009876543', role: 'model', message: 'Hoy cerramos por inventario 🙏' },
+      ]);
     });
 
     it('fuera de horario (día sin franjas) tampoco llama a la IA', async () => {

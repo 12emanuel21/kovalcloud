@@ -201,7 +201,7 @@ model ChatHistory {
   restaurantId  String
   restaurant    Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   customerPhone String
-  role          String // "user" o "model"
+  role          String // "user", "model" o "system" (marcadores como el reset)
   message       String
   createdAt     DateTime   @default(now())
 

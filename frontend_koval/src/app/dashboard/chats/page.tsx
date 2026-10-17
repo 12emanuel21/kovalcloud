@@ -10,10 +10,16 @@ const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4
 /** Cada cuánto se refrescan la bandeja y el chat abierto */
 const POLL_INTERVAL_MS = 10_000;
 
+/** Marcadores internos del bot (role "system", ver backend chats/chat-history.ts) */
+const SYSTEM_LABELS: Record<string, string> = {
+  '[SYSTEM_RESET_CONTEXT]': '🧹 El cliente reinició el contexto del bot',
+};
+const systemLabel = (message: string) => SYSTEM_LABELS[message] ?? `⚙️ ${message}`;
+
 interface Conversation {
   customerPhone: string;
   lastMessage: string;
-  lastRole: string; // "user" (cliente) | "model" (bot)
+  lastRole: string; // "user" (cliente) | "model" (bot) | "system" (marcador interno)
   lastMessageAt: string;
   messageCount: number;
 }
@@ -227,7 +233,7 @@ export default function ChatsPage() {
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-xs text-slate-400">
                       {conversation.lastRole === 'model' && <span className="text-emerald-400/80">🤖 </span>}
-                      {conversation.lastMessage}
+                      {conversation.lastRole === 'system' ? systemLabel(conversation.lastMessage) : conversation.lastMessage}
                     </p>
                   </button>
                 );
@@ -277,6 +283,15 @@ export default function ChatsPage() {
                   <p className="text-center text-xs text-slate-500">Este chat no tiene mensajes guardados.</p>
                 ) : (
                   messages.map((msg) => {
+                    if (msg.role === 'system') {
+                      return (
+                        <div key={msg.id} className="flex justify-center">
+                          <span className="rounded-full border border-slate-700/60 bg-slate-900 px-3 py-1 text-[10px] font-semibold text-slate-400">
+                            {systemLabel(msg.message)} · {formatBubbleTime(msg.createdAt)}
+                          </span>
+                        </div>
+                      );
+                    }
                     const fromBot = msg.role === 'model';
                     return (
                       <div key={msg.id} className={`flex ${fromBot ? 'justify-end' : 'justify-start'}`}>

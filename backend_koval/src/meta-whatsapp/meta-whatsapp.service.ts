@@ -9,6 +9,12 @@ import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
 import { internalApiHeaders } from '../config/secrets';
 import { buildClosedMessage, isRestaurantClosed } from '../restaurants/business-hours';
 import {
+  CHAT_ROLE_MODEL,
+  CHAT_ROLE_SYSTEM,
+  CHAT_ROLE_USER,
+  RESET_CONTEXT_MARKER,
+} from '../chats/chat-history';
+import {
   buildConfirmationMessage,
   buildOrderLines,
   buildOrderNotes,
@@ -26,6 +32,20 @@ import {
 function baileysSendUrl(restaurantId: string): string {
   const base = (process.env.WHATSAPP_SERVICE_URL || 'http://whatsapp_baileys:5000/send').replace(/\/send\/?$/, '');
   return `${base}/sessions/${encodeURIComponent(restaurantId)}/send`;
+}
+
+/** Texto de un mensaje entrante sin transcribir audio (texto, captions o botones) */
+function extractPlainText(msg: any): string {
+  return (
+    msg?.text?.body ||
+    msg?.image?.caption ||
+    msg?.video?.caption ||
+    msg?.document?.caption ||
+    msg?.interactive?.button_reply?.title ||
+    msg?.interactive?.list_reply?.title ||
+    msg?.button?.text ||
+    ''
+  ).trim();
 }
 
 /** Ventana para evitar pedidos duplicados si el cliente confirma dos veces */
@@ -49,6 +69,25 @@ export class MetaWhatsAppService {
     private readonly aiService: AiService,
     private readonly ordersGateway: OrdersGateway,
   ) { }
+
+  /**
+   * Auditoría del Inbox: guarda en orden los mensajes de un intercambio que no pasó por la IA.
+   * Nunca lanza: un fallo al registrar no debe afectar a la respuesta ya enviada.
+   */
+  private async recordChat(
+    restaurantId: string,
+    customerPhone: string,
+    entries: Array<{ role: string; message: string }>,
+  ): Promise<void> {
+    try {
+      // Inserciones secuenciales: createdAt creciente preserva el orden en el Inbox
+      for (const { role, message } of entries) {
+        await this.prisma.chatHistory.create({ data: { restaurantId, customerPhone, role, message } });
+      }
+    } catch (error: any) {
+      this.logger.error(`❌ No se pudo registrar el chat de ${customerPhone} en ChatHistory: ${error?.message || error}`);
+    }
+  }
 
   /**
    * Envía un mensaje de texto oficial a WhatsApp utilizando Meta Graph API v22.0
@@ -432,15 +471,20 @@ export class MetaWhatsAppService {
       //      no se transcribe audio ni se llama a la IA; se responde con el mensaje de cierre.
       if (isRestaurantClosed(restaurant)) {
         this.logger.log(`🌙 [${restaurant.name}] Local cerrado: respuesta estática a [${senderNumber}] sin IA`);
-        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, buildClosedMessage(restaurant), isBaileys);
+        const closedMessage = buildClosedMessage(restaurant);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, closedMessage, isBaileys);
+        // Auditoría del Inbox: el audio no se transcribe con el local cerrado
+        const incomingText = extractPlainText(incomingMsg) || (incomingMsg.audio?.id ? '🎙️ [Nota de voz]' : '');
+        await this.recordChat(restaurant.id, senderNumber, [
+          ...(incomingText ? [{ role: CHAT_ROLE_USER, message: incomingText }] : []),
+          { role: CHAT_ROLE_MODEL, message: closedMessage },
+        ]);
         return;
       }
 
       // 3. Extraer el texto del mensaje según su tipo
-      let messageText = '';
-      if (incomingMsg.text?.body) {
-        messageText = incomingMsg.text.body;
-      } else if (incomingMsg.audio?.id) {
+      let messageText = extractPlainText(incomingMsg);
+      if (!messageText && incomingMsg.audio?.id) {
         this.logger.log(`🎙️ Mensaje de voz recibido (Media ID: ${incomingMsg.audio.id}). Descargando y transcribiendo...`);
         try {
           const audioBuffer = await this.downloadMedia(incomingMsg.audio.id, targetToken);
@@ -452,18 +496,6 @@ export class MetaWhatsAppService {
         } catch (audioErr: any) {
           this.logger.error(`❌ Error al procesar audio: ${audioErr?.message || audioErr}`);
         }
-      } else if (incomingMsg.image?.caption) {
-        messageText = incomingMsg.image.caption;
-      } else if (incomingMsg.video?.caption) {
-        messageText = incomingMsg.video.caption;
-      } else if (incomingMsg.document?.caption) {
-        messageText = incomingMsg.document.caption;
-      } else if (incomingMsg.interactive?.button_reply?.title) {
-        messageText = incomingMsg.interactive.button_reply.title;
-      } else if (incomingMsg.interactive?.list_reply?.title) {
-        messageText = incomingMsg.interactive.list_reply.title;
-      } else if (incomingMsg.button?.text) {
-        messageText = incomingMsg.button.text;
       }
 
       if (!messageText || !messageText.trim()) {
@@ -486,19 +518,14 @@ export class MetaWhatsAppService {
       // --- 3.5 COMANDO DE SISTEMA: RESET ---
       if (lowerMsg === 'reset') {
         this.logger.log(`🧹 Ejecutando comando de reset para ${senderNumber}`);
-        await this.prisma.chatHistory.deleteMany({
-          where: {
-            restaurantId: restaurant.id,
-            customerPhone: senderNumber,
-          },
-        });
-        await this.sendTextMessage(
-          targetPhoneId,
-          targetToken,
-          senderNumber,
-          '🧠 Memoria borrada. Contexto limpio. ¿En qué puedo ayudarte de nuevo?',
-          isBaileys
-        );
+        const resetReply = '🧠 Memoria borrada. Contexto limpio. ¿En qué puedo ayudarte de nuevo?';
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, resetReply, isBaileys);
+        // Sin borrado físico: el marcador va al final para que la IA arranque limpia tras él
+        await this.recordChat(restaurant.id, senderNumber, [
+          { role: CHAT_ROLE_USER, message: messageText.trim() },
+          { role: CHAT_ROLE_MODEL, message: resetReply },
+          { role: CHAT_ROLE_SYSTEM, message: RESET_CONTEXT_MARKER },
+        ]);
         return; // Detener flujo
       }
 
@@ -531,10 +558,18 @@ export class MetaWhatsAppService {
             'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
           const caption = '📄 Aquí tienes nuestro menú. ¡Dime qué te gustaría ordenar!';
           await this.sendDocumentMessage(targetPhoneId, targetToken, senderNumber, pdfUrl, "Menu.pdf", caption, isBaileys);
+          await this.recordChat(restaurant.id, senderNumber, [
+            { role: CHAT_ROLE_USER, message: messageText.trim() },
+            { role: CHAT_ROLE_MODEL, message: `${caption}\n📎 ${pdfUrl}` },
+          ]);
           return; // Detiene la ejecución de IA
         }
 
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, finalResponse, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [
+          { role: CHAT_ROLE_USER, message: messageText.trim() },
+          { role: CHAT_ROLE_MODEL, message: finalResponse },
+        ]);
         return; // Detiene la ejecución aquí (Costo IA: $0)
       }
       // --- FIN INTERCEPTOR ---
@@ -544,11 +579,23 @@ export class MetaWhatsAppService {
         .map((i) => `ID: ${i.id} | Categoría: ${i.category?.name ?? '-'} | Nombre: ${i.name} | Precio: ${i.price}`)
         .join('\n');
 
-      // 4.5. Obtener historial de conversación previo (últimos 20 mensajes)
+      // 4.5. Obtener historial de conversación previo (últimos 20 mensajes desde el último reset)
+      const lastReset = await this.prisma.chatHistory.findFirst({
+        where: {
+          restaurantId: restaurant.id,
+          customerPhone: senderNumber,
+          role: CHAT_ROLE_SYSTEM,
+          message: RESET_CONTEXT_MARKER,
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
       const rawHistory = await this.prisma.chatHistory.findMany({
         where: {
           restaurantId: restaurant.id,
           customerPhone: senderNumber,
+          role: { in: [CHAT_ROLE_USER, CHAT_ROLE_MODEL] },
+          ...(lastReset ? { createdAt: { gt: lastReset.createdAt } } : {}),
         },
         orderBy: { createdAt: 'desc' },
         take: 20,
