@@ -1,6 +1,7 @@
 /**
  * RBAC en el frontend (solo UX: la autorización real la aplica el backend).
- * - SUPERADMIN: panel global /admin (no entra al dashboard de un restaurante).
+ * - SUPERADMIN: panel global /admin. Entra al dashboard de un restaurante solo en
+ *   "Modo Dios" (operando un local elegido desde /admin).
  * - OWNER: dashboard completo de su restaurante.
  * - KITCHEN: solo pedidos (Kanban) y el monitor de cocina.
  */
@@ -21,9 +22,9 @@ export function homePathForRole(role: string | undefined): string {
   }
 }
 
-/** ¿Puede este rol ver esta ruta del dashboard? */
-export function canAccessDashboardPath(role: string | undefined, pathname: string): boolean {
-  if (role === 'SUPERADMIN') return false;
+/** ¿Puede este rol ver esta ruta del dashboard? (SUPERADMIN solo en Modo Dios) */
+export function canAccessDashboardPath(role: string | undefined, pathname: string, isImpersonating = false): boolean {
+  if (role === 'SUPERADMIN') return isImpersonating;
   if (role === 'KITCHEN') {
     return KITCHEN_DASHBOARD_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
   }

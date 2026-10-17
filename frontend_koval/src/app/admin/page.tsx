@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Building2, CircleAlert, ExternalLink, Plus, RefreshCw } from 'lucide-react';
+import { Building2, CircleAlert, ExternalLink, LogIn, Plus, RefreshCw } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import NewRestaurantModal from '@/components/admin/NewRestaurantModal';
 import type { AdminRestaurant } from '@/components/admin/types';
@@ -12,7 +13,14 @@ const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
 
 export default function AdminHomePage() {
-  const { token } = useAuth();
+  const { token, enterAsOwner } = useAuth();
+  const router = useRouter();
+
+  // Modo Dios: operar el dashboard del cliente con la sesión del SUPERADMIN
+  const handleEnterAsOwner = (restaurant: AdminRestaurant) => {
+    enterAsOwner({ id: restaurant.id, name: restaurant.name, slug: restaurant.slug });
+    router.push('/dashboard');
+  };
   const [restaurants, setRestaurants] = useState<AdminRestaurant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,20 +95,21 @@ export default function AdminHomePage() {
 
       <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-[880px] text-left text-sm">
             <thead className="border-b border-zinc-800 bg-zinc-900/80 text-xs uppercase tracking-wider text-zinc-500">
               <tr>
                 <th className="px-5 py-3 font-semibold">Nombre del Restaurante</th>
                 <th className="px-5 py-3 font-semibold">Subdominio / Slug</th>
                 <th className="px-5 py-3 font-semibold">Email del Dueño</th>
                 <th className="px-5 py-3 font-semibold">Fecha de Creación</th>
+                <th className="px-5 py-3 text-right font-semibold">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {loading && restaurants.length === 0 ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 4 }).map((__, j) => (
+                    {Array.from({ length: 5 }).map((__, j) => (
                       <td key={j} className="px-5 py-4">
                         <div className="h-4 w-3/4 animate-pulse rounded bg-zinc-800" />
                       </td>
@@ -109,7 +118,7 @@ export default function AdminHomePage() {
                 ))
               ) : restaurants.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-14 text-center">
+                  <td colSpan={5} className="px-5 py-14 text-center">
                     <Building2 className="mx-auto h-8 w-8 text-zinc-600" />
                     <p className="mt-2 text-sm text-zinc-400">Aún no hay restaurantes. Crea el primero.</p>
                   </td>
@@ -147,6 +156,17 @@ export default function AdminHomePage() {
                       )}
                     </td>
                     <td className="px-5 py-4 text-zinc-400">{formatDate(r.createdAt)}</td>
+                    <td className="px-5 py-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleEnterAsOwner(r)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-orange-500/40 bg-orange-500/10 px-3 py-1.5 text-xs font-semibold text-orange-300 transition-colors hover:bg-orange-500/20 hover:text-orange-200"
+                        title={`Operar el dashboard de ${r.name}`}
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                        Entrar como Dueño
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}

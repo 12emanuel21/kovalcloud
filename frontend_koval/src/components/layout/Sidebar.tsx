@@ -15,9 +15,10 @@ interface SidebarProps {
 
 export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { restaurant, restaurantId, user } = useAuth();
+  const { restaurant, restaurantId, user, isImpersonating } = useAuth();
   const navItems = getNavItems(restaurantId, user?.role);
-  const homeHref = homePathForRole(user?.role);
+  // En Modo Dios el logo lleva al dashboard del local operado, no al panel /admin
+  const homeHref = isImpersonating ? '/dashboard' : homePathForRole(user?.role);
   const restaurantSlug = restaurant?.slug;
 
   return (

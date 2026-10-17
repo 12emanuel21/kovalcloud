@@ -29,11 +29,12 @@ async function apiErrorMessage(res: Response, fallback: string): Promise<string>
 /**
  * Panel "Turno / Horario" del Kanban: muestra si el local recibe pedidos y permite
  * prorrogar el horario (+30 min, +1 h o minutos a medida) o cancelar la prórroga.
- * Solo para el OWNER (el backend también lo exige).
+ * Para el OWNER y el SUPERADMIN (en Modo Dios); el backend también lo exige.
  */
 export function ShiftExtensionPanel() {
   const { user, restaurantId, token } = useAuth();
-  const canManage = user?.role === 'OWNER';
+  // OWNER de su local, o SUPERADMIN en Modo Dios (el backend permite ambos)
+  const canManage = user?.role === 'OWNER' || user?.role === 'SUPERADMIN';
 
   const [shift, setShift] = useState<ShiftState | null>(null);
   const [now, setNow] = useState(() => new Date());

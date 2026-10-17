@@ -19,11 +19,21 @@ export interface User {
   restaurant?: Restaurant | null;
 }
 
+/** Restaurante que opera un SUPERADMIN en "Modo Dios" */
+export type ImpersonatedRestaurant = Pick<Restaurant, 'id' | 'name' | 'slug'>;
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
+  /** Restaurante en contexto: el del usuario o, en Modo Dios, el que opera el SUPERADMIN */
   restaurant: Restaurant | null;
+  /** Id del restaurante en contexto ('' si no hay ninguno) */
   restaurantId: string;
+  /** Restaurante que opera el SUPERADMIN (null si no está en Modo Dios) */
+  impersonatedRestaurant: ImpersonatedRestaurant | null;
+  isImpersonating: boolean;
+  enterAsOwner: (restaurant: ImpersonatedRestaurant) => void;
+  exitImpersonation: () => void;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -35,11 +45,34 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
 
+// Modo Dios en sessionStorage: sobrevive a recargas pero muere al cerrar la pestaña,
+// para que un SUPERADMIN no quede operando un local por olvido.
+const IMPERSONATION_KEY = 'koval_impersonation';
+
+function readImpersonation(): ImpersonatedRestaurant | null {
+  try {
+    const raw = sessionStorage.getItem(IMPERSONATION_KEY);
+    const value = raw ? (JSON.parse(raw) as Partial<ImpersonatedRestaurant>) : null;
+    return value?.id && value.name && value.slug ? { id: value.id, name: value.name, slug: value.slug } : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearImpersonationStorage() {
+  try {
+    sessionStorage.removeItem(IMPERSONATION_KEY);
+  } catch {
+    // sessionStorage no disponible (modo privado estricto): no hay nada que limpiar
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [impersonation, setImpersonation] = useState<ImpersonatedRestaurant | null>(null);
 
   const syncAuth = useCallback((): boolean => {
     try {
@@ -63,9 +96,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Cargar sesión guardada en localStorage al montar
+  // Cargar sesión guardada (y Modo Dios activo) al montar, antes de que los layouts decidan
   useEffect(() => {
     syncAuth();
+    setImpersonation(readImpersonation());
     setIsLoading(false);
   }, [syncAuth]);
 
@@ -114,6 +148,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setToken(accessToken);
     setUser(authUser);
+    setImpersonation(null);
+    clearImpersonationStorage();
 
     localStorage.setItem('koval_token', accessToken);
     localStorage.setItem('koval_user', JSON.stringify(authUser));
@@ -125,14 +161,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
+    setImpersonation(null);
+    clearImpersonationStorage();
     localStorage.removeItem('koval_token');
     localStorage.removeItem('koval_user');
     router.push('/login');
   }, [router]);
 
-  const restaurant = user?.restaurant || null;
-  // Si el usuario autenticado tiene restaurante, se usa su id; de lo contrario, ID de respaldo
-  const restaurantId = restaurant?.id || '8a23ecc8-788f-43fd-a5d6-d3f83ab5316d';
+  const enterAsOwner = useCallback((target: ImpersonatedRestaurant) => {
+    const value = { id: target.id, name: target.name, slug: target.slug };
+    setImpersonation(value);
+    try {
+      sessionStorage.setItem(IMPERSONATION_KEY, JSON.stringify(value));
+    } catch {
+      // Sin sessionStorage el Modo Dios dura solo hasta recargar
+    }
+  }, []);
+
+  const exitImpersonation = useCallback(() => {
+    setImpersonation(null);
+    clearImpersonationStorage();
+    router.push('/admin');
+  }, [router]);
+
+  // El disfraz solo aplica a un SUPERADMIN: cualquier otro rol usa siempre su propio restaurante
+  const impersonatedRestaurant = user?.role === 'SUPERADMIN' ? impersonation : null;
+  const restaurant: Restaurant | null = impersonatedRestaurant ?? user?.restaurant ?? null;
+  // Sin respaldo: un usuario sin restaurante no debe operar ningún local por accidente
+  const restaurantId = restaurant?.id ?? '';
 
   return (
     <AuthContext.Provider
@@ -141,6 +197,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         restaurant,
         restaurantId,
+        impersonatedRestaurant,
+        isImpersonating: impersonatedRestaurant !== null,
+        enterAsOwner,
+        exitImpersonation,
         isAuthenticated: !!token && !!user,
         isLoading,
         login,

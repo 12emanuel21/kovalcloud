@@ -13,13 +13,13 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isLoading, syncAuth, user } = useAuth();
+  const { isAuthenticated, isLoading, syncAuth, user, isImpersonating } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  // RBAC de rutas: SUPERADMIN no usa el dashboard de un restaurante; KITCHEN solo Pedidos
-  const allowedHere = !user || canAccessDashboardPath(user.role, pathname);
+  // RBAC de rutas: SUPERADMIN solo en Modo Dios; KITCHEN solo Pedidos
+  const allowedHere = !user || canAccessDashboardPath(user.role, pathname, isImpersonating);
 
   useEffect(() => {
     if (!isLoading) {

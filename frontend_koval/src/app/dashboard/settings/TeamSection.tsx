@@ -26,7 +26,10 @@ async function apiErrorMessage(res: Response, fallback: string): Promise<string>
  * WebSockets abiertos al instante.
  */
 export function TeamSection() {
-  const { token } = useAuth();
+  const { token, restaurantId } = useAuth();
+  // Restaurante en contexto (propio o, en Modo Dios, el operado): sin él un SUPERADMIN
+  // listaría empleados de todos los locales y no podría crear cuentas
+  const tenantQuery = restaurantId ? `?restaurantId=${encodeURIComponent(restaurantId)}` : '';
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +51,7 @@ export function TeamSection() {
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    fetch(`${API_URL}/users`, { cache: 'no-store', headers: authHeaders() })
+    fetch(`${API_URL}/users${tenantQuery}`, { cache: 'no-store', headers: authHeaders() })
       .then(async (res) => {
         if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo cargar el equipo'));
         return res.json() as Promise<Employee[]>;
@@ -65,7 +68,7 @@ export function TeamSection() {
     return () => {
       cancelled = true;
     };
-  }, [token, authHeaders]);
+  }, [token, authHeaders, tenantQuery]);
 
   // Cambio optimista: se revierte si la API lo rechaza
   const handleToggle = async (employee: Employee) => {
@@ -95,7 +98,13 @@ export function TeamSection() {
       const res = await fetch(`${API_URL}/users`, {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ name: newName.trim(), email: newEmail.trim(), password: newPassword }),
+        // El backend toma restaurantId del body en POST /users (CreateEmployeeDto)
+        body: JSON.stringify({
+          name: newName.trim(),
+          email: newEmail.trim(),
+          password: newPassword,
+          ...(restaurantId ? { restaurantId } : {}),
+        }),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo crear el empleado'));
       const created: Employee = await res.json();
