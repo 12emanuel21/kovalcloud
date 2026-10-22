@@ -169,6 +169,7 @@ export const DarkPremiumTemplate: React.FC<MenuTemplateProps> = ({ restaurant, c
 
       {/* Drawer y botón flotante del carrito */}
       <CartDrawer
+        theme="dark-premium"
         restaurantId={restaurant.id}
         restaurantPhone={restaurant.phone || ''}
         tableNumber={tableNumber}

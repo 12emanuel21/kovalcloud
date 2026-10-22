@@ -2,8 +2,37 @@
 
 import React, { useState } from 'react';
 import { useCart } from '@/context/CartContext';
+import { DEFAULT_MENU_THEME, type MenuTheme } from '@/lib/menu-themes';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
+
+/**
+ * Acento del carrito según el tema de la carta: solo CTA y bordes activos.
+ * El resto del drawer es neutro (casi negro) en todos los temas.
+ */
+const ACCENTS: Record<
+  MenuTheme,
+  { cta: string; ctaShadow: string; barBorder: string; badge: string; text: string; soft: string; focus: string }
+> = {
+  'dark-premium': {
+    cta: 'bg-red-600 hover:bg-red-700 text-white',
+    ctaShadow: 'shadow-red-950/50',
+    barBorder: 'border-red-600/40',
+    badge: 'bg-red-500 text-white',
+    text: 'text-red-400',
+    soft: 'bg-red-500/10 text-red-400 border-red-500/20',
+    focus: 'focus:border-red-500 focus:ring-red-500',
+  },
+  'clean-light': {
+    cta: 'bg-emerald-500 hover:bg-emerald-600 text-white',
+    ctaShadow: 'shadow-emerald-950/40',
+    barBorder: 'border-emerald-500/40',
+    badge: 'bg-emerald-400 text-slate-950',
+    text: 'text-emerald-400',
+    soft: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    focus: 'focus:border-emerald-500 focus:ring-emerald-500',
+  },
+};
 
 interface CartDrawerProps {
   restaurantId: string;
@@ -12,6 +41,8 @@ interface CartDrawerProps {
   /** Local cerrado (emergencia u horario): no se pueden enviar pedidos */
   isClosed?: boolean;
   closedNotice?: string;
+  /** Tema de la carta: define el color de acento de los botones */
+  theme?: MenuTheme;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -20,7 +51,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   tableNumber,
   isClosed = false,
   closedNotice = 'En este momento estamos cerrados.',
+  theme = DEFAULT_MENU_THEME,
 }) => {
+  const accent = ACCENTS[theme] ?? ACCENTS[DEFAULT_MENU_THEME];
   const { items, totalCount, totalAmount, updateQuantity, removeItem, clearCart } = useCart();
   const [isOpen, setIsOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -120,10 +153,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       {/* Botón Flotante Inferior (Sticky Bottom Bar) */}
       {totalCount > 0 && !isOpen && (
         <div className="fixed bottom-4 left-4 right-4 z-40 max-w-md mx-auto animate-in fade-in slide-in-from-bottom-5 duration-300">
-          <div className="bg-slate-900/95 border border-emerald-500/40 backdrop-blur-xl rounded-2xl p-3.5 shadow-2xl shadow-emerald-950/60 flex items-center justify-between gap-4">
+          <div className={`bg-slate-900/95 border ${accent.barBorder} backdrop-blur-xl rounded-2xl p-3.5 shadow-2xl shadow-black/60 flex items-center justify-between gap-4`}>
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className="h-11 w-11 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black shadow-lg shadow-emerald-500/30">
+                <div className={`h-11 w-11 rounded-xl ${accent.cta} flex items-center justify-center font-black shadow-lg ${accent.ctaShadow}`}>
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     className="h-6 w-6"
@@ -139,7 +172,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
                   </svg>
                 </div>
-                <span className="absolute -top-1.5 -right-1.5 bg-emerald-400 text-slate-950 text-[11px] font-black h-5 min-w-5 px-1 rounded-full flex items-center justify-center border-2 border-slate-900 shadow">
+                <span className={`absolute -top-1.5 -right-1.5 ${accent.badge} text-[11px] font-black h-5 min-w-5 px-1 rounded-full flex items-center justify-center border-2 border-slate-900 shadow`}>
                   {totalCount}
                 </span>
               </div>
@@ -155,7 +188,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
             <button
               onClick={() => setIsOpen(true)}
-              className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold text-sm px-5 py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/25 active:scale-95 flex items-center gap-2"
+              className={`${accent.cta} font-bold text-sm px-5 py-2.5 rounded-xl transition shadow-lg ${accent.ctaShadow} active:scale-95 flex items-center gap-2`}
             >
               <span>Ver Pedido</span>
               <svg
@@ -189,7 +222,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             {/* Header */}
             <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 sticky top-0 z-20 backdrop-blur-md">
               <div className="flex items-center gap-2.5">
-                <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-xs border border-emerald-500/20">
+                <div className={`h-8 w-8 rounded-lg ${accent.soft} flex items-center justify-center font-bold text-xs border`}>
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     className="h-4 w-4"
@@ -242,7 +275,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       >
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-semibold text-white truncate">{item.name}</p>
-                          <p className="text-xs text-emerald-400 font-medium">
+                          <p className={`text-xs ${accent.text} font-medium`}>
                             {formatCOP(item.price * item.quantity)}
                           </p>
                         </div>
@@ -326,7 +359,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Nombre Completo <span className="text-emerald-400">*</span>
+                      Nombre Completo <span className={accent.text}>*</span>
                     </label>
                     <input
                       type="text"
@@ -334,13 +367,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       onChange={(e) => setCustomerName(e.target.value)}
                       placeholder="Ej. Carlos Gómez"
                       required
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition"
+                      className={`w-full bg-slate-950 border border-slate-800 ${accent.focus} focus:ring-1 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition`}
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Teléfono / WhatsApp <span className="text-emerald-400">*</span>
+                      Teléfono / WhatsApp <span className={accent.text}>*</span>
                     </label>
                     <input
                       type="tel"
@@ -348,7 +381,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       onChange={(e) => setCustomerPhone(e.target.value)}
                       placeholder="Ej. 300 123 4567"
                       required
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition"
+                      className={`w-full bg-slate-950 border border-slate-800 ${accent.focus} focus:ring-1 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition`}
                     />
                   </div>
 
@@ -362,7 +395,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         value={deliveryAddress}
                         onChange={(e) => setDeliveryAddress(e.target.value)}
                         placeholder="Ej. Cra 45 # 26-85 Apto 401"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition"
+                        className={`w-full bg-slate-950 border border-slate-800 ${accent.focus} focus:ring-1 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition`}
                       />
                     </div>
                   )}
@@ -376,7 +409,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder="Ej. Sin cebolla en la pizza, llevar cambio de 50mil..."
                       rows={2}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition resize-none"
+                      className={`w-full bg-slate-950 border border-slate-800 ${accent.focus} focus:ring-1 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition resize-none`}
                     />
                   </div>
                 </form>
@@ -388,7 +421,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               <div className="p-5 border-t border-slate-800 bg-slate-900/90 space-y-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-400 font-medium">Total a Pagar:</span>
-                  <span className="text-xl font-extrabold text-emerald-400 font-mono">
+                  <span className={`text-xl font-extrabold ${accent.text} font-mono`}>
                     {formatCOP(totalAmount)}
                   </span>
                 </div>
@@ -397,7 +430,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   type="submit"
                   form="checkout-form"
                   disabled={isSubmitting || isClosed}
-                  className="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 disabled:opacity-50 text-white font-bold py-3.5 px-4 rounded-xl transition shadow-lg shadow-green-900/40 active:scale-[0.98] flex items-center justify-center gap-2.5"
+                  className={`w-full ${accent.cta} disabled:opacity-50 font-bold py-3.5 px-4 rounded-xl transition shadow-lg ${accent.ctaShadow} active:scale-[0.98] flex items-center justify-center gap-2.5`}
                 >
                   {isClosed ? (
                     <span>🔒 Local cerrado: no estamos recibiendo pedidos</span>
