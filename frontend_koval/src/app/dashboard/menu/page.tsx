@@ -31,6 +31,18 @@ const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4
 const DISH_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_DISH_IMAGE_BYTES = 5 * 1024 * 1024;
 
+/** Categorías del restaurante con sus platos (sin tocar estado: lo aplica quien llama) */
+async function requestCategories(restaurantId: string): Promise<Category[]> {
+  const res = await fetch(`${API_URL}/categories?restaurantId=${restaurantId}`, { cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`Error en el servidor: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+const loadErrorMessage = (err: unknown) =>
+  err instanceof Error ? err.message : 'No se pudo conectar con el servidor NestJS';
+
 export default function MenuManagementPage() {
   const router = useRouter();
   const { restaurantId, token } = useAuth();
@@ -75,36 +87,52 @@ export default function MenuManagementPage() {
   const imageTargetRef = useRef<MenuItem | null>(null);
   const [uploadingImageId, setUploadingImageId] = useState<string | null>(null);
 
-  // Cargar categorías desde el backend
-  const fetchCategories = useCallback(async (showLoader = false) => {
-    if (!restaurantId) return;
-    if (showLoader) setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API_URL}/categories?restaurantId=${restaurantId}`, {
-        cache: 'no-store',
-      });
-      if (!res.ok) {
-        throw new Error(`Error en el servidor: ${res.status} ${res.statusText}`);
-      }
-      const data: Category[] = await res.json();
-      setCategories(data);
-      if (data.length > 0 && !dishCategoryId) {
-        setDishCategoryId(data[0].id);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'No se pudo conectar con el servidor NestJS';
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [dishCategoryId, restaurantId]);
+  // Aplica las categorías recibidas; preselecciona la primera en "Nuevo plato" si no hay ninguna elegida.
+  // (Updater funcional: así fetchCategories no depende de dishCategoryId y no se recarga el menú
+  // cada vez que el usuario cambia ese selector.)
+  const applyCategories = useCallback((data: Category[]) => {
+    setCategories(data);
+    if (data.length > 0) setDishCategoryId((current) => current || data[0].id);
+  }, []);
 
+  // Recarga manual o tras crear/editar/borrar
+  const fetchCategories = useCallback(
+    async (showLoader = false) => {
+      if (!restaurantId) return;
+      if (showLoader) setLoading(true);
+      setError(null);
+      try {
+        applyCategories(await requestCategories(restaurantId));
+      } catch (err: unknown) {
+        setError(loadErrorMessage(err));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [restaurantId, applyCategories],
+  );
+
+  // Carga inicial (y al cambiar de restaurante en Modo Dios): setState solo en callbacks de la promesa
   useEffect(() => {
-    if (restaurantId) {
-      fetchCategories(true);
-    }
-  }, [fetchCategories, restaurantId]);
+    if (!restaurantId) return;
+    let cancelled = false;
+    requestCategories(restaurantId)
+      .then((data) => {
+        if (!cancelled) {
+          applyCategories(data);
+          setError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(loadErrorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantId, applyCategories]);
 
   // Manejador: Crear Categoría
   const handleCreateCategory = async (e: React.FormEvent) => {
@@ -882,7 +910,7 @@ export default function MenuManagementPage() {
               <div>
                 <h3 className="text-base font-bold text-slate-200">No hay categorías en el menú</h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                  Comienza creando tu primera categoría en el formulario de la izquierda (ej. "Entradas" o "Bebidas").
+                  Comienza creando tu primera categoría en el formulario de la izquierda (ej. &quot;Entradas&quot; o &quot;Bebidas&quot;).
                 </p>
               </div>
             </div>
