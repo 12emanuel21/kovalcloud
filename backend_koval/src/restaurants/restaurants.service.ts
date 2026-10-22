@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,6 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { maskSecret, sanitizeRestaurant } from './sanitize-restaurant';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { parseBusinessHours } from './business-hours';
+import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
 
@@ -257,6 +258,69 @@ export class RestaurantsService {
       hasMetaAppSecret: Boolean(metaAppSecret),
       metaAppSecretMasked: maskSecret(metaAppSecret),
     };
+  }
+
+  /**
+   * Carga masiva desde Excel/CSV (columnas: Categoría, Nombre, Descripción, Precio, Disponible, URL Imagen).
+   * Todo o nada: primero se valida el archivo completo (400 con la lista de filas con error) y
+   * luego se inserta en una sola transacción. Las categorías existentes se reutilizan por nombre.
+   */
+  async importMenuFromSpreadsheet(id: string, fileBuffer: Buffer, filename: string) {
+    await this.findOne(id);
+
+    const { rows, errors, warnings } = parseMenuSpreadsheet(fileBuffer, filename);
+    if (errors.length) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: ['No se importó ningún plato. Corrige el archivo y vuelve a subirlo:', ...errors],
+      });
+    }
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const existing = await tx.menuCategory.findMany({
+          where: { restaurantId: id, deletedAt: null },
+          select: { id: true, name: true, order: true },
+        });
+        // Nombre normalizado (sin tildes ni mayúsculas) -> id, para no duplicar categorías
+        const categoryIds = new Map(existing.map((c) => [normalizeHeader(c.name), c.id]));
+        let nextOrder = existing.reduce((max, c) => Math.max(max, c.order), -1) + 1;
+        let categoriesCreated = 0;
+
+        for (const { category } of rows) {
+          const key = normalizeHeader(category);
+          if (categoryIds.has(key)) continue;
+          const created = await tx.menuCategory.create({
+            data: { name: category, order: nextOrder++, restaurantId: id },
+            select: { id: true },
+          });
+          categoryIds.set(key, created.id);
+          categoriesCreated++;
+        }
+
+        const { count } = await tx.menuItem.createMany({
+          data: rows.map((row) => ({
+            name: row.name,
+            description: row.description,
+            price: row.price,
+            isAvailable: row.isAvailable,
+            imageUrl: row.imageUrl,
+            restaurantId: id,
+            categoryId: categoryIds.get(normalizeHeader(row.category))!,
+          })),
+        });
+
+        const categoriesUsed = new Set(rows.map((row) => normalizeHeader(row.category))).size;
+        return {
+          message: `Menú importado: ${count} platos en ${categoriesUsed} categorías (${categoriesCreated} nuevas)`,
+          itemsCreated: count,
+          categoriesCreated,
+          warnings,
+        };
+      },
+      { timeout: 30_000 },
+    );
   }
 
   async importMenuFromPdf(id: string, fileBuffer: Buffer) {

@@ -11,6 +11,10 @@ import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { ExtendHoursDto } from './dto/extend-hours.dto';
+import { SPREADSHEET_EXTENSIONS } from './menu-spreadsheet';
+
+/** Tamaño máximo del archivo de importación (PDF o Excel) */
+const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024;
 
 @Controller('restaurants')
 export class RestaurantsController {
@@ -85,15 +89,30 @@ export class RestaurantsController {
     return this.restaurantsService.remove(id);
   }
 
-  @UseGuards(JwtAuthGuard, TenantGuard)
+  /**
+   * Importación de menú, según el archivo recibido en `file`:
+   * - PDF: digitalización con IA (comportamiento original del modal de importación).
+   * - XLSX / XLS / CSV: carga masiva por columnas, todo o nada (ver importMenuFromSpreadsheet).
+   * Solo el OWNER del local o el SUPERADMIN.
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(Role.OWNER, Role.SUPERADMIN)
   @TenantParam('id')
-  @Post(":id/menu/import")
-  @UseInterceptors(FileInterceptor("file"))
-  async importMenuFromPdf(
-    @Param("id") id: string,
-    @UploadedFile() file: { buffer: Buffer }
+  @Post(':id/menu/import')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_IMPORT_FILE_BYTES } }))
+  async importMenu(
+    @Param('id') id: string,
+    @UploadedFile() file: { buffer: Buffer; originalname?: string; mimetype?: string },
   ) {
-    if (!file) throw new BadRequestException("Archivo PDF requerido");
-    return this.restaurantsService.importMenuFromPdf(id, file.buffer);
+    if (!file) throw new BadRequestException('Adjunta un archivo en el campo "file" (PDF, Excel o CSV)');
+    const filename = (file.originalname ?? '').toLowerCase();
+
+    if (filename.endsWith('.pdf') || file.mimetype === 'application/pdf') {
+      return this.restaurantsService.importMenuFromPdf(id, file.buffer);
+    }
+    if (SPREADSHEET_EXTENSIONS.some((ext) => filename.endsWith(ext))) {
+      return this.restaurantsService.importMenuFromSpreadsheet(id, file.buffer, filename);
+    }
+    throw new BadRequestException('Formato no soportado: sube un PDF, un Excel (.xlsx/.xls) o un CSV');
   }
 }
