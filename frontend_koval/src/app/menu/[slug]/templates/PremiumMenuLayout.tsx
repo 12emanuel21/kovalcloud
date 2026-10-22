@@ -55,7 +55,8 @@ interface PremiumMenuLayoutProps extends MenuTemplateProps {
  * horarios/contacto y footer. Los temas solo cambian la paleta.
  */
 export function PremiumMenuLayout({ restaurant, categories, tableNumber, palette, theme }: PremiumMenuLayoutProps) {
-  const { isClosed, closedNotice, handleAddItem, getItemCartQuantity, isJustAdded } = useMenuLogic(restaurant);
+  const { isClosed, closedNotice, scheduleGroups, handleAddItem, getItemCartQuantity, isJustAdded } =
+    useMenuLogic(restaurant);
   const { totalCount } = useCart();
 
   const [activeCategory, setActiveCategory] = useState<'all' | string>('all');
@@ -226,9 +227,19 @@ export function PremiumMenuLayout({ restaurant, categories, tableNumber, palette
               <span className="text-xl" aria-hidden>
                 🔒
               </span>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className={`text-sm font-bold ${palette.closedTitle}`}>No estamos recibiendo pedidos</p>
-                <p className={`text-sm leading-relaxed ${palette.body}`}>{closedNotice}</p>
+                <p className={`text-sm leading-relaxed ${palette.closedText}`}>{closedNotice}</p>
+                {scheduleGroups.length > 0 && (
+                  <dl className={`mt-3 grid gap-x-8 gap-y-1.5 border-t pt-3 text-sm sm:grid-cols-2 ${palette.closedDivider} ${palette.closedText}`}>
+                    {scheduleGroups.map((group) => (
+                      <div key={group.days} className="flex flex-wrap gap-x-2">
+                        <dt className="font-bold">{group.days}:</dt>
+                        <dd>{group.time}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
               </div>
             </div>
           </div>

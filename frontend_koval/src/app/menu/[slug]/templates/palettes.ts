@@ -20,6 +20,9 @@ export interface MenuPalette {
   chip: string;
   closedBanner: string;
   closedTitle: string;
+  /** Texto y horarios dentro del banner de cerrado (legible sobre su fondo) */
+  closedText: string;
+  closedDivider: string;
   todayRow: string;
   /** Borde rasgado rojo del hero (tema claro) o fundido con el fondo (tema oscuro) */
   heroStyle: 'torn' | 'fade';
@@ -45,6 +48,8 @@ export const DARK_PALETTE: MenuPalette = {
   chip: 'bg-zinc-800/80 text-zinc-200 border-zinc-700',
   closedBanner: 'bg-red-950/40 border-red-900/60',
   closedTitle: 'text-white',
+  closedText: 'text-zinc-200',
+  closedDivider: 'border-red-900/50',
   todayRow: 'bg-red-600/10 text-white',
   heroStyle: 'fade',
   heroFade: 'bg-gradient-to-r from-[#0a0a0b] via-[#0a0a0b]/40 to-transparent',
@@ -69,6 +74,8 @@ export const LIGHT_PALETTE: MenuPalette = {
   chip: 'bg-white text-slate-700 border-slate-200',
   closedBanner: 'bg-red-50 border-red-200',
   closedTitle: 'text-red-700',
+  closedText: 'text-red-950',
+  closedDivider: 'border-red-200',
   todayRow: 'bg-red-50 text-zinc-950',
   heroStyle: 'torn',
   heroFade: '',

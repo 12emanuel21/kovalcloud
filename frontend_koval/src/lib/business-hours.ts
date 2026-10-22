@@ -154,3 +154,42 @@ export function formatClock12h(time: string): string {
   const suffix = h >= 12 ? 'p. m.' : 'a. m.';
   return `${h % 12 === 0 ? 12 : h % 12}:${m} ${suffix}`;
 }
+
+/**
+ * Nombre corto de un grupo de días: tramos seguidos de 3+ días van como rango.
+ * [lunes..viernes] -> "Lun – Vie"; [sábado, domingo] -> "Sáb y Dom".
+ */
+function describeDayGroup(days: WeekDay[]): string {
+  const runs: WeekDay[][] = [];
+  for (const day of days) {
+    const last = runs[runs.length - 1];
+    if (last && WEEK_DAYS.indexOf(day) === WEEK_DAYS.indexOf(last[last.length - 1]) + 1) last.push(day);
+    else runs.push([day]);
+  }
+  const parts = runs.flatMap((run) =>
+    run.length >= 3 ? [`${DAY_LABELS[run[0]]} – ${DAY_LABELS[run[run.length - 1]]}`] : run.map((d) => DAY_LABELS[d]),
+  );
+  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`;
+}
+
+/**
+ * Horario agrupado (misma lógica que formatScheduleLines del backend): los días con
+ * exactamente las mismas franjas comparten fila. Ej. { days: "Lun – Vie", time: "3:00 p. m. – 11:00 p. m." }
+ */
+export function groupBusinessHours(hours: BusinessHours | null | undefined): Array<{ days: string; time: string }> {
+  if (!hours) return [];
+  const groups = new Map<string, { days: WeekDay[]; ranges: TimeRange[] }>();
+  for (const day of WEEK_DAYS) {
+    const ranges = [...(hours[day] ?? [])].sort((a, b) => a.open.localeCompare(b.open));
+    const key = ranges.map((r) => `${r.open}-${r.close}`).join(',');
+    const group = groups.get(key) ?? { days: [], ranges };
+    group.days.push(day);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map(({ days, ranges }) => ({
+    days: describeDayGroup(days),
+    time: ranges.length
+      ? ranges.map((r) => `${formatClock12h(r.open)} – ${formatClock12h(r.close)}`).join(' y ')
+      : 'Cerrado',
+  }));
+}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useCart } from '@/context/CartContext';
-import { formatBusinessHours, isRestaurantClosed } from '@/lib/business-hours';
+import { groupBusinessHours, isRestaurantClosed } from '@/lib/business-hours';
 import type { MenuItem, RestaurantData } from './types';
 
 /**
@@ -20,11 +20,12 @@ export function useMenuLogic(restaurant: RestaurantData) {
     return () => clearInterval(interval);
   }, [restaurant]);
 
-  const schedule = formatBusinessHours(restaurant.businessHours);
+  // Horario agrupado por días con las mismas franjas (el banner lo muestra como lista)
+  const scheduleGroups = groupBusinessHours(restaurant.businessHours);
   const closedNotice =
     restaurant.closedMessage?.trim() ||
-    (schedule
-      ? `En este momento estamos cerrados. Nuestro horario: ${schedule}.`
+    (scheduleGroups.length
+      ? 'En este momento estamos cerrados. Te esperamos en nuestro horario de atención.'
       : 'En este momento estamos cerrados. ¡Vuelve pronto!');
 
   const handleAddItem = (item: MenuItem) => {
@@ -50,7 +51,7 @@ export function useMenuLogic(restaurant: RestaurantData) {
 
   const isJustAdded = (id: string) => Boolean(addedItemIds[id]);
 
-  return { isClosed, closedNotice, handleAddItem, getItemCartQuantity, isJustAdded };
+  return { isClosed, closedNotice, scheduleGroups, handleAddItem, getItemCartQuantity, isJustAdded };
 }
 
 export const formatPrice = (price: number) => `$${price.toLocaleString('es-CO')} COP`;
