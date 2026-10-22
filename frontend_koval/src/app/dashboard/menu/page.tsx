@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { Sparkles } from 'lucide-react';
+import { Camera, ImageIcon, Sparkles } from 'lucide-react';
 import MenuImportModal from '@/components/menu/MenuImportModal';
 
 interface MenuItem {
@@ -26,6 +26,10 @@ interface Category {
 }
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
+
+/** Fotos de platos: deben coincidir con el backend (menu-item-image.ts) */
+const DISH_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_DISH_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export default function MenuManagementPage() {
   const router = useRouter();
@@ -65,6 +69,11 @@ export default function MenuManagementPage() {
   const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
+
+  // Foto del plato: un único input oculto; se recuerda a qué plato va la imagen elegida
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const imageTargetRef = useRef<MenuItem | null>(null);
+  const [uploadingImageId, setUploadingImageId] = useState<string | null>(null);
 
   // Cargar categorías desde el backend
   const fetchCategories = useCallback(async (showLoader = false) => {
@@ -247,6 +256,59 @@ export default function MenuManagementPage() {
     }
   };
 
+  // Manejador: Subir foto del plato (se sube apenas se elige el archivo)
+  const openImagePicker = (item: MenuItem) => {
+    imageTargetRef.current = item;
+    imageInputRef.current?.click();
+  };
+
+  const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite volver a elegir el mismo archivo
+    const item = imageTargetRef.current;
+    if (!file || !item) return;
+
+    if (!DISH_IMAGE_TYPES.includes(file.type)) {
+      alert('Formato no válido: sube una imagen JPG, PNG o WebP.');
+      return;
+    }
+    if (file.size > MAX_DISH_IMAGE_BYTES) {
+      alert('La imagen no puede superar 5 MB.');
+      return;
+    }
+
+    setUploadingImageId(item.id);
+    try {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await fetch(`${API_URL}/restaurants/${restaurantId}/menu-items/${item.id}/image`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + currentToken },
+        body: formData,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const message = Array.isArray(data.message) ? data.message.join('. ') : data.message;
+        throw new Error(
+          res.status === 413 ? 'La imagen no puede superar 5 MB.' : message || 'No se pudo subir la imagen',
+        );
+      }
+      const updated: MenuItem = await res.json();
+      setCategories((prevCategories) =>
+        prevCategories.map((cat) => ({
+          ...cat,
+          items: (cat.items || []).map((i) => (i.id === item.id ? { ...i, imageUrl: updated.imageUrl } : i)),
+        }))
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al subir la imagen');
+    } finally {
+      setUploadingImageId(null);
+      imageTargetRef.current = null;
+    }
+  };
+
   // Manejador: Abrir Modal de Edición
   const openEditModal = (item: MenuItem) => {
     setEditingItem(item);
@@ -380,6 +442,14 @@ export default function MenuManagementPage() {
 
   return (
     <div className="space-y-6">
+      {/* Selector de foto de plato (lo abre el botón de cámara de cada plato) */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept={DISH_IMAGE_TYPES.join(',')}
+        className="hidden"
+        onChange={handleImageSelected}
+      />
       {importOpen && (
         <MenuImportModal
           open={importOpen}
@@ -881,6 +951,7 @@ export default function MenuManagementPage() {
                         const isAvailable = item.isAvailable !== false;
                         const isToggling = togglingItemId === item.id;
                         const isDeleting = deletingItemId === item.id;
+                        const isUploadingImage = uploadingImageId === item.id;
 
                         return (
                           <article
@@ -891,6 +962,36 @@ export default function MenuManagementPage() {
                                 : 'border-rose-950/50 bg-slate-950/40 opacity-70'
                             }`}
                           >
+                            <div className="flex flex-1 min-w-0 items-start gap-3">
+                            <button
+                              type="button"
+                              onClick={() => openImagePicker(item)}
+                              disabled={isUploadingImage}
+                              className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-900 disabled:cursor-wait"
+                              title={item.imageUrl ? 'Cambiar foto' : 'Subir foto'}
+                              aria-label={item.imageUrl ? `Cambiar foto de ${item.name}` : `Subir foto de ${item.name}`}
+                            >
+                              {item.imageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element -- fotos locales (/uploads) o URLs externas importadas
+                                <img src={item.imageUrl} alt="" className="h-full w-full object-cover" />
+                              ) : (
+                                <span className="flex h-full w-full items-center justify-center text-slate-600">
+                                  <ImageIcon className="h-5 w-5" />
+                                </span>
+                              )}
+                              <span
+                                className={`absolute inset-0 flex items-center justify-center bg-slate-950/60 text-white transition ${
+                                  isUploadingImage ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                }`}
+                              >
+                                {isUploadingImage ? (
+                                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                ) : (
+                                  <Camera className="h-4 w-4" />
+                                )}
+                              </span>
+                            </button>
+
                             <div className="space-y-1 flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <h4 className="font-semibold text-slate-100 text-sm">{item.name}</h4>
@@ -925,6 +1026,7 @@ export default function MenuManagementPage() {
                                 </p>
                               )}
                             </div>
+                            </div>
 
                             <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800">
                               <span className="text-sm font-extrabold text-emerald-400 font-mono">
@@ -932,6 +1034,20 @@ export default function MenuManagementPage() {
                               </span>
 
                               <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openImagePicker(item)}
+                                  disabled={isUploadingImage}
+                                  className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition disabled:opacity-50"
+                                  title={item.imageUrl ? 'Cambiar foto' : 'Subir foto'}
+                                >
+                                  {isUploadingImage ? (
+                                    <span className="block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                  ) : (
+                                    <Camera className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+
                                 <button
                                   type="button"
                                   onClick={() => openEditModal(item)}

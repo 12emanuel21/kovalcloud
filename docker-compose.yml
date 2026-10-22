@@ -80,6 +80,8 @@ services:
       - "80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      # Fotos de platos (las escribe el backend en /app/uploads/menu)
+      - backend_uploads:/usr/share/nginx/uploads:ro
     networks:
       - koval_network
     depends_on:
