@@ -1,4 +1,7 @@
 import { ConflictException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RestaurantsService } from './restaurants.service';
@@ -59,6 +62,15 @@ describe('RestaurantsService · kill switch del cierre de emergencia', () => {
     const { prisma, service } = build(restaurantRow({ extendedUntil: new Date(Date.now() + 3600_000) }));
     await service.updateConfig('rest-1', { isTemporarilyClosed: true });
     expect(prisma.restaurant.update.mock.calls[0][0].data).toMatchObject({ isTemporarilyClosed: true, extendedUntil: null });
+  });
+
+  it('guarda el tema de la carta y el DTO rechaza temas desconocidos', async () => {
+    const { prisma, service } = build(restaurantRow());
+    await service.updateConfig('rest-1', { theme: 'clean-light' });
+    expect(prisma.restaurant.update.mock.calls[0][0].data).toMatchObject({ theme: 'clean-light' });
+
+    const errors = await validate(plainToInstance(UpdateRestaurantConfigDto, { theme: 'neon' }));
+    expect(errors.map((e) => e.property)).toEqual(['theme']);
   });
 
   it('desactivar la emergencia o editar otros campos no toca la prórroga', async () => {

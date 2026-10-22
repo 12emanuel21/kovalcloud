@@ -1,4 +1,5 @@
-import { IsBoolean, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { MENU_THEMES, type MenuTheme } from '../menu-themes';
 
 /**
  * Configuración operativa del local (Ajustes > Perfil del Local).
@@ -28,4 +29,8 @@ export class UpdateRestaurantConfigDto {
   @IsString()
   @MaxLength(300)
   closedMessage?: string | null;
+
+  @IsOptional()
+  @IsIn(MENU_THEMES, { message: `El tema debe ser uno de: ${MENU_THEMES.join(', ')}` })
+  theme?: MenuTheme;
 }

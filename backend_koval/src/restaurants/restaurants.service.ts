@@ -181,6 +181,7 @@ export class RestaurantsService {
         paymentDetails: text(dto.paymentDetails),
         closedMessage: text(dto.closedMessage),
         isTemporarilyClosed: dto.isTemporarilyClosed,
+        theme: dto.theme,
         // Kill switch: activar la emergencia destruye cualquier prórroga vigente
         ...(dto.isTemporarilyClosed === true ? { extendedUntil: null } : {}),
         businessHours:
@@ -197,6 +198,7 @@ export class RestaurantsService {
         businessHours: true,
         isTemporarilyClosed: true,
         closedMessage: true,
+        theme: true,
       },
     });
   }

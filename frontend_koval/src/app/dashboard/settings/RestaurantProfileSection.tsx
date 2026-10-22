@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { WEEK_DAYS, type BusinessHours, type WeekDay } from '@/lib/business-hours';
+import { DEFAULT_MENU_THEME, MENU_THEMES, isMenuTheme, type MenuTheme } from '@/lib/menu-themes';
 import {
   DAY_PILLS,
   blocksToHours,
@@ -22,6 +23,7 @@ interface RestaurantConfig {
   businessHours?: BusinessHours | null;
   isTemporarilyClosed?: boolean;
   closedMessage?: string | null;
+  theme?: string | null;
 }
 
 /** Mensaje legible de un error de la API (ValidationPipe devuelve message como arreglo) */
@@ -35,7 +37,7 @@ const inputClass =
   'w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-xs text-white outline-none transition';
 
 /**
- * Perfil operativo del local: dirección, datos de pago, horarios y cierre de emergencia.
+ * Perfil operativo del local: dirección, datos de pago, tema de la carta, horarios y cierre de emergencia.
  * Guarda con PATCH /restaurants/:id/config (solo OWNER del local o SUPERADMIN).
  */
 export function RestaurantProfileSection() {
@@ -50,6 +52,7 @@ export function RestaurantProfileSection() {
   const [isTemporarilyClosed, setIsTemporarilyClosed] = useState(false);
   const [closedMessage, setClosedMessage] = useState('');
   const [blocks, setBlocks] = useState<ScheduleBlock[]>([]);
+  const [theme, setTheme] = useState<MenuTheme>(DEFAULT_MENU_THEME);
 
   // Carga inicial: setState solo en callbacks de la promesa (nunca síncrono en el efecto)
   useEffect(() => {
@@ -70,6 +73,7 @@ export function RestaurantProfileSection() {
         setIsTemporarilyClosed(Boolean(data.isTemporarilyClosed));
         setClosedMessage(data.closedMessage ?? '');
         setBlocks(hoursToBlocks(data.businessHours));
+        setTheme(isMenuTheme(data.theme) ? data.theme : DEFAULT_MENU_THEME);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -120,6 +124,7 @@ export function RestaurantProfileSection() {
         businessHours: blocksToHours(blocks),
         isTemporarilyClosed,
         closedMessage: closedMessage.trim(),
+        theme,
       };
       const res = await fetch(`${API_URL}/restaurants/${restaurantId}/config`, {
         method: 'PATCH',
@@ -240,6 +245,26 @@ export function RestaurantProfileSection() {
             className={`${inputClass} resize-y`}
           />
         </div>
+      </div>
+
+      {/* Tema de la carta pública */}
+      <div className="max-w-sm">
+        <label htmlFor="menu-theme" className="block text-[11px] font-semibold text-slate-400 mb-1">
+          Tema del Menú Web
+        </label>
+        <select
+          id="menu-theme"
+          value={theme}
+          onChange={(e) => setTheme(e.target.value as MenuTheme)}
+          className={`${inputClass} [color-scheme:dark]`}
+        >
+          {MENU_THEMES.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <p className="text-[11px] text-slate-500 mt-1">Diseño que ven tus clientes al abrir la carta o escanear el QR.</p>
       </div>
 
       {/* Horarios: bloques tipo alarma (franja + días) */}
