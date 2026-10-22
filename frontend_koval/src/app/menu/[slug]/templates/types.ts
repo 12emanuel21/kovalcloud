@@ -21,6 +21,10 @@ export interface RestaurantData {
   name: string;
   slug: string;
   phone?: string;
+  description?: string | null;
+  logoUrl?: string | null;
+  bannerUrl?: string | null;
+  paymentDetails?: string | null;
   address?: string | null;
   businessHours?: BusinessHours | null;
   isTemporarilyClosed?: boolean;

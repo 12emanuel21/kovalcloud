@@ -23,14 +23,15 @@ const ACCENTS: Record<
     soft: 'bg-red-500/10 text-red-400 border-red-500/20',
     focus: 'focus:border-red-500 focus:ring-red-500',
   },
+  // Mismo acento rojo que el tema oscuro (diseño de referencia en claro y oscuro)
   'clean-light': {
-    cta: 'bg-emerald-500 hover:bg-emerald-600 text-white',
-    ctaShadow: 'shadow-emerald-950/40',
-    barBorder: 'border-emerald-500/40',
-    badge: 'bg-emerald-400 text-slate-950',
-    text: 'text-emerald-400',
-    soft: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    focus: 'focus:border-emerald-500 focus:ring-emerald-500',
+    cta: 'bg-red-600 hover:bg-red-700 text-white',
+    ctaShadow: 'shadow-red-900/30',
+    barBorder: 'border-red-600/40',
+    badge: 'bg-red-500 text-white',
+    text: 'text-red-400',
+    soft: 'bg-red-500/10 text-red-400 border-red-500/20',
+    focus: 'focus:border-red-500 focus:ring-red-500',
   },
 };
 
@@ -43,6 +44,9 @@ interface CartDrawerProps {
   closedNotice?: string;
   /** Tema de la carta: define el color de acento de los botones */
   theme?: MenuTheme;
+  /** Modo controlado (opcional): permite abrir el carrito desde fuera, ej. el icono del header */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -52,10 +56,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   isClosed = false,
   closedNotice = 'En este momento estamos cerrados.',
   theme = DEFAULT_MENU_THEME,
+  open,
+  onOpenChange,
 }) => {
   const accent = ACCENTS[theme] ?? ACCENTS[DEFAULT_MENU_THEME];
   const { items, totalCount, totalAmount, updateQuantity, removeItem, clearCart } = useCart();
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = open ?? internalOpen;
+  const setIsOpen = (value: boolean) => (onOpenChange ? onOpenChange(value) : setInternalOpen(value));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 

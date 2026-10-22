@@ -107,3 +107,50 @@ export function formatBusinessHours(hours: BusinessHours | null | undefined): st
     return `${DAY_LABELS[day]} ${ranges.length ? ranges.map((r) => `${r.open}–${r.close}`).join(', ') : 'cerrado'}`;
   }).join(' · ');
 }
+
+export const DAY_NAMES: Record<WeekDay, string> = {
+  monday: 'Lunes',
+  tuesday: 'Martes',
+  wednesday: 'Miércoles',
+  thursday: 'Jueves',
+  friday: 'Viernes',
+  saturday: 'Sábado',
+  sunday: 'Domingo',
+};
+
+/** Día de la semana actual en la zona del local */
+export function getLocalWeekDay(now = new Date(), timeZone = RESTAURANT_TIMEZONE): WeekDay {
+  return localDayAndMinute(now, timeZone).day;
+}
+
+/**
+ * Hora de cierre ("HH:MM") de la franja abierta en este momento, o null si no hay
+ * franja activa o el local no tiene horario. Contempla franjas que cruzan la medianoche.
+ */
+export function currentClosingTime(
+  hours: BusinessHours | null | undefined,
+  now = new Date(),
+  timeZone = RESTAURANT_TIMEZONE,
+): string | null {
+  if (!hours) return null;
+  const { day, minute } = localDayAndMinute(now, timeZone);
+  const previousDay = WEEK_DAYS[(WEEK_DAYS.indexOf(day) + 6) % 7];
+  const today = (hours[day] ?? []).find(({ open, close }) => {
+    const o = toMinutes(open);
+    const c = toMinutes(close);
+    return c > o ? minute >= o && minute < c : minute >= o;
+  });
+  if (today) return today.close;
+  const fromYesterday = (hours[previousDay] ?? []).find(
+    ({ open, close }) => toMinutes(close) < toMinutes(open) && minute < toMinutes(close),
+  );
+  return fromYesterday?.close ?? null;
+}
+
+/** "23:00" -> "11:00 p. m." */
+export function formatClock12h(time: string): string {
+  const h = Number(time.slice(0, 2));
+  const m = time.slice(3, 5);
+  const suffix = h >= 12 ? 'p. m.' : 'a. m.';
+  return `${h % 12 === 0 ? 12 : h % 12}:${m} ${suffix}`;
+}

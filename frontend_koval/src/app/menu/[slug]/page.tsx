@@ -1,5 +1,6 @@
 import { CartProvider } from '@/context/CartContext';
 import { MenuView, RestaurantData } from './MenuView';
+import { displayFont } from './fonts';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -59,7 +60,9 @@ export default async function MenuPage({
 
   return (
     <CartProvider>
-      <MenuView restaurant={restaurant} tableNumber={table} />
+      <div className={displayFont.variable}>
+        <MenuView restaurant={restaurant} tableNumber={table} />
+      </div>
     </CartProvider>
   );
 }

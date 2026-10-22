@@ -10,6 +10,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* Titulares de la carta pública (Montserrat se carga en app/menu/[slug]) */
+  --font-display: var(--font-display-family), var(--font-geist-sans), ui-sans-serif, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
