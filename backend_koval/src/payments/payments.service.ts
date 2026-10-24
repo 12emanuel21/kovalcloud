@@ -4,16 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { OrdersService } from '../orders/orders.service';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
-import {
-  type WompiEvent,
-  buildCheckoutUrl,
-  buildIntegritySignature,
-  generatePaymentReference,
-  mapWompiStatus,
-  toAmountInCents,
-  verifyWompiEventChecksum,
-  WOMPI_CURRENCY,
-} from './wompi';
+import { type WompiEvent, mapWompiStatus, toAmountInCents, verifyWompiEventChecksum, WOMPI_CURRENCY } from './wompi';
+import { WompiCheckoutService } from './wompi-checkout.service';
 
 // No promete que ya se cocina: el pago no cambia el estado del pedido en cocina
 export const PAYMENT_CONFIRMED_MESSAGE = '¡Pago confirmado! 💳 Hemos notificado al restaurante para que inicie tu orden.';
@@ -28,36 +20,15 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly ordersService: OrdersService,
     private readonly ordersGateway: OrdersGateway,
+    private readonly wompiCheckout: WompiCheckoutService,
   ) {}
 
-  /**
-   * Link al Web Checkout de Wompi para pagar el pedido. Asigna paymentReference si el pedido
-   * aún no tiene una (la misma referencia se reutiliza en reintentos del mismo pedido).
-   */
-  async generateWompiPaymentLink(
+  /** Link al Web Checkout de Wompi (ver WompiCheckoutService) */
+  generateWompiPaymentLink(
     order: Pick<Order, 'id' | 'total' | 'paymentReference' | 'paymentStatus'>,
-    restaurant: Pick<Restaurant, 'slug' | 'wompiPublicKey' | 'wompiIntegritySecret'>,
+    restaurant: Pick<Restaurant, 'slug' | 'wompiPublicKey' | 'wompiIntegritySecret' | 'wompiEventSecret'>,
   ): Promise<string> {
-    if (!restaurant.wompiPublicKey || !restaurant.wompiIntegritySecret) {
-      throw new BadRequestException('El restaurante no tiene configurados los pagos en línea (Wompi)');
-    }
-    if (order.paymentStatus === 'PAID') throw new BadRequestException('Este pedido ya está pagado');
-
-    let reference = order.paymentReference;
-    if (!reference) {
-      reference = generatePaymentReference(order.id);
-      await this.prisma.order.update({ where: { id: order.id }, data: { paymentReference: reference } });
-    }
-
-    const amountInCents = toAmountInCents(order.total);
-    const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '');
-    return buildCheckoutUrl({
-      publicKey: restaurant.wompiPublicKey,
-      reference,
-      amountInCents,
-      integritySignature: buildIntegritySignature(reference, amountInCents, WOMPI_CURRENCY, restaurant.wompiIntegritySecret),
-      redirectUrl: frontendUrl ? `${frontendUrl}/menu/${restaurant.slug}?pedido=${order.id}` : undefined,
-    });
+    return this.wompiCheckout.generatePaymentLink(order, restaurant).then(({ url }) => url);
   }
 
   /**

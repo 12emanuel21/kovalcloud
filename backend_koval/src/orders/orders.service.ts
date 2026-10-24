@@ -16,6 +16,17 @@ import { OrdersGateway } from './orders.gateway';
 import { buildClosedNotice, isRestaurantClosed } from '../restaurants/business-hours';
 import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/tenant-access';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
+import { isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
+
+/** Mensaje de WhatsApp con el link de pago (plan B si el cliente cierra el checkout) */
+export function buildPaymentLinkMessage(restaurantName: string, orderId: string, total: number, url: string): string {
+  return (
+    `🧾 ¡Recibimos tu pedido #${orderId.slice(0, 8).toUpperCase()} en ${restaurantName}! ` +
+    `Total: $${total.toLocaleString('es-CO')} COP.\n\n` +
+    `💳 Si no alcanzaste a pagar, puedes hacerlo aquí:\n${url}\n\n` +
+    'Apenas se confirme el pago te avisamos por este chat.'
+  );
+}
 
 @Injectable()
 export class OrdersService {
@@ -26,6 +37,7 @@ export class OrdersService {
     private readonly ordersGateway: OrdersGateway,
     @Inject(forwardRef(() => MetaWhatsAppService))
     private readonly metaWhatsAppService: MetaWhatsAppService,
+    private readonly wompiCheckout: WompiCheckoutService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto) {
@@ -39,6 +51,7 @@ export class OrdersService {
       deliveryAddress,
       notes,
       items,
+      paymentMethod,
     } = createOrderDto;
     // Endpoint público: `status` y `unitPrice` del cliente se ignoran.
     // El pedido nace PENDING y los precios salen siempre de la base de datos.
@@ -54,6 +67,14 @@ export class OrdersService {
     // 1.5. El endpoint es público: la carta deshabilita el botón, pero se valida también aquí
     if (isRestaurantClosed(restaurant)) {
       throw new ConflictException(buildClosedNotice(restaurant));
+    }
+
+    // 1.6. Pago en línea: se valida antes de crear nada para que el cliente pueda elegir efectivo
+    const payOnline = paymentMethod === 'WOMPI';
+    if (payOnline && !isWompiReady(restaurant)) {
+      throw new BadRequestException(
+        'Este restaurante no tiene habilitado el pago en línea. Elige pago en efectivo / contra entrega.',
+      );
     }
 
     // 2. Validar que la orden contenga al menos un item
@@ -110,6 +131,8 @@ export class OrdersService {
           notes,
           status: OrderStatus.PENDING,
           total: calculatedTotal,
+          // WOMPI se reemplaza por el método real (NEQUI, CARD...) cuando llega el webhook
+          paymentMethod: payOnline ? 'WOMPI' : 'CASH',
           items: {
             create: itemsToCreate.map((item) => ({
               menuItemId: item.menuItemId,
@@ -129,10 +152,32 @@ export class OrdersService {
       });
     });
 
-    // 5. Emitir evento WebSocket en tiempo real
-    this.ordersGateway.emitNewOrder(restaurantId, createdOrder);
+    // 4.5. Link de pago de Wompi (antes de emitir: el Kanban ya ve la referencia = "pago pendiente")
+    let wompiCheckoutUrl: string | null = null;
+    let order = createdOrder;
+    if (payOnline) {
+      try {
+        const link = await this.wompiCheckout.generatePaymentLink(createdOrder, restaurant);
+        wompiCheckoutUrl = link.url;
+        order = { ...createdOrder, paymentReference: link.reference };
+      } catch (error) {
+        // El pedido ya existe: el cliente sigue por WhatsApp y el local cobra por otro medio
+        this.logger.error(`No se pudo generar el link de Wompi del pedido ${createdOrder.id}:`, error);
+      }
+    }
 
-    return createdOrder;
+    // 5. Emitir evento WebSocket en tiempo real
+    this.ordersGateway.emitNewOrder(restaurantId, order);
+
+    // 6. Plan B por WhatsApp: si el cliente cierra el navegador, conserva el link de pago
+    if (wompiCheckoutUrl) {
+      void this.notifyCustomer(
+        { customerPhone: order.customerPhone, restaurantId, restaurant },
+        buildPaymentLinkMessage(restaurant.name, order.id, order.total, wompiCheckoutUrl),
+      );
+    }
+
+    return { ...order, wompiCheckoutUrl };
   }
 
   async findAll(user: TenantUser, requestedRestaurantId?: string) {

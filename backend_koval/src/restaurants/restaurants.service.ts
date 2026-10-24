@@ -11,6 +11,7 @@ import { maskSecret, sanitizeRestaurant } from './sanitize-restaurant';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
+import { isWompiReady } from '../payments/wompi-checkout.service';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
 
@@ -76,7 +77,9 @@ export class RestaurantsService {
     });
 
     if (!restaurant) throw new NotFoundException('Restaurante no encontrado');
-    return sanitizeRestaurant(restaurant);
+    // Carta pública: sanitizeRestaurant deja solo wompiPublicKey (nunca los secretos).
+    // onlinePaymentsEnabled indica si el carrito debe ofrecer "Pagar en línea".
+    return { ...sanitizeRestaurant(restaurant), onlinePaymentsEnabled: isWompiReady(restaurant) };
   }
 
   async create(createRestaurantDto: CreateRestaurantDto) {

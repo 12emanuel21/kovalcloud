@@ -31,6 +31,10 @@ export interface RestaurantData {
   closedMessage?: string | null;
   extendedUntil?: string | null;
   theme?: string | null;
+  /** Pública por diseño (checkout de Wompi); los secretos nunca llegan a la carta */
+  wompiPublicKey?: string | null;
+  /** El backend confirma que el local puede cobrar en línea (llaves completas) */
+  onlinePaymentsEnabled?: boolean;
   categories: Category[];
 }
 
@@ -39,4 +43,6 @@ export interface MenuTemplateProps {
   restaurant: RestaurantData;
   categories: Category[];
   tableNumber?: string;
+  /** Pedido con el que el cliente vuelve del checkout de Wompi (?pedido=) */
+  returnedOrderId?: string;
 }

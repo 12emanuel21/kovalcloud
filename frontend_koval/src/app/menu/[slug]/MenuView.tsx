@@ -17,11 +17,19 @@ const TEMPLATES: Record<MenuTheme, React.FC<MenuTemplateProps>> = {
  * Enrutador de temas de la carta pública: elige la plantilla según restaurant.theme.
  * Un tema desconocido o ausente usa el predeterminado (dark-premium).
  */
-export const MenuView: React.FC<{ restaurant: RestaurantData; tableNumber?: string }> = ({
+export const MenuView: React.FC<{ restaurant: RestaurantData; tableNumber?: string; returnedOrderId?: string }> = ({
   restaurant,
   tableNumber,
+  returnedOrderId,
 }) => {
   const theme = isMenuTheme(restaurant.theme) ? restaurant.theme : DEFAULT_MENU_THEME;
   const Template = TEMPLATES[theme];
-  return <Template restaurant={restaurant} categories={restaurant.categories} tableNumber={tableNumber} />;
+  return (
+    <Template
+      restaurant={restaurant}
+      categories={restaurant.categories}
+      tableNumber={tableNumber}
+      returnedOrderId={returnedOrderId}
+    />
+  );
 };

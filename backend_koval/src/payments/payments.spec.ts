@@ -9,6 +9,7 @@ import {
   type WompiEvent,
 } from './wompi';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
+import { WompiCheckoutService } from './wompi-checkout.service';
 
 const EVENT_SECRET = 'test_events_secret';
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -98,7 +99,7 @@ describe('PaymentsService', () => {
     };
     ordersService = { notifyCustomer: jest.fn().mockResolvedValue(undefined) };
     gateway = { emitOrderStatusUpdated: jest.fn() };
-    service = new PaymentsService(prisma, ordersService, gateway);
+    service = new PaymentsService(prisma, ordersService, gateway, new WompiCheckoutService(prisma));
     process.env.FRONTEND_URL = 'https://koval.test';
   });
 

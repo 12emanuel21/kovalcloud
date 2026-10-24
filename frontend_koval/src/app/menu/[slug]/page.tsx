@@ -27,6 +27,8 @@ export default async function MenuPage({
   const { slug } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const table = typeof resolvedSearchParams.table === 'string' ? resolvedSearchParams.table : undefined;
+  // Wompi redirige aquí tras el pago (redirect-url = /menu/<slug>?pedido=<id>)
+  const returnedOrderId = typeof resolvedSearchParams.pedido === 'string' ? resolvedSearchParams.pedido : undefined;
   const restaurant = await getRestaurantMenu(slug);
 
   if (!restaurant) {
@@ -61,7 +63,7 @@ export default async function MenuPage({
   return (
     <CartProvider>
       <div className={displayFont.variable}>
-        <MenuView restaurant={restaurant} tableNumber={table} />
+        <MenuView restaurant={restaurant} tableNumber={table} returnedOrderId={returnedOrderId} />
       </div>
     </CartProvider>
   );

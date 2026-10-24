@@ -4,9 +4,10 @@ import { OrdersController } from './orders.controller';
 import { OrdersGateway } from './orders.gateway';
 import { MetaWhatsAppModule } from '../meta-whatsapp/meta-whatsapp.module';
 import { AuthModule } from '../auth/auth.module';
+import { WompiCheckoutModule } from '../payments/wompi-checkout.module';
 
 @Module({
-  imports: [forwardRef(() => MetaWhatsAppModule), AuthModule],
+  imports: [forwardRef(() => MetaWhatsAppModule), AuthModule, WompiCheckoutModule],
   controllers: [OrdersController],
   providers: [OrdersService, OrdersGateway],
   exports: [OrdersService, OrdersGateway],

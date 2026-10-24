@@ -54,7 +54,14 @@ interface PremiumMenuLayoutProps extends MenuTemplateProps {
  * hero a pantalla completa, barra de categorías con iconos, tarjetas con imagen, pasos para pedir,
  * horarios/contacto y footer. Los temas solo cambian la paleta.
  */
-export function PremiumMenuLayout({ restaurant, categories, tableNumber, palette, theme }: PremiumMenuLayoutProps) {
+export function PremiumMenuLayout({
+  restaurant,
+  categories,
+  tableNumber,
+  returnedOrderId,
+  palette,
+  theme,
+}: PremiumMenuLayoutProps) {
   const { isClosed, closedNotice, scheduleGroups, handleAddItem, getItemCartQuantity, isJustAdded } =
     useMenuLogic(restaurant);
   const { totalCount } = useCart();
@@ -62,6 +69,7 @@ export function PremiumMenuLayout({ restaurant, categories, tableNumber, palette
   const [activeCategory, setActiveCategory] = useState<'all' | string>('all');
   const [query, setQuery] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
+  const [showPaymentReturn, setShowPaymentReturn] = useState(Boolean(returnedOrderId));
 
   const statusLabel = useMemo(() => {
     if (isClosed) return 'Cerrado ahora';
@@ -169,6 +177,34 @@ export function PremiumMenuLayout({ restaurant, categories, tableNumber, palette
       </header>
 
       <main id="top">
+        {/* Regreso desde el checkout de Wompi: la confirmación real llega por webhook + WhatsApp */}
+        {showPaymentReturn && returnedOrderId && (
+          <div className="mx-auto max-w-7xl px-4 pt-4 md:px-6">
+            <div role="status" className="flex items-start gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
+              <span className="text-xl" aria-hidden>
+                💳
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className={`text-sm font-bold ${palette.heading}`}>
+                  Recibimos tu pedido #{returnedOrderId.slice(0, 8).toUpperCase()}
+                </p>
+                <p className={`text-sm leading-relaxed ${palette.body}`}>
+                  Si completaste el pago, te lo confirmamos por WhatsApp en unos segundos. Si no alcanzaste a pagar,
+                  usa el link que te enviamos por WhatsApp.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPaymentReturn(false)}
+                aria-label="Cerrar aviso"
+                className={`shrink-0 rounded-lg px-2 text-lg leading-none ${palette.muted} hover:opacity-80`}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ───────── Hero ───────── */}
         <section className="mx-auto grid max-w-7xl items-center gap-8 px-4 pb-10 pt-8 md:px-6 lg:grid-cols-2 lg:gap-4 lg:py-14">
           <div className="order-2 space-y-6 lg:order-1">
@@ -451,6 +487,7 @@ export function PremiumMenuLayout({ restaurant, categories, tableNumber, palette
         tableNumber={tableNumber}
         isClosed={isClosed}
         closedNotice={closedNotice}
+        onlinePaymentsEnabled={Boolean(restaurant.onlinePaymentsEnabled)}
       />
     </div>
   );

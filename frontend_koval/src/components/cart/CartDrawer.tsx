@@ -35,6 +35,37 @@ const ACCENTS: Record<
   },
 };
 
+type PaymentMethod = 'WOMPI' | 'CASH';
+
+const Spinner = () => (
+  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+  </svg>
+);
+
+const CardIcon = () => (
+  <svg
+    className="h-5 w-5"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <rect width="20" height="14" x="2" y="5" rx="2" />
+    <line x1="2" x2="22" y1="10" y2="10" />
+  </svg>
+);
+
+const WhatsAppIcon = () => (
+  <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+    <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm.01 1.67c4.54 0 8.24 3.7 8.24 8.24 0 2.2-.86 4.27-2.42 5.83a8.188 8.188 0 0 1-5.82 2.41c-1.42 0-2.82-.37-4.06-1.07l-.29-.17-3.02.79.81-2.94-.19-.3a8.19 8.19 0 0 1-1.25-4.55c0-4.54 3.7-8.24 8.24-8.24zm4.72 11.64c-.26-.13-1.53-.76-1.77-.85-.24-.09-.41-.13-.58.13-.17.26-.67.85-.82 1.02-.15.17-.3.19-.56.06-.26-.13-1.1-.41-2.09-1.3-.77-.69-1.29-1.54-1.44-1.8-.15-.26-.02-.4.11-.53.12-.12.26-.3.39-.45.13-.15.17-.26.26-.43.09-.17.04-.32-.02-.45-.06-.13-.58-1.4-.79-1.92-.21-.51-.43-.44-.58-.45h-.5c-.17 0-.45.06-.69.32-.24.26-.91.89-.91 2.17s.93 2.52 1.06 2.69c.13.17 1.83 2.8 4.43 3.92.62.27 1.1.43 1.48.55.62.2 1.19.17 1.64.1.5-.07 1.53-.63 1.75-1.23.21-.6.21-1.12.15-1.23-.07-.11-.24-.17-.5-.3z" />
+  </svg>
+);
+
 interface CartDrawerProps {
   restaurantId: string;
   restaurantPhone?: string;
@@ -44,6 +75,8 @@ interface CartDrawerProps {
   closedNotice?: string;
   /** Tema de la carta: define el color de acento de los botones */
   theme?: MenuTheme;
+  /** El local cobra en línea con Wompi: se ofrece "Pagar en línea" además del efectivo */
+  onlinePaymentsEnabled?: boolean;
   /** Modo controlado (opcional): permite abrir el carrito desde fuera, ej. el icono del header */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -58,6 +91,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   theme = DEFAULT_MENU_THEME,
   open,
   onOpenChange,
+  onlinePaymentsEnabled = false,
 }) => {
   const accent = ACCENTS[theme] ?? ACCENTS[DEFAULT_MENU_THEME];
   const { items, totalCount, totalAmount, updateQuantity, removeItem, clearCart } = useCart();
@@ -65,6 +99,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const isOpen = open ?? internalOpen;
   const setIsOpen = (value: boolean) => (onOpenChange ? onOpenChange(value) : setInternalOpen(value));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Método con el que se está enviando (spinner en el botón correcto)
+  const [submittingMethod, setSubmittingMethod] = useState<PaymentMethod | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Campos del formulario
@@ -77,8 +113,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     return `$${val.toLocaleString('es-CO')} COP`;
   };
 
-  const handleCheckout = async (e: React.FormEvent) => {
+  const handleCheckout = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Botón que envió el formulario (value="WOMPI" | "CASH"); Enter en un campo usa el primero
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const paymentMethod: PaymentMethod =
+      onlinePaymentsEnabled && submitter?.value === 'WOMPI' ? 'WOMPI' : 'CASH';
     if (isClosed) {
       setErrorMsg(closedNotice);
       return;
@@ -97,6 +137,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     }
 
     setIsSubmitting(true);
+    setSubmittingMethod(paymentMethod);
     setErrorMsg(null);
 
     try {
@@ -110,6 +151,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         customerPhone: customerPhone.trim(),
         deliveryAddress: tableNumber ? undefined : (deliveryAddress.trim() || undefined),
         notes: notes.trim() || undefined,
+        paymentMethod,
         items: items.map((item) => ({
           menuItemId: item.id,
           quantity: item.quantity,
@@ -128,7 +170,24 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         throw new Error(errorData.message || `Error al procesar el pedido (${res.status})`);
       }
 
-      const createdOrder: { id: string } = await res.json();
+      const createdOrder: { id: string; wompiCheckoutUrl?: string | null } = await res.json();
+
+      const resetForm = () => {
+        clearCart();
+        setCustomerName('');
+        setCustomerPhone('');
+        setDeliveryAddress('');
+        setNotes('');
+        setIsOpen(false);
+      };
+
+      // Pago en línea: a la pasarela de Wompi (vuelve a la carta con ?pedido=<id>).
+      // Si el backend no pudo generar el link, se sigue por WhatsApp (el pedido ya existe).
+      if (paymentMethod === 'WOMPI' && createdOrder.wompiCheckoutUrl) {
+        resetForm();
+        window.location.href = createdOrder.wompiCheckoutUrl;
+        return;
+      }
 
       // Carrito Híbrido: el pedido ya quedó registrado en el sistema (KDS); el cliente abre el
       // chat del local con la referencia del pedido. Número = "Teléfono" del local (Ajustes).
@@ -136,13 +195,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       const whatsappText = encodeURIComponent(`Hola, acabo de hacer el pedido #${createdOrder.id}`);
       const whatsappUrl = `https://wa.me/${cleanPhone}?text=${whatsappText}`;
 
-      // Limpiar y resetear
-      clearCart();
-      setCustomerName('');
-      setCustomerPhone('');
-      setDeliveryAddress('');
-      setNotes('');
-      setIsOpen(false);
+      resetForm();
 
       // Abrir WhatsApp en nueva pestaña. Tras un await, Safari/iOS suelen bloquear el popup:
       // en ese caso se navega en la misma pestaña (el pedido ya está guardado).
@@ -153,6 +206,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       setErrorMsg(message);
     } finally {
       setIsSubmitting(false);
+      setSubmittingMethod(null);
     }
   };
 
@@ -434,36 +488,76 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </span>
                 </div>
 
-                <button
-                  type="submit"
-                  form="checkout-form"
-                  disabled={isSubmitting || isClosed}
-                  className={`w-full ${accent.cta} disabled:opacity-50 font-bold py-3.5 px-4 rounded-xl transition shadow-lg ${accent.ctaShadow} active:scale-[0.98] flex items-center justify-center gap-2.5`}
-                >
-                  {isClosed ? (
-                    <span>🔒 Local cerrado: no estamos recibiendo pedidos</span>
-                  ) : isSubmitting ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                      </svg>
-                      <span>Procesando Pedido...</span>
-                    </>
-                  ) : (
-                    <>
-                      {/* Icono de WhatsApp */}
-                      <svg
-                        className="h-5 w-5 fill-current"
-                        viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm.01 1.67c4.54 0 8.24 3.7 8.24 8.24 0 2.2-.86 4.27-2.42 5.83a8.188 8.188 0 0 1-5.82 2.41c-1.42 0-2.82-.37-4.06-1.07l-.29-.17-3.02.79.81-2.94-.19-.3a8.19 8.19 0 0 1-1.25-4.55c0-4.54 3.7-8.24 8.24-8.24zm4.72 11.64c-.26-.13-1.53-.76-1.77-.85-.24-.09-.41-.13-.58.13-.17.26-.67.85-.82 1.02-.15.17-.3.19-.56.06-.26-.13-1.1-.41-2.09-1.3-.77-.69-1.29-1.54-1.44-1.8-.15-.26-.02-.4.11-.53.12-.12.26-.3.39-.45.13-.15.17-.26.26-.43.09-.17.04-.32-.02-.45-.06-.13-.58-1.4-79-1.92-.21-.51-.43-.44-.58-.45h-.5c-.17 0-.45.06-.69.32-.24.26-.91.89-.91 2.17s.93 2.52 1.06 2.69c.13.17 1.83 2.8 4.43 3.92.62.27 1.1.43 1.48.55.62.2 1.19.17 1.64.1.5-.07 1.53-.63 1.75-1.23.21-.6.21-1.12.15-1.23-.07-.11-.24-.17-.5-.3z" />
-                      </svg>
-                      <span>Confirmar Pedido por WhatsApp</span>
-                    </>
-                  )}
-                </button>
+                {isClosed ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full bg-slate-800 text-slate-400 font-bold py-3.5 px-4 rounded-xl opacity-70"
+                  >
+                    🔒 Local cerrado: no estamos recibiendo pedidos
+                  </button>
+                ) : onlinePaymentsEnabled ? (
+                  <>
+                    <button
+                      type="submit"
+                      form="checkout-form"
+                      value="WOMPI"
+                      disabled={isSubmitting}
+                      className={`w-full ${accent.cta} disabled:opacity-50 font-bold py-3.5 px-4 rounded-xl transition shadow-lg ${accent.ctaShadow} active:scale-[0.98] flex items-center justify-center gap-2.5`}
+                    >
+                      {submittingMethod === 'WOMPI' ? (
+                        <>
+                          <Spinner />
+                          <span>Preparando tu pago...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CardIcon />
+                          <span>Pagar en Línea (Nequi / Tarjetas)</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="submit"
+                      form="checkout-form"
+                      value="CASH"
+                      disabled={isSubmitting}
+                      className="w-full border border-slate-600 hover:border-slate-400 hover:bg-slate-800/60 disabled:opacity-50 text-slate-200 font-semibold py-3 px-4 rounded-xl transition active:scale-[0.98] flex items-center justify-center gap-2.5"
+                    >
+                      {submittingMethod === 'CASH' ? (
+                        <>
+                          <Spinner />
+                          <span>Procesando Pedido...</span>
+                        </>
+                      ) : (
+                        <span>Pago en Efectivo / Contra Entrega</span>
+                      )}
+                    </button>
+                    <p className="text-center text-[11px] text-slate-500">
+                      Pago seguro con Wompi (Bancolombia). Te enviaremos el link también por WhatsApp.
+                    </p>
+                  </>
+                ) : (
+                  <button
+                    type="submit"
+                    form="checkout-form"
+                    value="CASH"
+                    disabled={isSubmitting}
+                    className={`w-full ${accent.cta} disabled:opacity-50 font-bold py-3.5 px-4 rounded-xl transition shadow-lg ${accent.ctaShadow} active:scale-[0.98] flex items-center justify-center gap-2.5`}
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Spinner />
+                        <span>Procesando Pedido...</span>
+                      </>
+                    ) : (
+                      <>
+                        <WhatsAppIcon />
+                        <span>Confirmar Pedido por WhatsApp</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             )}
           </div>
