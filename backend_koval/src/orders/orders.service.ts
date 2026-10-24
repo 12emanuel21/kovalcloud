@@ -17,6 +17,7 @@ import { buildClosedNotice, isRestaurantClosed } from '../restaurants/business-h
 import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/tenant-access';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 import { isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
+import { normalizeColombianPhone } from './phone';
 
 /** Mensaje de WhatsApp con el link de pago (plan B si el cliente cierra el checkout) */
 export function buildPaymentLinkMessage(restaurantName: string, orderId: string, total: number, url: string): string {
@@ -126,7 +127,8 @@ export class OrdersService {
           tableNumber,
           channel,
           customerName,
-          customerPhone,
+          // Formato internacional (573001234567): lo usan Baileys/Meta para el link de pago y los estados
+          customerPhone: normalizeColombianPhone(customerPhone),
           deliveryAddress,
           notes,
           status: OrderStatus.PENDING,
@@ -267,7 +269,8 @@ export class OrdersService {
       where: { id },
       data: {
         customerName: updateOrderDto.customerName,
-        customerPhone: updateOrderDto.customerPhone,
+        customerPhone:
+          updateOrderDto.customerPhone === undefined ? undefined : normalizeColombianPhone(updateOrderDto.customerPhone),
         deliveryAddress: updateOrderDto.deliveryAddress,
         notes: updateOrderDto.notes,
         status: updateOrderDto.status,
@@ -338,6 +341,8 @@ export class OrdersService {
     text: string,
   ): Promise<void> {
     if (!order.customerPhone) return;
+    // También cubre pedidos guardados antes de normalizar el teléfono (ej. "3001234567")
+    const customerPhone = normalizeColombianPhone(order.customerPhone);
     const phoneId = order.restaurant?.whatsappPhoneId || process.env.META_PHONE_NUMBER_ID || '';
     const token = order.restaurant?.whatsappToken || process.env.META_ACCESS_TOKEN || '';
     const viaMeta = Boolean(phoneId && token);
@@ -349,12 +354,12 @@ export class OrdersService {
       await this.metaWhatsAppService.sendTextMessage(
         viaMeta ? phoneId : order.restaurantId!,
         token,
-        order.customerPhone,
+        customerPhone,
         text,
         !viaMeta,
       );
       this.logger.log(
-        `Notificación de WhatsApp (${viaMeta ? 'Meta' : 'Baileys'}) enviada al cliente ${order.customerPhone}`,
+        `Notificación de WhatsApp (${viaMeta ? 'Meta' : 'Baileys'}) enviada al cliente ${customerPhone}`,
       );
     } catch (error) {
       this.logger.error('Error enviando notificación al cliente:', error);
