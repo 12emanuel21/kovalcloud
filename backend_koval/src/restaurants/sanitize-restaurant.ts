@@ -1,15 +1,21 @@
-/** Campos de integración con Meta que nunca deben salir en respuestas genéricas */
+/**
+ * Credenciales que nunca deben salir en respuestas genéricas (Meta y Wompi).
+ * wompiPublicKey no está: es pública por diseño (la usa el checkout).
+ */
 const RESTAURANT_SECRET_FIELDS = [
   'whatsappToken',
   'whatsappPhoneId',
   'whatsappWabaId',
   'whatsappVerifyToken',
   'metaAppSecret',
+  'wompiPrivateKey',
+  'wompiEventSecret',
+  'wompiIntegritySecret',
 ] as const;
 
 type RestaurantSecretField = (typeof RESTAURANT_SECRET_FIELDS)[number];
 
-/** Elimina credenciales de WhatsApp/Meta antes de devolver un restaurante al cliente */
+/** Elimina credenciales (WhatsApp/Meta y Wompi) antes de devolver un restaurante al cliente */
 export function sanitizeRestaurant<T extends object>(restaurant: T): Omit<T, RestaurantSecretField> {
   const safeRestaurant = { ...restaurant };
   for (const field of RESTAURANT_SECRET_FIELDS) {

@@ -282,8 +282,9 @@ export class OrdersService {
   /**
    * Notifica al cliente por el canal unificado: Meta Cloud API si el restaurante tiene
    * credenciales oficiales; si no, la sesión de WhatsApp Web (Baileys). Nunca lanza.
+   * Público para otros módulos (ej. confirmación de pago de PaymentsService).
    */
-  private async notifyCustomer(
+  async notifyCustomer(
     order: {
       customerPhone?: string | null;
       restaurantId?: string | null;

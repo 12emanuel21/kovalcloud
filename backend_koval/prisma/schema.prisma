@@ -85,6 +85,13 @@ model Restaurant {
   // Verifica la firma x-hub-signature-256 de SUS webhooks. Nunca se devuelve en la API.
   metaAppSecret       String?
 
+  // Pasarela de pagos Wompi (Bancolombia). Solo la llave pública sale al cliente;
+  // el resto se oculta con sanitizeRestaurant.
+  wompiPublicKey       String? // pub_test_... / pub_prod_...
+  wompiPrivateKey      String? // prv_... (consultas a la API de Wompi)
+  wompiEventSecret     String? // Verifica la firma (checksum) de los webhooks
+  wompiIntegritySecret String? // Firma de integridad obligatoria del link de pago
+
   // Usuarios del restaurante (dueños, y a futuro staff)
   users User[]
 
@@ -164,6 +171,11 @@ model Order {
   channel         String?     @default("WEB_MENU")
   status          OrderStatus @default(PENDING)
   notes           String?
+
+  // Pago en línea (Wompi). paymentStatus: PENDING, PAID, FAILED, CANCELLED
+  paymentStatus    String  @default("PENDING")
+  paymentReference String? @unique // Referencia enviada a la pasarela (KOV-...)
+  paymentMethod    String? // Ej: NEQUI, CARD, PSE, CASH
 
   items OrderItem[]
 
