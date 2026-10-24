@@ -15,7 +15,8 @@ import {
   WOMPI_CURRENCY,
 } from './wompi';
 
-export const PAYMENT_CONFIRMED_MESSAGE = '¡Pago confirmado! 🍔 Tu orden ya está en preparación.';
+// No promete que ya se cocina: el pago no cambia el estado del pedido en cocina
+export const PAYMENT_CONFIRMED_MESSAGE = '¡Pago confirmado! 💳 Hemos notificado al restaurante para que inicie tu orden.';
 
 type WebhookResult = { received: true; ignored?: string; paymentStatus?: string };
 

@@ -38,6 +38,10 @@ interface Order {
   total: number | null;
   status: OrderStatus;
   notes?: string;
+  /** Pago en línea (Wompi): PENDING, PAID, FAILED, CANCELLED */
+  paymentStatus?: string;
+  paymentReference?: string | null;
+  paymentMethod?: string | null;
   items: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -260,6 +264,40 @@ export default function OrdersPage() {
     }
   };
 
+  /** Etiqueta de pago: PAGADO (verde brillante) o PAGO PENDIENTE (ámbar si espera a Wompi, gris si no) */
+  const renderPaymentBadge = (order: Order) => {
+    const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black tracking-wide';
+    switch (order.paymentStatus) {
+      case 'PAID':
+        return (
+          <span
+            className={`${base} bg-emerald-400 text-slate-950 shadow-[0_0_12px_rgba(52,211,153,0.45)]`}
+            title={order.paymentMethod ? `Pagado con ${order.paymentMethod}` : 'Pagado en línea'}
+          >
+            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            PAGADO{order.paymentMethod ? ` · ${order.paymentMethod}` : ''}
+          </span>
+        );
+      case 'FAILED':
+        return <span className={`${base} bg-rose-500/15 text-rose-300 border border-rose-500/30`}>PAGO RECHAZADO</span>;
+      case 'CANCELLED':
+        return <span className={`${base} bg-slate-700/60 text-slate-300 border border-slate-600`}>PAGO ANULADO</span>;
+      default:
+        // Con referencia = el cliente abrió el checkout de Wompi y aún no se confirma
+        return order.paymentReference ? (
+          <span className={`${base} bg-amber-500/15 text-amber-300 border border-amber-500/30`} title="Esperando confirmación de Wompi">
+            PAGO PENDIENTE
+          </span>
+        ) : (
+          <span className={`${base} bg-slate-700/50 text-slate-400 border border-slate-600/60`} title="Sin pago en línea registrado">
+            PAGO PENDIENTE
+          </span>
+        );
+    }
+  };
+
   // Render de tarjeta de orden
   const renderOrderCard = (order: Order) => {
     const isUpdating = updatingOrderId === order.id;
@@ -290,6 +328,7 @@ export default function OrdersPage() {
               )}
               <span className="text-[11px] text-slate-400">{formatOrderTime(order.createdAt)}</span>
             </div>
+            <div className="mt-1.5">{renderPaymentBadge(order)}</div>
           </div>
 
           <div className="shrink-0 text-right">

@@ -33,6 +33,39 @@ async function apiErrorMessage(res: Response, fallback: string): Promise<string>
   return message || fallback;
 }
 
+/** GET /restaurants/:id/payments-config y respuesta del PATCH: secretos solo enmascarados */
+interface PaymentsConfig {
+  wompiPublicKey: string | null;
+  wompiEnvironment: 'sandbox' | 'production' | null;
+  hasWompiPrivateKey: boolean;
+  wompiPrivateKeyMasked: string | null;
+  hasWompiEventSecret: boolean;
+  wompiEventSecretMasked: string | null;
+  hasWompiIntegritySecret: boolean;
+  wompiIntegritySecretMasked: string | null;
+  wompiReady: boolean;
+}
+
+type WompiSecretField = 'wompiPrivateKey' | 'wompiEventSecret' | 'wompiIntegritySecret';
+
+const WOMPI_SECRET_FIELDS: Array<{
+  field: WompiSecretField;
+  label: string;
+  placeholder: string;
+  masked: (c: PaymentsConfig | null) => string | null;
+}> = [
+  { field: 'wompiPrivateKey', label: 'Llave Privada', placeholder: 'prv_test_...', masked: (c) => c?.wompiPrivateKeyMasked ?? null },
+  { field: 'wompiEventSecret', label: 'Secreto de Eventos', placeholder: 'test_events_...', masked: (c) => c?.wompiEventSecretMasked ?? null },
+  {
+    field: 'wompiIntegritySecret',
+    label: 'Secreto de Integridad',
+    placeholder: 'test_integrity_...',
+    masked: (c) => c?.wompiIntegritySecretMasked ?? null,
+  },
+];
+
+const EMPTY_SECRETS: Record<WompiSecretField, string> = { wompiPrivateKey: '', wompiEventSecret: '', wompiIntegritySecret: '' };
+
 const inputClass =
   'w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-xs text-white outline-none transition';
 
@@ -53,6 +86,12 @@ export function RestaurantProfileSection() {
   const [closedMessage, setClosedMessage] = useState('');
   const [blocks, setBlocks] = useState<ScheduleBlock[]>([]);
   const [theme, setTheme] = useState<MenuTheme>(DEFAULT_MENU_THEME);
+
+  // Wompi: la llave pública se edita tal cual; los secretos vacíos = conservar el guardado
+  const [payments, setPayments] = useState<PaymentsConfig | null>(null);
+  const [wompiPublicKey, setWompiPublicKey] = useState('');
+  const [wompiSecrets, setWompiSecrets] = useState<Record<WompiSecretField, string>>(EMPTY_SECRETS);
+  const [disconnectingWompi, setDisconnectingWompi] = useState(false);
 
   // Carga inicial: setState solo en callbacks de la promesa (nunca síncrono en el efecto)
   useEffect(() => {
@@ -88,6 +127,64 @@ export function RestaurantProfileSection() {
     };
   }, [restaurantId, token]);
 
+  // Configuración de Wompi (endpoint aparte: solo OWNER/SUPERADMIN, secretos enmascarados)
+  useEffect(() => {
+    if (!restaurantId || !token) return;
+    let cancelled = false;
+    fetch(`${API_URL}/restaurants/${restaurantId}/payments-config`, {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo cargar la configuración de pagos'));
+        return res.json() as Promise<PaymentsConfig>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setPayments(data);
+        setWompiPublicKey(data.wompiPublicKey ?? '');
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setFeedback({ type: 'error', text: err instanceof Error ? err.message : 'No se pudo cargar la configuración de pagos' });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantId, token]);
+
+  /** Aplica la respuesta del backend (PATCH config) a la sección de Wompi */
+  const applyPaymentsResponse = (data: Partial<PaymentsConfig>) => {
+    if (!('hasWompiPrivateKey' in data)) return;
+    const config = data as PaymentsConfig;
+    setPayments(config);
+    setWompiPublicKey(config.wompiPublicKey ?? '');
+    setWompiSecrets(EMPTY_SECRETS);
+  };
+
+  const handleDisconnectWompi = async () => {
+    if (!window.confirm('¿Quitar la configuración de Wompi? Tus clientes no podrán pagar en línea hasta que la vuelvas a configurar.')) {
+      return;
+    }
+    setDisconnectingWompi(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`${API_URL}/restaurants/${restaurantId}/config`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wompiPublicKey: null, wompiPrivateKey: null, wompiEventSecret: null, wompiIntegritySecret: null }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo quitar la configuración de Wompi'));
+      applyPaymentsResponse(await res.json());
+      setFeedback({ type: 'success', text: 'Configuración de Wompi eliminada.' });
+    } catch (err) {
+      setFeedback({ type: 'error', text: err instanceof Error ? err.message : 'No se pudo quitar la configuración de Wompi' });
+    } finally {
+      setDisconnectingWompi(false);
+    }
+  };
+
   const updateBlock = (id: string, patch: Partial<Omit<ScheduleBlock, 'id'>>) =>
     setBlocks((prev) => prev.map((block) => (block.id === id ? { ...block, ...patch } : block)));
 
@@ -118,13 +215,21 @@ export function RestaurantProfileSection() {
     setSaving(true);
     setFeedback(null);
     try {
-      const payload: RestaurantConfig = {
+      // Secretos de Wompi: solo se envían los que el usuario escribió (vacío = conservar)
+      const secrets = Object.fromEntries(
+        Object.entries(wompiSecrets)
+          .map(([field, value]) => [field, value.trim()])
+          .filter(([, value]) => value),
+      );
+      const payload: RestaurantConfig & Record<string, unknown> = {
         address: address.trim(),
         paymentDetails: paymentDetails.trim(),
         businessHours: blocksToHours(blocks),
         isTemporarilyClosed,
         closedMessage: closedMessage.trim(),
         theme,
+        wompiPublicKey: wompiPublicKey.trim(),
+        ...secrets,
       };
       const res = await fetch(`${API_URL}/restaurants/${restaurantId}/config`, {
         method: 'PATCH',
@@ -132,6 +237,7 @@ export function RestaurantProfileSection() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo guardar el perfil del local'));
+      applyPaymentsResponse(await res.json());
       setFeedback({ type: 'success', text: 'Perfil del local guardado correctamente.' });
       setTimeout(() => setFeedback(null), 4000);
     } catch (err) {
@@ -266,6 +372,94 @@ export function RestaurantProfileSection() {
         </select>
         <p className="text-[11px] text-slate-500 mt-1">Diseño que ven tus clientes al abrir la carta o escanear el QR.</p>
       </div>
+
+      {/* Pagos en línea (Wompi) */}
+      <details className="group rounded-2xl border border-slate-800/80 bg-slate-950/60 open:bg-slate-950/80" open={!payments?.wompiReady}>
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
+          <div>
+            <h3 className="text-sm font-bold text-white">Configuración de Pagos (Wompi)</h3>
+            <p className="text-[11px] text-slate-400">Cobra en línea con tarjeta, Nequi, PSE y Bancolombia.</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {payments?.wompiReady ? (
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300">
+                {payments.wompiEnvironment === 'production' ? 'Activo · Producción' : 'Activo · Sandbox'}
+              </span>
+            ) : (
+              <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[10px] font-bold text-slate-400">
+                Sin configurar
+              </span>
+            )}
+            <span className="text-slate-500 transition group-open:rotate-180" aria-hidden>
+              ▾
+            </span>
+          </div>
+        </summary>
+
+        <div className="space-y-4 border-t border-slate-800/80 p-4">
+          <div>
+            <label htmlFor="wompi-public-key" className="block text-[11px] font-semibold text-slate-400 mb-1">
+              Llave Pública
+            </label>
+            <input
+              id="wompi-public-key"
+              type="text"
+              value={wompiPublicKey}
+              onChange={(e) => setWompiPublicKey(e.target.value)}
+              placeholder="pub_test_... o pub_prod_..."
+              autoComplete="off"
+              spellCheck={false}
+              className={`${inputClass} font-mono`}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {WOMPI_SECRET_FIELDS.map(({ field, label, placeholder, masked }) => {
+              const saved = masked(payments);
+              return (
+                <div key={field}>
+                  <label htmlFor={field} className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    {label}
+                  </label>
+                  <input
+                    id={field}
+                    type="password"
+                    value={wompiSecrets[field]}
+                    onChange={(e) => setWompiSecrets((prev) => ({ ...prev, [field]: e.target.value }))}
+                    placeholder={saved ? `Guardado ${saved}` : placeholder}
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    className={`${inputClass} font-mono`}
+                  />
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    {saved ? 'Déjalo vacío para conservar el actual.' : 'Aún no configurado.'}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-[11px] leading-relaxed text-slate-400">
+            Encuéntralas en tu panel de Wompi → <span className="text-slate-300">Desarrolladores</span>. En
+            &quot;URL de eventos&quot; configura:{' '}
+            <code className="break-all rounded bg-slate-950 px-1.5 py-0.5 font-mono text-emerald-300">
+              {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/wompi
+            </code>
+            . No mezcles llaves de prueba (test) con llaves de producción (prod).
+          </div>
+
+          {(payments?.wompiPublicKey || payments?.hasWompiPrivateKey || payments?.hasWompiEventSecret || payments?.hasWompiIntegritySecret) && (
+            <button
+              type="button"
+              onClick={handleDisconnectWompi}
+              disabled={disconnectingWompi}
+              className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-1.5 text-[11px] font-semibold text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50 cursor-pointer"
+            >
+              {disconnectingWompi ? 'Quitando...' : 'Quitar configuración de Wompi'}
+            </button>
+          )}
+        </div>
+      </details>
 
       {/* Horarios: bloques tipo alarma (franja + días) */}
       <div className="space-y-3">

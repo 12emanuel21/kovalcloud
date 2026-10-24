@@ -14,6 +14,34 @@ import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
 
+const wompiSelect = {
+  wompiPublicKey: true,
+  wompiPrivateKey: true,
+  wompiEventSecret: true,
+  wompiIntegritySecret: true,
+} as const;
+
+/** Estado de Wompi para el dashboard: la llave pública completa, los secretos solo enmascarados */
+function toPaymentsConfig(r: {
+  wompiPublicKey: string | null;
+  wompiPrivateKey: string | null;
+  wompiEventSecret: string | null;
+  wompiIntegritySecret: string | null;
+}) {
+  return {
+    wompiPublicKey: r.wompiPublicKey,
+    wompiEnvironment: r.wompiPublicKey?.startsWith('pub_prod_') ? 'production' : r.wompiPublicKey ? 'sandbox' : null,
+    hasWompiPrivateKey: Boolean(r.wompiPrivateKey),
+    wompiPrivateKeyMasked: maskSecret(r.wompiPrivateKey),
+    hasWompiEventSecret: Boolean(r.wompiEventSecret),
+    wompiEventSecretMasked: maskSecret(r.wompiEventSecret),
+    hasWompiIntegritySecret: Boolean(r.wompiIntegritySecret),
+    wompiIntegritySecretMasked: maskSecret(r.wompiIntegritySecret),
+    /** Listo para cobrar: link de pago (pública + integridad) y webhook (eventos) */
+    wompiReady: Boolean(r.wompiPublicKey && r.wompiIntegritySecret && r.wompiEventSecret),
+  };
+}
+
 /**
  * Respuesta pública de un restaurante: sin credenciales de Meta y con `owner`
  * (primer dueño) por compatibilidad con el frontend.
@@ -174,8 +202,12 @@ export class RestaurantsService {
     // Texto vacío o null = borrar; ausente (undefined) = no tocar
     const text = (value: string | null | undefined) =>
       value === undefined ? undefined : value?.trim() || null;
+    // Secretos: ausente o "" = conservar el guardado; null = borrar
+    const secret = (value: string | null | undefined) =>
+      value === null ? null : value?.trim() ? value.trim() : undefined;
 
-    return this.prisma.restaurant.update({
+    const { wompiPublicKey, wompiPrivateKey, wompiEventSecret, wompiIntegritySecret, ...config } =
+      await this.prisma.restaurant.update({
       where: { id },
       data: {
         address: text(dto.address),
@@ -183,6 +215,10 @@ export class RestaurantsService {
         closedMessage: text(dto.closedMessage),
         isTemporarilyClosed: dto.isTemporarilyClosed,
         theme: dto.theme,
+        wompiPublicKey: text(dto.wompiPublicKey),
+        wompiPrivateKey: secret(dto.wompiPrivateKey),
+        wompiEventSecret: secret(dto.wompiEventSecret),
+        wompiIntegritySecret: secret(dto.wompiIntegritySecret),
         // Kill switch: activar la emergencia destruye cualquier prórroga vigente
         ...(dto.isTemporarilyClosed === true ? { extendedUntil: null } : {}),
         businessHours:
@@ -200,8 +236,17 @@ export class RestaurantsService {
         isTemporarilyClosed: true,
         closedMessage: true,
         theme: true,
+        ...wompiSelect,
       },
     });
+    return { ...config, ...toPaymentsConfig({ wompiPublicKey, wompiPrivateKey, wompiEventSecret, wompiIntegritySecret }) };
+  }
+
+  /** Configuración de Wompi del local para Ajustes (secretos enmascarados) */
+  async findPaymentsConfig(id: string) {
+    const restaurant = await this.prisma.restaurant.findUnique({ where: { id }, select: wompiSelect });
+    if (!restaurant) throw new NotFoundException('Restaurante no encontrado');
+    return toPaymentsConfig(restaurant);
   }
 
   /**

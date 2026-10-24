@@ -65,6 +65,15 @@ export class RestaurantsController {
     return this.restaurantsService.updateConfig(id, dto);
   }
 
+  // Configuración de Wompi (secretos enmascarados): solo el OWNER del local o el SUPERADMIN
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(Role.OWNER, Role.SUPERADMIN)
+  @TenantParam('id')
+  @Get(':id/payments-config')
+  findPaymentsConfig(@Param('id') id: string) {
+    return this.restaurantsService.findPaymentsConfig(id);
+  }
+
   // Prórroga de horario (botones rápidos del Kanban): solo el OWNER del local o el SUPERADMIN
   @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(Role.OWNER, Role.SUPERADMIN)

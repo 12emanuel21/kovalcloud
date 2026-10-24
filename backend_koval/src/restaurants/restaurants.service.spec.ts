@@ -73,6 +73,53 @@ describe('RestaurantsService · kill switch del cierre de emergencia', () => {
     expect(errors.map((e) => e.property)).toEqual(['theme']);
   });
 
+  it('Wompi: guarda llaves nuevas, conserva las vacías, borra con null y nunca devuelve secretos completos', async () => {
+    const { prisma, service } = build(restaurantRow());
+    prisma.restaurant.update.mockImplementation(({ data }: { data: Record<string, unknown> }) => ({
+      id: 'rest-1',
+      wompiPublicKey: data.wompiPublicKey ?? null,
+      wompiPrivateKey: 'prv_test_guardada1234',
+      wompiEventSecret: data.wompiEventSecret === null ? null : 'test_events_guardado9876',
+      wompiIntegritySecret: data.wompiIntegritySecret ?? 'test_integrity_viejo0000',
+    }));
+
+    const result = await service.updateConfig('rest-1', {
+      wompiPublicKey: ' pub_test_abc ',
+      wompiPrivateKey: '',
+      wompiEventSecret: null,
+      wompiIntegritySecret: 'test_integrity_nuevo5555',
+    });
+
+    const data = prisma.restaurant.update.mock.calls[0][0].data;
+    expect(data.wompiPublicKey).toBe('pub_test_abc');
+    expect(data.wompiPrivateKey).toBeUndefined(); // "" = conservar
+    expect(data.wompiEventSecret).toBeNull(); // null = borrar
+    expect(data.wompiIntegritySecret).toBe('test_integrity_nuevo5555');
+
+    expect(result).toMatchObject({
+      wompiPublicKey: 'pub_test_abc',
+      wompiEnvironment: 'sandbox',
+      hasWompiPrivateKey: true,
+      wompiPrivateKeyMasked: '••••1234',
+      hasWompiEventSecret: false,
+      wompiReady: false,
+    });
+    expect(JSON.stringify(result)).not.toContain('prv_test_guardada1234');
+    expect(JSON.stringify(result)).not.toContain('test_integrity_nuevo5555');
+  });
+
+  it('el DTO rechaza llaves de Wompi pegadas en el campo equivocado', async () => {
+    const errors = await validate(
+      plainToInstance(UpdateRestaurantConfigDto, {
+        wompiPublicKey: 'prv_test_x',
+        wompiPrivateKey: 'pub_test_x',
+        wompiEventSecret: 'test_integrity_x',
+        wompiIntegritySecret: '',
+      }),
+    );
+    expect(errors.map((e) => e.property).sort()).toEqual(['wompiEventSecret', 'wompiPrivateKey', 'wompiPublicKey']);
+  });
+
   it('desactivar la emergencia o editar otros campos no toca la prórroga', async () => {
     const { prisma, service } = build(restaurantRow());
     await service.updateConfig('rest-1', { isTemporarilyClosed: false, address: 'Calle 1' });
