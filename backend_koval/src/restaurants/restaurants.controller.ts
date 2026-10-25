@@ -3,6 +3,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { TenantGuard } from '../auth/guards/tenant.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantParam } from '../auth/decorators/tenant-param.decorator';
+import { SudoGuard } from '../auth/guards/sudo.guard';
 import { UseGuards, Controller, Get, Post, Body, Patch, Param, Delete , UseInterceptors, UploadedFile, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
@@ -56,8 +57,8 @@ export class RestaurantsController {
     return this.restaurantsService.findWhatsappConfig(id);
   }
 
-  // Perfil del local: solo el OWNER de este restaurante (TenantGuard) o el SUPERADMIN
-  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  // Perfil del local (incluye llaves de Wompi): OWNER del local o SUPERADMIN, en Sudo Mode
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard, SudoGuard)
   @Roles(Role.OWNER, Role.SUPERADMIN)
   @TenantParam('id')
   @Patch(':id/config')
@@ -84,7 +85,9 @@ export class RestaurantsController {
     return this.restaurantsService.extendHours(id, dto.minutes);
   }
 
-  @UseGuards(JwtAuthGuard, TenantGuard)
+  // Identidad del local y credenciales de WhatsApp/Meta: OWNER del local o SUPERADMIN, en Sudo Mode
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard, SudoGuard)
+  @Roles(Role.OWNER, Role.SUPERADMIN)
   @TenantParam('id')
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateRestaurantDto: UpdateRestaurantDto) {

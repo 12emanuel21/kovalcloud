@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { homePathForRole, type UserRole } from '@/lib/roles';
+import { clearSudoToken } from '@/lib/sudo-token';
 
 export interface Restaurant {
   id: string;
@@ -16,6 +17,7 @@ export interface User {
   email: string;
   name?: string;
   role: UserRole;
+  isTwoFactorEnabled?: boolean;
   restaurant?: Restaurant | null;
 }
 
@@ -150,6 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(authUser);
     setImpersonation(null);
     clearImpersonationStorage();
+    clearSudoToken();
 
     localStorage.setItem('koval_token', accessToken);
     localStorage.setItem('koval_user', JSON.stringify(authUser));
@@ -163,6 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     setImpersonation(null);
     clearImpersonationStorage();
+    clearSudoToken();
     localStorage.removeItem('koval_token');
     localStorage.removeItem('koval_user');
     router.push('/login');

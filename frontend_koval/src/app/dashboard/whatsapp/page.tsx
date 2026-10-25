@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { useSudoMode } from '@/context/SudoContext';
 import { QRCodeCanvas } from 'qrcode.react';
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
@@ -33,6 +34,8 @@ interface WhatsappConfigData {
 
 export default function WhatsAppDashboardPage() {
   const { restaurantId , token} = useAuth();
+  // Guardar credenciales de Meta (PATCH /restaurants/:id) exige Sudo Mode
+  const { sudoFetch } = useSudoMode();
 
   // Selector de Pestaña Activa ('meta' | 'baileys')
   const [activeTab, setActiveTab] = useState<'meta' | 'baileys'>('meta');
@@ -146,7 +149,7 @@ export default function WhatsAppDashboardPage() {
         botpressBotId: botpressBotId.trim() || undefined,
       };
 
-      const res = await fetch(`${API_URL}/restaurants/${restaurantId}`, {
+      const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}`, {
         method: 'PATCH',
         headers: {
         'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },

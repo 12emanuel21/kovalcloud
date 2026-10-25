@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { useSudoMode } from '@/context/SudoContext';
+import { TwoFactorSection } from '@/components/security/TwoFactorSection';
 import { WEEK_DAYS, type BusinessHours, type WeekDay } from '@/lib/business-hours';
 import { DEFAULT_MENU_THEME, MENU_THEMES, isMenuTheme, type MenuTheme } from '@/lib/menu-themes';
 import {
@@ -75,6 +77,8 @@ const inputClass =
  */
 export function RestaurantProfileSection() {
   const { restaurantId, token } = useAuth();
+  // PATCH /config está en Sudo Mode: ante 403 SUDO_REQUIRED se pide el código 2FA y se reintenta
+  const { sudoFetch } = useSudoMode();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -170,7 +174,7 @@ export function RestaurantProfileSection() {
     setDisconnectingWompi(true);
     setFeedback(null);
     try {
-      const res = await fetch(`${API_URL}/restaurants/${restaurantId}/config`, {
+      const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}/config`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ wompiPublicKey: null, wompiPrivateKey: null, wompiEventSecret: null, wompiIntegritySecret: null }),
@@ -231,7 +235,7 @@ export function RestaurantProfileSection() {
         wompiPublicKey: wompiPublicKey.trim(),
         ...secrets,
       };
-      const res = await fetch(`${API_URL}/restaurants/${restaurantId}/config`, {
+      const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}/config`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -256,6 +260,7 @@ export function RestaurantProfileSection() {
   }
 
   return (
+    <>
     <form
       onSubmit={handleSave}
       className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl backdrop-blur-sm"
@@ -577,5 +582,8 @@ export function RestaurantProfileSection() {
         </button>
       </div>
     </form>
+
+    <TwoFactorSection />
+    </>
   );
 }

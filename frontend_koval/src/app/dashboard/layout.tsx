@@ -7,6 +7,7 @@ import { canAccessDashboardPath, homePathForRole } from '@/lib/roles';
 import { Loader2 } from 'lucide-react';
 import Sidebar from '@/components/layout/Sidebar';
 import TopBar from '@/components/layout/TopBar';
+import { SudoProvider } from '@/context/SudoContext';
 
 export default function DashboardLayout({
   children,
@@ -56,6 +57,8 @@ export default function DashboardLayout({
   }
 
   return (
+    // Sudo Mode: modal de código 2FA para guardar configuraciones sensibles
+    <SudoProvider>
     <div className="flex h-screen bg-slate-900 text-slate-100 antialiased selection:bg-emerald-500 selection:text-white">
       <Sidebar mobileOpen={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} />
 
@@ -66,5 +69,6 @@ export default function DashboardLayout({
         </main>
       </div>
     </div>
+    </SudoProvider>
   );
 }

@@ -7,6 +7,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { RolesGuard } from './guards/roles.guard';
 import { requireEnv } from '../config/secrets';
 import { TenantGuard } from './guards/tenant.guard';
+import { SudoGuard } from './guards/sudo.guard';
 
 @Module({
   imports: [
@@ -19,7 +20,7 @@ import { TenantGuard } from './guards/tenant.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, RolesGuard, TenantGuard],
-  exports: [AuthService, JwtStrategy, PassportModule, JwtModule, RolesGuard, TenantGuard],
+  providers: [AuthService, JwtStrategy, RolesGuard, TenantGuard, SudoGuard],
+  exports: [AuthService, JwtStrategy, PassportModule, JwtModule, RolesGuard, TenantGuard, SudoGuard],
 })
 export class AuthModule {}

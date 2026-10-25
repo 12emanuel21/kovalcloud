@@ -1,5 +1,4 @@
 import {
-  UnauthorizedException,
   Controller,
   Post,
   Body,
@@ -10,6 +9,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -18,6 +18,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/roles.decorator';
 import { KitchenAccess } from './decorators/kitchen-access.decorator';
 import { AuthenticatedUser } from './strategies/jwt.strategy';
+import { TwoFactorThrottlerGuard } from './guards/two-factor-throttler.guard';
 
 type AuthenticatedRequest = { user: AuthenticatedUser };
 
@@ -46,6 +47,7 @@ export class AuthController {
     return req.user;
   }
 
+  // Paso 1: secreto pendiente + QR (rechazado si el 2FA ya está activo)
   @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Post('2fa/generate')
@@ -53,14 +55,22 @@ export class AuthController {
     return this.authService.generateTwoFactorSecret(req.user.id, req.user.email);
   }
 
+  // Paso 2: confirma el código de la app y activa el 2FA
   @KitchenAccess()
-  @UseGuards(JwtAuthGuard)
-  @Post('2fa/verify')
-  async verify2FA(@Request() req: AuthenticatedRequest, @Body('code') code: string) {
-    const isValid = await this.authService.verifyTwoFactorCode(req.user.id, code);
-    if (!isValid) {
-      throw new UnauthorizedException('Código 2FA inválido');
-    }
-    return { message: '2FA verificado correctamente' };
+  @UseGuards(JwtAuthGuard, TwoFactorThrottlerGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('2fa/enable')
+  enable2FA(@Request() req: AuthenticatedRequest, @Body('code') code: unknown) {
+    return this.authService.enableTwoFactor(req.user.id, code);
+  }
+
+  // Sudo Mode: código válido -> sudoToken de 30 min (header x-sudo-token en rutas sensibles)
+  @UseGuards(JwtAuthGuard, TwoFactorThrottlerGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('2fa/verify-sudo')
+  verifySudo(@Request() req: AuthenticatedRequest, @Body('code') code: unknown) {
+    return this.authService.issueSudoToken(req.user.id, code);
   }
 }

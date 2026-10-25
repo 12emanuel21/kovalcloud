@@ -17,6 +17,15 @@ import { LoginDto } from './dto/login.dto';
 import { Restaurant, Role, User } from '@prisma/client';
 import type { JwtPayload } from './strategies/jwt.strategy';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
+import { SUDO_SCOPE, SUDO_TOKEN_TTL_SECONDS, sudoTokenSecret, type SudoTokenPayload } from './sudo';
+
+/** TOTP con ±1 ventana de 30 s de tolerancia (relojes de celular desfasados) */
+const totp = authenticator.clone({ window: 1 });
+
+/** Código de 6 dígitos válido para el secreto */
+export function isValidTotp(code: unknown, secret: string): boolean {
+  return typeof code === 'string' && /^\d{6}$/.test(code) && totp.verify({ token: code, secret });
+}
 
 /**
  * Elimina campos sensibles antes de devolver un usuario al cliente,
@@ -126,7 +135,15 @@ export class AuthService {
     };
   }
 
+  /**
+   * Paso 1 del 2FA: genera un secreto pendiente y su QR. Si el 2FA ya está activo se rechaza:
+   * regenerarlo con solo la sesión permitiría a quien robe el token anular el Sudo Mode.
+   */
   async generateTwoFactorSecret(userId: string, email: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { isTwoFactorEnabled: true } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (user.isTwoFactorEnabled) throw new ConflictException('La autenticación en 2 pasos ya está activa');
+
     const secret = authenticator.generateSecret();
     const otpauthUrl = authenticator.keyuri(email, 'KovalCloud', secret);
 
@@ -141,22 +158,35 @@ export class AuthService {
     };
   }
 
-  async verifyTwoFactorCode(userId: string, code: string) {
+  /** Paso 2: confirma el secreto pendiente con un código de la app y activa el 2FA */
+  async enableTwoFactor(userId: string, code: unknown) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.twoFactorSecret) return false;
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (user.isTwoFactorEnabled) throw new ConflictException('La autenticación en 2 pasos ya está activa');
+    if (!user.twoFactorSecret) throw new BadRequestException('Primero genera el código QR');
+    if (!isValidTotp(code, user.twoFactorSecret)) throw new UnauthorizedException('Código 2FA inválido');
 
-    const isCodeValid = authenticator.verify({
-      token: code,
-      secret: user.twoFactorSecret,
+    await this.prisma.user.update({ where: { id: userId }, data: { isTwoFactorEnabled: true } });
+    return { isTwoFactorEnabled: true };
+  }
+
+  /** Sudo Mode: con un código válido emite un sudoToken de 30 minutos (header x-sudo-token) */
+  async issueSudoToken(userId: string, code: unknown) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, isTwoFactorEnabled: true, twoFactorSecret: true },
     });
-
-    if (isCodeValid && !user.isTwoFactorEnabled) {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { isTwoFactorEnabled: true },
-      });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (!user.isTwoFactorEnabled || !user.twoFactorSecret) {
+      throw new ForbiddenException('Activa la autenticación en 2 pasos para usar el modo seguro');
     }
+    if (!isValidTotp(code, user.twoFactorSecret)) throw new UnauthorizedException('Código 2FA inválido');
 
-    return isCodeValid;
+    const payload: SudoTokenPayload = { sub: user.id, scope: SUDO_SCOPE };
+    const sudoToken = await this.jwtService.signAsync(payload, {
+      secret: sudoTokenSecret(),
+      expiresIn: SUDO_TOKEN_TTL_SECONDS,
+    });
+    return { sudoToken, expiresAt: new Date(Date.now() + SUDO_TOKEN_TTL_SECONDS * 1000).toISOString() };
   }
 }
