@@ -75,8 +75,10 @@ interface CartDrawerProps {
   closedNotice?: string;
   /** Tema de la carta: define el color de acento de los botones */
   theme?: MenuTheme;
-  /** El local cobra en línea con Wompi: se ofrece "Pagar en línea" además del efectivo */
+  /** El backend confirma que el local puede cobrar en línea (llaves completas + interruptor) */
   onlinePaymentsEnabled?: boolean;
+  /** Interruptor manual del dueño: apagado = solo efectivo / WhatsApp, aunque haya llaves */
+  isWompiEnabled?: boolean;
   /** Modo controlado (opcional): permite abrir el carrito desde fuera, ej. el icono del header */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -92,7 +94,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   open,
   onOpenChange,
   onlinePaymentsEnabled = false,
+  isWompiEnabled = false,
 }) => {
+  // "Pagar en línea" solo con el interruptor del dueño encendido Y las llaves completas
+  const canPayOnline = isWompiEnabled && onlinePaymentsEnabled;
   const accent = ACCENTS[theme] ?? ACCENTS[DEFAULT_MENU_THEME];
   const { items, totalCount, totalAmount, updateQuantity, removeItem, clearCart } = useCart();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -118,7 +123,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     // Botón que envió el formulario (value="WOMPI" | "CASH"); Enter en un campo usa el primero
     const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const paymentMethod: PaymentMethod =
-      onlinePaymentsEnabled && submitter?.value === 'WOMPI' ? 'WOMPI' : 'CASH';
+      canPayOnline && submitter?.value === 'WOMPI' ? 'WOMPI' : 'CASH';
     if (isClosed) {
       setErrorMsg(closedNotice);
       return;
@@ -496,7 +501,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   >
                     🔒 Local cerrado: no estamos recibiendo pedidos
                   </button>
-                ) : onlinePaymentsEnabled ? (
+                ) : canPayOnline ? (
                   <>
                     <button
                       type="submit"

@@ -35,6 +35,11 @@ export class UpdateRestaurantConfigDto {
   theme?: MenuTheme;
 
   // ── Wompi ──
+  // Interruptor manual: con false la carta no ofrece "Pagar en línea" aunque haya llaves
+  @IsOptional()
+  @IsBoolean()
+  isWompiEnabled?: boolean;
+
   // Llave pública: vacío o null = quitar. Secretos: ausente o "" = no cambiar (el formulario no
   // conoce el valor guardado); null = borrar. Los prefijos evitan pegar una llave en el campo equivocado.
   @IsOptional()

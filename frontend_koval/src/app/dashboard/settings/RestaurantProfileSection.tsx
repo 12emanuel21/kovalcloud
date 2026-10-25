@@ -46,7 +46,12 @@ interface PaymentsConfig {
   wompiEventSecretMasked: string | null;
   hasWompiIntegritySecret: boolean;
   wompiIntegritySecretMasked: string | null;
+  /** Llaves completas (pública + eventos + integridad) */
   wompiReady: boolean;
+  /** Interruptor manual del dueño */
+  isWompiEnabled: boolean;
+  /** Cobrando de verdad: llaves completas e interruptor encendido */
+  onlinePaymentsEnabled: boolean;
 }
 
 type WompiSecretField = 'wompiPrivateKey' | 'wompiEventSecret' | 'wompiIntegritySecret';
@@ -97,6 +102,7 @@ export function RestaurantProfileSection() {
   const [wompiPublicKey, setWompiPublicKey] = useState('');
   const [wompiSecrets, setWompiSecrets] = useState<Record<WompiSecretField, string>>(EMPTY_SECRETS);
   const [disconnectingWompi, setDisconnectingWompi] = useState(false);
+  const [togglingWompi, setTogglingWompi] = useState(false);
 
   // Carga inicial: setState solo en callbacks de la promesa (nunca síncrono en el efecto)
   useEffect(() => {
@@ -168,6 +174,32 @@ export function RestaurantProfileSection() {
     setWompiSecrets(EMPTY_SECRETS);
   };
 
+  /** Interruptor manual: se guarda al instante (sin Sudo Mode) para poder apagar la pasarela en un clic */
+  const handleToggleWompi = async (enabled: boolean) => {
+    setTogglingWompi(true);
+    setFeedback(null);
+    try {
+      const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}/config`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isWompiEnabled: enabled }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo cambiar el estado de los cobros en línea'));
+      const data = (await res.json()) as PaymentsConfig;
+      // Solo el interruptor: no pisa llaves que el usuario esté escribiendo
+      setPayments(data);
+      setFeedback({
+        type: 'success',
+        text: enabled ? 'Cobros en línea habilitados: la carta ya ofrece "Pagar en línea".' : 'Cobros en línea deshabilitados.',
+      });
+      setTimeout(() => setFeedback(null), 4000);
+    } catch (err) {
+      setFeedback({ type: 'error', text: err instanceof Error ? err.message : 'No se pudo cambiar el estado de los cobros en línea' });
+    } finally {
+      setTogglingWompi(false);
+    }
+  };
+
   const handleDisconnectWompi = async () => {
     if (!window.confirm('¿Quitar la configuración de Wompi? Tus clientes no podrán pagar en línea hasta que la vuelvas a configurar.')) {
       return;
@@ -178,7 +210,13 @@ export function RestaurantProfileSection() {
       const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}/config`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wompiPublicKey: null, wompiPrivateKey: null, wompiEventSecret: null, wompiIntegritySecret: null }),
+        body: JSON.stringify({
+          isWompiEnabled: false,
+          wompiPublicKey: null,
+          wompiPrivateKey: null,
+          wompiEventSecret: null,
+          wompiIntegritySecret: null,
+        }),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo quitar la configuración de Wompi'));
       applyPaymentsResponse(await res.json());
@@ -393,9 +431,13 @@ export function RestaurantProfileSection() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {payments?.wompiReady ? (
+            {payments?.onlinePaymentsEnabled ? (
               <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300">
                 {payments.wompiEnvironment === 'production' ? 'Activo · Producción' : 'Activo · Sandbox'}
+              </span>
+            ) : payments?.wompiReady ? (
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold text-amber-300">
+                Apagado
               </span>
             ) : (
               <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[10px] font-bold text-slate-400">
@@ -403,6 +445,41 @@ export function RestaurantProfileSection() {
               </span>
             )}
           </div>
+        </div>
+
+        {/* Interruptor manual: aunque las llaves estén completas, apagado = la carta no cobra en línea */}
+        <div className="border-t border-slate-800/80 p-4">
+          <label
+            className={`flex items-center justify-between gap-4 rounded-xl border p-4 transition ${
+              payments?.isWompiEnabled ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-slate-800 bg-slate-900/60'
+            } ${!payments || togglingWompi || (!payments.wompiReady && !payments.isWompiEnabled) ? 'opacity-60' : 'cursor-pointer'}`}
+          >
+            <span>
+              <span className="block text-sm font-bold text-white">Habilitar cobros en línea con Wompi</span>
+              <span className="block text-[11px] text-slate-400">
+                {!payments
+                  ? 'Cargando configuración de pagos...'
+                  : payments.isWompiEnabled
+                    ? 'Tus clientes ven el botón "Pagar en línea" en el carrito.'
+                    : payments.wompiReady
+                      ? 'Apagado: el carrito solo ofrece pago en efectivo / WhatsApp.'
+                      : 'Completa y guarda las llaves de Wompi para poder encenderlo.'}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="peer sr-only"
+              checked={Boolean(payments?.isWompiEnabled)}
+              disabled={!payments || togglingWompi || (!payments.wompiReady && !payments.isWompiEnabled)}
+              onChange={(e) => handleToggleWompi(e.target.checked)}
+              aria-describedby="wompi-title"
+            />
+            <span
+              aria-hidden
+              className="relative h-7 w-12 shrink-0 rounded-full bg-slate-700 transition peer-checked:bg-emerald-500 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400 after:absolute after:left-1 after:top-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5"
+            />
+          </label>
         </div>
 
         <div className="space-y-4 border-t border-slate-800/80 p-4">

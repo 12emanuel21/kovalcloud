@@ -33,7 +33,9 @@ export interface RestaurantData {
   theme?: string | null;
   /** Pública por diseño (checkout de Wompi); los secretos nunca llegan a la carta */
   wompiPublicKey?: string | null;
-  /** El backend confirma que el local puede cobrar en línea (llaves completas) */
+  /** Interruptor manual del dueño para encender o apagar la pasarela */
+  isWompiEnabled?: boolean;
+  /** El backend confirma que el local puede cobrar en línea (interruptor encendido + llaves completas) */
   onlinePaymentsEnabled?: boolean;
   categories: Category[];
 }

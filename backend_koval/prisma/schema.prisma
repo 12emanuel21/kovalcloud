@@ -91,6 +91,8 @@ model Restaurant {
   wompiPrivateKey      String? // prv_... (consultas a la API de Wompi)
   wompiEventSecret     String? // Verifica la firma (checksum) de los webhooks
   wompiIntegritySecret String? // Firma de integridad obligatoria del link de pago
+  // Interruptor manual del dueño: aunque las llaves estén completas, sin esto no se cobra en línea
+  isWompiEnabled       Boolean @default(false)
 
   // Usuarios del restaurante (dueños, y a futuro staff)
   users User[]

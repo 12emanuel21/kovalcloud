@@ -19,6 +19,11 @@ export function isWompiReady(restaurant: Partial<CheckoutRestaurant>): boolean {
   return Boolean(restaurant.wompiPublicKey && restaurant.wompiIntegritySecret && restaurant.wompiEventSecret);
 }
 
+/** ¿Ofrecer "Pagar en línea"? Llaves completas Y el interruptor manual del dueño encendido */
+export function isOnlinePaymentEnabled(restaurant: Partial<CheckoutRestaurant> & { isWompiEnabled?: boolean }): boolean {
+  return restaurant.isWompiEnabled === true && isWompiReady(restaurant);
+}
+
 /**
  * Generación del link al Web Checkout de Wompi. Separado de PaymentsService (webhook) para que
  * OrdersService lo use sin dependencia circular entre módulos.

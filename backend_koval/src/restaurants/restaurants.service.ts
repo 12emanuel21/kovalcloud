@@ -11,12 +11,13 @@ import { maskSecret, sanitizeRestaurant } from './sanitize-restaurant';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
-import { isWompiReady } from '../payments/wompi-checkout.service';
+import { isOnlinePaymentEnabled, isWompiReady } from '../payments/wompi-checkout.service';
 import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
 
 const wompiSelect = {
+  isWompiEnabled: true,
   wompiPublicKey: true,
   wompiPrivateKey: true,
   wompiEventSecret: true,
@@ -36,12 +37,13 @@ const metaSelect = {
  * ¿El pedido cambia algún campo sensible respecto a lo guardado? undefined = no se toca;
  * vacío y null cuentan igual. Reenviar el mismo valor (el formulario lo hace) no cuenta.
  */
-function changesSensitiveFields(current: Record<string, string | null>, next: Record<string, string | null | undefined>) {
+function changesSensitiveFields(current: Record<string, unknown>, next: Record<string, string | null | undefined>) {
   return Object.entries(next).some(([field, value]) => value !== undefined && (value || null) !== (current[field] || null));
 }
 
 /** Estado de Wompi para el dashboard: la llave pública completa, los secretos solo enmascarados */
 function toPaymentsConfig(r: {
+  isWompiEnabled: boolean;
   wompiPublicKey: string | null;
   wompiPrivateKey: string | null;
   wompiEventSecret: string | null;
@@ -56,8 +58,12 @@ function toPaymentsConfig(r: {
     wompiEventSecretMasked: maskSecret(r.wompiEventSecret),
     hasWompiIntegritySecret: Boolean(r.wompiIntegritySecret),
     wompiIntegritySecretMasked: maskSecret(r.wompiIntegritySecret),
-    /** Listo para cobrar: link de pago (pública + integridad) y webhook (eventos) */
-    wompiReady: Boolean(r.wompiPublicKey && r.wompiIntegritySecret && r.wompiEventSecret),
+    /** Llaves completas: link de pago (pública + integridad) y webhook (eventos) */
+    wompiReady: isWompiReady(r),
+    /** Interruptor manual del dueño */
+    isWompiEnabled: r.isWompiEnabled,
+    /** Cobrando de verdad: llaves completas e interruptor encendido */
+    onlinePaymentsEnabled: isOnlinePaymentEnabled(r),
   };
 }
 
@@ -100,8 +106,13 @@ export class RestaurantsService {
 
     if (!restaurant) throw new NotFoundException('Restaurante no encontrado');
     // Carta pública: sanitizeRestaurant deja solo wompiPublicKey (nunca los secretos).
-    // onlinePaymentsEnabled indica si el carrito debe ofrecer "Pagar en línea".
-    return { ...sanitizeRestaurant(restaurant), onlinePaymentsEnabled: isWompiReady(restaurant) };
+    // isWompiEnabled es el interruptor del dueño; onlinePaymentsEnabled (interruptor + llaves completas)
+    // indica si el carrito debe ofrecer "Pagar en línea".
+    return {
+      ...sanitizeRestaurant(restaurant),
+      isWompiEnabled: restaurant.isWompiEnabled,
+      onlinePaymentsEnabled: isOnlinePaymentEnabled(restaurant),
+    };
   }
 
   async create(createRestaurantDto: CreateRestaurantDto) {
@@ -250,7 +261,21 @@ export class RestaurantsService {
     };
     if (changesSensitiveFields(current, wompi)) await this.twoFactorAuth.assertSudo(sudo);
 
-    const { wompiPublicKey, wompiPrivateKey, wompiEventSecret, wompiIntegritySecret, ...config } =
+    // Interruptor manual: encenderlo (o dejarlo encendido) exige llaves completas tras este guardado.
+    // Apagarlo siempre se permite y no pide Sudo Mode (es la forma rápida de dejar de cobrar en línea).
+    const willBeEnabled = dto.isWompiEnabled ?? current.isWompiEnabled;
+    if (dto.isWompiEnabled === true || (willBeEnabled && Object.values(wompi).some((v) => v !== undefined))) {
+      const merged = Object.fromEntries(
+        Object.entries(wompi).map(([field, value]) => [field, value === undefined ? current[field as keyof typeof wompi] : value]),
+      );
+      if (willBeEnabled && !isWompiReady(merged)) {
+        throw new BadRequestException(
+          'Para habilitar los cobros en línea completa la llave pública, el secreto de eventos y el secreto de integridad de Wompi',
+        );
+      }
+    }
+
+    const { isWompiEnabled, wompiPublicKey, wompiPrivateKey, wompiEventSecret, wompiIntegritySecret, ...config } =
       await this.prisma.restaurant.update({
       where: { id },
       data: {
@@ -259,6 +284,7 @@ export class RestaurantsService {
         closedMessage: text(dto.closedMessage),
         isTemporarilyClosed: dto.isTemporarilyClosed,
         theme: dto.theme,
+        isWompiEnabled: dto.isWompiEnabled,
         ...wompi,
         // Kill switch: activar la emergencia destruye cualquier prórroga vigente
         ...(dto.isTemporarilyClosed === true ? { extendedUntil: null } : {}),
@@ -280,7 +306,10 @@ export class RestaurantsService {
         ...wompiSelect,
       },
     });
-    return { ...config, ...toPaymentsConfig({ wompiPublicKey, wompiPrivateKey, wompiEventSecret, wompiIntegritySecret }) };
+    return {
+      ...config,
+      ...toPaymentsConfig({ isWompiEnabled, wompiPublicKey, wompiPrivateKey, wompiEventSecret, wompiIntegritySecret }),
+    };
   }
 
   /** Configuración de Wompi del local para Ajustes (secretos enmascarados) */

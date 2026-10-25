@@ -16,6 +16,7 @@ const wompiRestaurant = {
   wompiPrivateKey: 'prv_test_secret',
   wompiEventSecret: 'test_events_secret',
   wompiIntegritySecret: 'test_integrity_secret',
+  isWompiEnabled: true,
 };
 
 describe('OrdersService.create · pago en línea', () => {
@@ -106,6 +107,33 @@ describe('OrdersService.create · pago en línea', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('WOMPI con la pasarela apagada por el dueño: 400 aunque las llaves estén completas', async () => {
+    const { prisma, service, notify } = build({ ...wompiRestaurant, isWompiEnabled: false });
+    const error = await service.create(dto('WOMPI')).catch((e) => e);
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(error.message).toMatch(/desactivado/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('si el link de Wompi falla, el WhatsApp solo confirma la recepción (sin link)', async () => {
+    const { service, notify } = build({ ...wompiRestaurant, wompiIntegritySecret: 'x' });
+    jest.spyOn(WompiCheckoutService.prototype, 'generatePaymentLink').mockRejectedValueOnce(new Error('caído'));
+    jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+    const order = await service.create(dto('WOMPI'));
+    expect(order.wompiCheckoutUrl).toBeNull();
+    const message: string = notify.mock.calls[0][1];
+    expect(message).toContain('Recibimos tu pedido');
+    expect(message).not.toMatch(/https?:\/\//);
+  });
+
+  it('sin link, el mensaje solo confirma la recepción del pedido', () => {
+    expect(buildPaymentLinkMessage('Burger BQ', 'abcd1234-xyz', 25000, null)).toBe(
+      '🧾 ¡Recibimos tu pedido #ABCD1234 en Burger BQ! Total: $25.000 COP.\n\n' +
+        'El local te confirmará el pedido por este chat.',
+    );
+  });
+
   it('el mensaje de WhatsApp incluye pedido, total y link', () => {
     expect(buildPaymentLinkMessage('Burger BQ', 'abcd1234-xyz', 25000, 'https://checkout.wompi.co/p/?x=1')).toBe(
       '🧾 ¡Recibimos tu pedido #ABCD1234 en Burger BQ! Total: $25.000 COP.\n\n' +
@@ -126,5 +154,14 @@ describe('Carta pública (findBySlug) · Wompi', () => {
       expect(result).not.toHaveProperty(field);
     }
     expect(JSON.stringify(result)).not.toMatch(/prv_test|test_events|test_integrity/);
+  });
+
+  it('con el interruptor apagado la carta recibe isWompiEnabled=false y no ofrece pagar en línea', async () => {
+    const prisma: any = {
+      restaurant: { findUnique: jest.fn().mockResolvedValue({ ...wompiRestaurant, isWompiEnabled: false, categories: [] }) },
+    };
+    const result: Record<string, unknown> = await new RestaurantsService(prisma, {} as any, {} as any).findBySlug('burger-bq');
+    expect(result.isWompiEnabled).toBe(false);
+    expect(result.onlinePaymentsEnabled).toBe(false);
   });
 });

@@ -488,6 +488,7 @@ export function PremiumMenuLayout({
         isClosed={isClosed}
         closedNotice={closedNotice}
         onlinePaymentsEnabled={Boolean(restaurant.onlinePaymentsEnabled)}
+        isWompiEnabled={Boolean(restaurant.isWompiEnabled)}
       />
     </div>
   );

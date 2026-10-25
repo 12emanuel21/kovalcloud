@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
@@ -208,6 +208,18 @@ describe('RestaurantsService · Sudo Mode solo para campos sensibles', () => {
     twoFactorAuth.assertSudo.mockResolvedValue(undefined);
     await service.updateConfig('rest-1', { wompiIntegritySecret: 'test_integrity_nuevo' }, sudo);
     expect(prisma.restaurant.update.mock.calls[0][0].data.wompiIntegritySecret).toBe('test_integrity_nuevo');
+  });
+
+  it('interruptor de Wompi: apagarlo no pide Sudo Mode; encenderlo exige llaves completas', async () => {
+    const off = build();
+    await off.service.updateConfig('rest-1', { isWompiEnabled: false }, sudo);
+    expect(off.twoFactorAuth.assertSudo).not.toHaveBeenCalled();
+    expect(off.prisma.restaurant.update.mock.calls[0][0].data.isWompiEnabled).toBe(false);
+
+    // stored no tiene secreto de eventos ni de integridad
+    const on = build();
+    await expect(on.service.updateConfig('rest-1', { isWompiEnabled: true }, sudo)).rejects.toBeInstanceOf(BadRequestException);
+    expect(on.prisma.restaurant.update).not.toHaveBeenCalled();
   });
 
   it('PATCH /restaurants/:id: la identidad se guarda libre; las credenciales de Meta exigen Sudo Mode', async () => {

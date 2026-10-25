@@ -19,12 +19,23 @@ import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 import { isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
 import { normalizeColombianPhone } from './phone';
 
-/** Mensaje de WhatsApp con el link de pago (plan B si el cliente cierra el checkout) */
-export function buildPaymentLinkMessage(restaurantName: string, orderId: string, total: number, url: string): string {
-  return (
+/**
+ * Confirmación inicial por WhatsApp. Con `paymentUrl` adjunta el link de pago (plan B si el cliente
+ * cierra el checkout); sin él (Wompi apagado o link fallido) solo confirma la recepción del pedido.
+ */
+export function buildPaymentLinkMessage(
+  restaurantName: string,
+  orderId: string,
+  total: number,
+  paymentUrl: string | null,
+): string {
+  const received =
     `🧾 ¡Recibimos tu pedido #${orderId.slice(0, 8).toUpperCase()} en ${restaurantName}! ` +
-    `Total: $${total.toLocaleString('es-CO')} COP.\n\n` +
-    `💳 Si no alcanzaste a pagar, puedes hacerlo aquí:\n${url}\n\n` +
+    `Total: $${total.toLocaleString('es-CO')} COP.`;
+  if (!paymentUrl) return `${received}\n\nEl local te confirmará el pedido por este chat.`;
+  return (
+    `${received}\n\n` +
+    `💳 Si no alcanzaste a pagar, puedes hacerlo aquí:\n${paymentUrl}\n\n` +
     'Apenas se confirme el pago te avisamos por este chat.'
   );
 }
@@ -72,6 +83,12 @@ export class OrdersService {
 
     // 1.6. Pago en línea: se valida antes de crear nada para que el cliente pueda elegir efectivo
     const payOnline = paymentMethod === 'WOMPI';
+    // Interruptor manual del dueño: con la pasarela apagada no se cobra en línea aunque haya llaves
+    if (payOnline && !restaurant.isWompiEnabled) {
+      throw new BadRequestException(
+        'El pago en línea está desactivado en este restaurante. Elige pago en efectivo / contra entrega.',
+      );
+    }
     if (payOnline && !isWompiReady(restaurant)) {
       throw new BadRequestException(
         'Este restaurante no tiene habilitado el pago en línea. Elige pago en efectivo / contra entrega.',
@@ -157,7 +174,7 @@ export class OrdersService {
     // 4.5. Link de pago de Wompi (antes de emitir: el Kanban ya ve la referencia = "pago pendiente")
     let wompiCheckoutUrl: string | null = null;
     let order = createdOrder;
-    if (payOnline) {
+    if (payOnline && restaurant.isWompiEnabled) {
       try {
         const link = await this.wompiCheckout.generatePaymentLink(createdOrder, restaurant);
         wompiCheckoutUrl = link.url;
@@ -171,11 +188,17 @@ export class OrdersService {
     // 5. Emitir evento WebSocket en tiempo real
     this.ordersGateway.emitNewOrder(restaurantId, order);
 
-    // 6. Plan B por WhatsApp: si el cliente cierra el navegador, conserva el link de pago
-    if (wompiCheckoutUrl) {
+    // 6. Plan B por WhatsApp: si el cliente cierra el navegador, conserva el link de pago.
+    // El link solo va con la pasarela encendida; si no se pudo generar, solo se confirma la recepción.
+    if (payOnline) {
       void this.notifyCustomer(
         { customerPhone: order.customerPhone, restaurantId, restaurant },
-        buildPaymentLinkMessage(restaurant.name, order.id, order.total, wompiCheckoutUrl),
+        buildPaymentLinkMessage(
+          restaurant.name,
+          order.id,
+          order.total,
+          restaurant.isWompiEnabled ? wompiCheckoutUrl : null,
+        ),
       );
     }
 
