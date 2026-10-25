@@ -4,8 +4,20 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useSudoMode } from '@/context/SudoContext';
 import Link from 'next/link';
+import { ArrowRight, ExternalLink, MessageCircle } from 'lucide-react';
+import { TwoFactorSection } from '@/components/security/TwoFactorSection';
 import { TeamSection } from './TeamSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
+import {
+  SettingsCardFooter,
+  SettingsCardHeader,
+  SettingsFeedback,
+  SettingsPanel,
+  SettingsTabs,
+  primaryButtonClass,
+  settingsCardClass,
+  type SettingsTab,
+} from './settings-ui';
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
 
@@ -32,7 +44,7 @@ interface RestaurantData {
 
 export default function SettingsPage() {
   const { restaurantId , token} = useAuth();
-  // PATCH /restaurants/:id está en Sudo Mode (código 2FA, 30 min)
+  // PATCH /restaurants/:id: el backend pide Sudo Mode solo si cambian credenciales de Meta
   const { sudoFetch } = useSudoMode();
 
   const [loading, setLoading] = useState<boolean>(true);
@@ -49,6 +61,9 @@ export default function SettingsPage() {
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [ownerEmail, setOwnerEmail] = useState<string>('');
   const [planName, setPlanName] = useState<string>('Plan Pro');
+
+  // Pestaña activa de Ajustes
+  const [activeTab, setActiveTab] = useState<SettingsTab>('perfil');
 
 
   
@@ -151,208 +166,198 @@ export default function SettingsPage() {
     <div className="space-y-6 max-w-4xl mx-auto">
       {/* Barra de herramientas (el título lo muestra el TopBar) */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <p className="text-sm text-slate-400">
-          Datos de tu marca, menú digital y roles de tu equipo.
-        </p>
-
-        <div className="flex items-center gap-3">
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            {planName}
-          </span>
-        </div>
+        <p className="text-sm text-slate-400">Administra tu local, tus horarios, tus pagos y la seguridad de tu cuenta.</p>
+        <span className="inline-flex w-fit items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          {planName}
+        </span>
       </div>
 
-      {/* Banner de Acceso Rápido a WhatsApp */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl bg-gradient-to-r from-emerald-950/40 via-slate-900/80 to-slate-900/80 border border-emerald-500/20 shadow-lg">
+      {/* Banner global de acceso rápido a WhatsApp */}
+      <div className={`${settingsCardClass} flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-5 py-4`}>
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-lg border border-emerald-500/20">
-            💬
-          </div>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
+            <MessageCircle className="h-4 w-4" aria-hidden />
+          </span>
           <div>
-            <h3 className="text-sm font-bold text-white">¿Deseas conectar tu Chatbot o WhatsApp?</h3>
+            <h3 className="text-sm font-semibold text-white">Conexión a WhatsApp</h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Configura tu línea oficial de Meta Cloud API v22.0 o el emulador de WhatsApp Web en el centro de conexiones.
+              Configura tu línea oficial de Meta Cloud API o vincula WhatsApp Web en el centro de conexiones.
             </p>
           </div>
         </div>
         <Link
           href="/dashboard/whatsapp"
-          className="px-4 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition flex items-center gap-1.5 shrink-0"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950/60 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:border-emerald-500/40 hover:text-emerald-300"
         >
-          <span>Ir a Conexión WhatsApp</span>
-          <span className="font-mono">→</span>
+          Ir a Conexión WhatsApp
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </div>
 
-      {feedback && (
-        <div
-          className={`p-4 rounded-2xl text-xs font-semibold flex items-center gap-3 animate-in fade-in duration-200 ${
-            feedback.type === 'success'
-              ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
-              : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
-          }`}
-        >
-          <span>{feedback.type === 'success' ? '✓' : '⚠️'}</span>
-          <span>{feedback.text}</span>
+      <SettingsTabs active={activeTab} onChange={setActiveTab} />
+
+      <SettingsPanel tab={activeTab}>
+        {/* PERFIL: identidad de marca y enlace del menú (PATCH /restaurants/:id) */}
+        {activeTab === 'perfil' && (
+          <form onSubmit={handleSaveSettings} className={settingsCardClass}>
+            <SettingsCardHeader
+              title="Identidad de marca"
+              description="Datos públicos de tu local en la carta digital."
+              action={
+                slug ? (
+                  <Link
+                    href={`/menu/${slug}`}
+                    target="_blank"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-emerald-500/40 hover:text-emerald-300"
+                  >
+                    Ver carta
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                  </Link>
+                ) : null
+              }
+            />
+            <div className="space-y-6 p-6">
+              <SettingsFeedback feedback={feedback} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            Nombre del Restaurante <span className="text-emerald-400">*</span>
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Ej. Pizzería Nápoles"
+            required
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-sm text-white outline-none transition"
+          />
         </div>
-      )}
 
-      {/* SECCIÓN 1: FORMULARIO DE IDENTIDAD DE MARCA */}
-      <form onSubmit={handleSaveSettings} className="space-y-8">
-        <section className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl backdrop-blur-sm">
-          <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-            <div className="h-9 w-9 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-sm border border-emerald-500/20">
-              🏪
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white">Identidad de Marca & Menú Digital</h2>
-              <p className="text-xs text-slate-400">Datos públicos de tu local comercial</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Nombre del Restaurante <span className="text-emerald-400">*</span>
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ej. Pizzería Nápoles"
-                required
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none transition"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Slug (Enlace Web del Menú) <span className="text-emerald-400">*</span>
-              </label>
-              <input
-                type="text"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="pizzeria-napoles"
-                required
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm font-mono text-emerald-400 outline-none transition"
-              />
-              <p className="text-[11px] text-slate-500 mt-1">
-                Tu menú digital está disponible en:{' '}
-                <Link
-                  href={`/menu/${slug}`}
-                  target="_blank"
-                  className="text-emerald-400 hover:underline font-mono"
-                >
-                  /menu/{slug}
-                </Link>
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Teléfono Comercial / Atención
-              </label>
-              <input
-                type="text"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Ej. +57 300 123 4567"
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none transition"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Moneda de Operación
-              </label>
-              <select
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none transition"
-              >
-                <option value="COP">COP ($ Pesos Colombianos)</option>
-                <option value="USD">USD ($ Dólares Estadounidenses)</option>
-                <option value="MXN">MXN ($ Pesos Mexicanos)</option>
-                <option value="EUR">EUR (€ Euros)</option>
-              </select>
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Descripción o Eslogan del Restaurante
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Ej. Auténtica pizza italiana artesanal al horno de leña..."
-                rows={2}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none transition resize-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                URL del Logo
-              </label>
-              <input
-                type="text"
-                value={logoUrl}
-                onChange={(e) => setLogoUrl(e.target.value)}
-                placeholder="https://ejemplo.com/logo.png"
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none transition"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                URL del Banner
-              </label>
-              <input
-                type="text"
-                value={bannerUrl}
-                onChange={(e) => setBannerUrl(e.target.value)}
-                placeholder="https://ejemplo.com/banner.jpg"
-                className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none transition"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold text-sm transition shadow-lg shadow-emerald-500/20 active:scale-98 disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            Slug (Enlace Web del Menú) <span className="text-emerald-400">*</span>
+          </label>
+          <input
+            type="text"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            placeholder="pizzeria-napoles"
+            required
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-sm font-mono text-emerald-400 outline-none transition"
+          />
+          <p className="text-[11px] text-slate-500 mt-1">
+            Tu menú digital está disponible en:{' '}
+            <Link
+              href={`/menu/${slug}`}
+              target="_blank"
+              className="text-emerald-400 hover:underline font-mono"
             >
-              {saving ? 'Guardando...' : '💾 Guardar Datos del Restaurante'}
-            </button>
-          </div>
-        </section>
-      </form>
-
-      {/* PERFIL DEL LOCAL: dirección, pagos, horarios y cierre de emergencia */}
-      <RestaurantProfileSection />
-
-      {/* SECCIÓN 2: EQUIPO DE COCINA (cuentas KITCHEN, acceso revocable) */}
-      <TeamSection />
-
-      {/* SECCIÓN 3: INFORMACIÓN DE LA CUENTA */}
-      <section className="bg-slate-900/40 border border-slate-800/80 rounded-3xl p-6 space-y-4">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-          Información de la Cuenta
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-          <div>
-            <span className="text-slate-500 font-medium">Correo del Administrador:</span>
-            <p className="text-white font-semibold mt-0.5">{ownerEmail}</p>
-          </div>
-          <div>
-            <span className="text-slate-500 font-medium">ID del Restaurante (Multi-Tenant):</span>
-            <p className="text-emerald-400 font-mono mt-0.5">{restaurantId}</p>
-          </div>
+              /menu/{slug}
+            </Link>
+          </p>
         </div>
-      </section>
 
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            Teléfono Comercial / Atención
+          </label>
+          <input
+            type="text"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Ej. +57 300 123 4567"
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-sm text-white outline-none transition"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            Moneda de Operación
+          </label>
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-sm text-white outline-none transition"
+          >
+            <option value="COP">COP ($ Pesos Colombianos)</option>
+            <option value="USD">USD ($ Dólares Estadounidenses)</option>
+            <option value="MXN">MXN ($ Pesos Mexicanos)</option>
+            <option value="EUR">EUR (€ Euros)</option>
+          </select>
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            Descripción o Eslogan del Restaurante
+          </label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Ej. Auténtica pizza italiana artesanal al horno de leña..."
+            rows={2}
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-sm text-white outline-none transition resize-none"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            URL del Logo
+          </label>
+          <input
+            type="text"
+            value={logoUrl}
+            onChange={(e) => setLogoUrl(e.target.value)}
+            placeholder="https://ejemplo.com/logo.png"
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-xs text-white outline-none transition"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            URL del Banner
+          </label>
+          <input
+            type="text"
+            value={bannerUrl}
+            onChange={(e) => setBannerUrl(e.target.value)}
+            placeholder="https://ejemplo.com/banner.jpg"
+            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-xs text-white outline-none transition"
+          />
+        </div>
+      </div>
+            </div>
+            <SettingsCardFooter hint="El slug cambia el enlace de tu carta y de tus códigos QR.">
+              <button type="submit" disabled={saving} className={primaryButtonClass}>
+                {saving ? 'Guardando...' : 'Guardar identidad'}
+              </button>
+            </SettingsCardFooter>
+          </form>
+        )}
+
+        {/* Perfil (ubicación y tema), Horarios y Pagos: un solo formulario que queda montado entre pestañas */}
+        <RestaurantProfileSection view={activeTab} />
+
+        {/* SEGURIDAD: 2FA, equipo de cocina e información de la cuenta */}
+        {activeTab === 'seguridad' && (
+          <>
+            <TwoFactorSection />
+            <TeamSection />
+            <section className={settingsCardClass}>
+              <SettingsCardHeader title="Información de la cuenta" />
+              <dl className="grid grid-cols-1 gap-4 p-6 text-xs sm:grid-cols-2">
+                <div>
+                  <dt className="text-slate-500 font-medium">Correo del administrador</dt>
+                  <dd className="text-white font-semibold mt-0.5">{ownerEmail}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500 font-medium">ID del restaurante (multi-tenant)</dt>
+                  <dd className="text-emerald-400 font-mono mt-0.5 break-all">{restaurantId}</dd>
+                </div>
+              </dl>
+            </section>
+          </>
+        )}
+      </SettingsPanel>
     </div>
   );
 }

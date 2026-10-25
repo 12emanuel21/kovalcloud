@@ -34,7 +34,7 @@ export function TwoFactorSection() {
   }, [token]);
 
   return (
-    <section className="space-y-4 rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl backdrop-blur-sm md:p-8">
+    <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm shadow-black/20">
       <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
           <ShieldCheck className="h-5 w-5" />
@@ -42,7 +42,7 @@ export function TwoFactorSection() {
         <div>
           <h2 className="text-base font-bold text-white">Seguridad (Autenticación en 2 Pasos)</h2>
           <p className="text-xs text-slate-400">
-            Protege pagos, WhatsApp y datos del local: al guardarlos se pide un código de Google Authenticator.
+            Protege las llaves de Wompi y la conexión de WhatsApp: al cambiarlas se pide un código de Google Authenticator.
           </p>
         </div>
       </div>
