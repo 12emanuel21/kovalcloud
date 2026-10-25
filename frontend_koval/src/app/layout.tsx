@@ -29,7 +29,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
+    // suppressHydrationWarning: next-themes pone la clase "dark" en <html> antes de hidratar (tema del dashboard)
     <html
+      suppressHydrationWarning
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
