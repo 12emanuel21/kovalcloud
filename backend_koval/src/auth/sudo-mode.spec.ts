@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { authenticator } from 'otplib';
 import { AuthService, isValidTotp } from './auth.service';
 import { SudoGuard } from './guards/sudo.guard';
+import { TwoFactorAuthService } from './two-factor-auth.service';
 import { sudoTokenSecret } from './sudo';
 
 process.env.JWT_SECRET = 'test-jwt-secret';
@@ -76,7 +77,7 @@ describe('2FA y Sudo Mode · AuthService', () => {
 });
 
 describe('SudoGuard', () => {
-  const guard = new SudoGuard(jwt);
+  const guard = new SudoGuard(new TwoFactorAuthService(jwt));
   const user = { id: 'user-1', isTwoFactorEnabled: true };
   const sudoFor = (sub: string, expiresIn = 1800, scope = 'sudo') =>
     jwt.signAsync({ sub, scope }, { secret: sudoTokenSecret(), expiresIn });

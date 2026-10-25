@@ -8,6 +8,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { requireEnv } from '../config/secrets';
 import { TenantGuard } from './guards/tenant.guard';
 import { SudoGuard } from './guards/sudo.guard';
+import { TwoFactorAuthService } from './two-factor-auth.service';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { SudoGuard } from './guards/sudo.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, RolesGuard, TenantGuard, SudoGuard],
-  exports: [AuthService, JwtStrategy, PassportModule, JwtModule, RolesGuard, TenantGuard, SudoGuard],
+  providers: [AuthService, JwtStrategy, RolesGuard, TenantGuard, SudoGuard, TwoFactorAuthService],
+  exports: [AuthService, JwtStrategy, PassportModule, JwtModule, RolesGuard, TenantGuard, SudoGuard, TwoFactorAuthService],
 })
 export class AuthModule {}

@@ -14,6 +14,7 @@ import {
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { SudoGuard } from '../auth/guards/sudo.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
@@ -94,7 +95,8 @@ export class WhatsappGatewayController {
     return this.callBaileys(this.resolveRestaurantId(user, restaurantId), '/connect', 'POST');
   }
 
-  @UseGuards(RolesGuard)
+  // Cerrar la sesión deja al local sin bot de WhatsApp: exige Sudo Mode
+  @UseGuards(RolesGuard, SudoGuard)
   @Roles(Role.SUPERADMIN, Role.OWNER)
   @Post('logout')
   logout(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {

@@ -28,3 +28,7 @@ yarn-error.log*
 .DS_Store
 .claude
 .vscode
+# Respaldos de la base de datos de producción (datos de clientes, hashes y llaves: ¡Nunca subir!)
+backups/
+*.dump
+backup_db.sh

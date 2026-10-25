@@ -18,8 +18,9 @@ export class SudoCancelledError extends Error {
 
 interface SudoContextValue {
   /**
-   * fetch para rutas protegidas con SudoGuard: adjunta x-sudo-token si hay uno vigente y,
-   * ante un 403 SUDO_REQUIRED, abre el modal de código y reintenta la petición original.
+   * fetch para operaciones que pueden exigir Sudo Mode: adjunta x-sudo-token si hay uno vigente y,
+   * solo si el backend responde 403 SUDO_REQUIRED, abre el modal de código y reintenta la petición original.
+   * Cualquier otra respuesta se devuelve tal cual (el backend decide qué cambios son sensibles).
    * Rechaza con SudoCancelledError si el usuario cancela.
    */
   sudoFetch: (input: string, init?: RequestInit) => Promise<Response>;
@@ -170,7 +171,7 @@ function SudoModal({
             </h2>
             <p className="text-xs text-slate-400">
               {needsSetup
-                ? 'Para cambiar configuraciones sensibles (pagos, WhatsApp, horarios) tu cuenta necesita Google Authenticator.'
+                ? 'Para cambiar las llaves de pagos (Wompi) o la conexión de WhatsApp tu cuenta necesita Google Authenticator.'
                 : 'Escribe el código de Google Authenticator. Quedarás en modo seguro durante 30 minutos.'}
             </p>
           </div>

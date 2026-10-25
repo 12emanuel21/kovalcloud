@@ -118,7 +118,7 @@ describe('OrdersService.create · pago en línea', () => {
 describe('Carta pública (findBySlug) · Wompi', () => {
   it('expone solo la llave pública y onlinePaymentsEnabled, nunca los secretos', async () => {
     const prisma: any = { restaurant: { findUnique: jest.fn().mockResolvedValue({ ...wompiRestaurant, categories: [] }) } };
-    const result: Record<string, unknown> = await new RestaurantsService(prisma, {} as any).findBySlug('burger-bq');
+    const result: Record<string, unknown> = await new RestaurantsService(prisma, {} as any, {} as any).findBySlug('burger-bq');
 
     expect(result.wompiPublicKey).toBe('pub_test_abc');
     expect(result.onlinePaymentsEnabled).toBe(true);

@@ -3,8 +3,10 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { TenantGuard } from '../auth/guards/tenant.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantParam } from '../auth/decorators/tenant-param.decorator';
-import { SudoGuard } from '../auth/guards/sudo.guard';
-import { UseGuards, Controller, Get, Post, Body, Patch, Param, Delete , UseInterceptors, UploadedFile, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
+import { SUDO_HEADER } from '../auth/sudo';
+import { UseGuards, Controller, Get, Post, Body, Patch, Param, Delete, Headers, UseInterceptors, UploadedFile, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
 import { RestaurantsService } from './restaurants.service';
@@ -57,13 +59,18 @@ export class RestaurantsController {
     return this.restaurantsService.findWhatsappConfig(id);
   }
 
-  // Perfil del local (incluye llaves de Wompi): OWNER del local o SUPERADMIN, en Sudo Mode
-  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard, SudoGuard)
+  // Perfil del local: OWNER del local o SUPERADMIN. Cambiar las llaves de Wompi exige Sudo Mode (lo decide el servicio)
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(Role.OWNER, Role.SUPERADMIN)
   @TenantParam('id')
   @Patch(':id/config')
-  updateConfig(@Param('id') id: string, @Body() dto: UpdateRestaurantConfigDto) {
-    return this.restaurantsService.updateConfig(id, dto);
+  updateConfig(
+    @Param('id') id: string,
+    @Body() dto: UpdateRestaurantConfigDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Headers(SUDO_HEADER) sudoToken?: string,
+  ) {
+    return this.restaurantsService.updateConfig(id, dto, { user, sudoToken });
   }
 
   // Configuración de Wompi (secretos enmascarados): solo el OWNER del local o el SUPERADMIN
@@ -85,13 +92,18 @@ export class RestaurantsController {
     return this.restaurantsService.extendHours(id, dto.minutes);
   }
 
-  // Identidad del local y credenciales de WhatsApp/Meta: OWNER del local o SUPERADMIN, en Sudo Mode
-  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard, SudoGuard)
+  // Identidad del local: OWNER del local o SUPERADMIN. Cambiar las credenciales de Meta exige Sudo Mode (lo decide el servicio)
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
   @Roles(Role.OWNER, Role.SUPERADMIN)
   @TenantParam('id')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateRestaurantDto: UpdateRestaurantDto) {
-    return this.restaurantsService.update(id, updateRestaurantDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateRestaurantDto: UpdateRestaurantDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Headers(SUDO_HEADER) sudoToken?: string,
+  ) {
+    return this.restaurantsService.update(id, updateRestaurantDto, { user, sudoToken });
   }
 
   @UseGuards(JwtAuthGuard, TenantGuard)

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useSudoMode } from '@/context/SudoContext';
+import { SudoCancelledError, useSudoMode } from '@/context/SudoContext';
 import { QRCodeCanvas } from 'qrcode.react';
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
@@ -34,7 +34,7 @@ interface WhatsappConfigData {
 
 export default function WhatsAppDashboardPage() {
   const { restaurantId , token} = useAuth();
-  // Guardar credenciales de Meta (PATCH /restaurants/:id) exige Sudo Mode
+  // Cambiar credenciales de Meta (PATCH /restaurants/:id) o cerrar la sesión de WhatsApp Web exige Sudo Mode
   const { sudoFetch } = useSudoMode();
 
   // Selector de Pestaña Activa ('meta' | 'baileys')
@@ -70,6 +70,7 @@ export default function WhatsAppDashboardPage() {
   const [isServiceOnline, setIsServiceOnline] = useState<boolean>(true);
   const [baileysLoading, setBaileysLoading] = useState<boolean>(true);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [testPhone, setTestPhone] = useState<string>('');
   const [testMessage, setTestMessage] = useState<string>('¡Hola! Este es un mensaje de prueba de Koval Cloud.');
   const [isSendingTest, setIsSendingTest] = useState<boolean>(false);
@@ -230,22 +231,43 @@ export default function WhatsAppDashboardPage() {
   const handleDisconnect = async () => {
     if (!confirm('¿Estás seguro de que deseas cerrar la sesión de WhatsApp Socket?')) return;
     setIsDisconnecting(true);
+    setSessionError(null);
     try {
-      await fetch(`${WHATSAPP_GATEWAY_URL}/logout${sessionQuery}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+      // Pide el código de Google Authenticator si el modo seguro no está vigente
+      const res = await sudoFetch(`${WHATSAPP_GATEWAY_URL}/logout${sessionQuery}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.message === 'string' ? data.message : 'No se pudo cerrar la sesión de WhatsApp');
+      }
       await fetchBaileysStatus();
     } catch (err) {
-      console.error(err);
+      setSessionError(
+        err instanceof SudoCancelledError
+          ? 'La sesión sigue activa: confirma tu identidad con el código de 2 pasos para cerrarla.'
+          : err instanceof Error ? err.message : 'No se pudo cerrar la sesión de WhatsApp',
+      );
     } finally {
       setIsDisconnecting(false);
     }
   };
 
   const handleConnect = async () => {
+    setSessionError(null);
     try {
-      await fetch(`${WHATSAPP_GATEWAY_URL}/connect${sessionQuery}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+      // sudoFetch: si el backend llegara a exigir Sudo Mode para conectar, se pide el código
+      const res = await sudoFetch(`${WHATSAPP_GATEWAY_URL}/connect${sessionQuery}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('No se pudo iniciar la sesión de WhatsApp');
       await fetchBaileysStatus();
     } catch (err) {
-      console.error(err);
+      if (!(err instanceof SudoCancelledError)) {
+        setSessionError(err instanceof Error ? err.message : 'No se pudo iniciar la sesión de WhatsApp');
+      }
     }
   };
 
@@ -664,6 +686,11 @@ export default function WhatsAppDashboardPage() {
                   {isDisconnecting ? 'Cerrando sesión...' : 'Cerrar Sesión WhatsApp'}
                 </button>
               </div>
+              {sessionError && (
+                <p className="p-3 rounded-xl text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+                  {sessionError}
+                </p>
+              )}
 
               <div className="space-y-3 pt-2">
                 <h4 className="text-xs font-bold text-slate-300">📤 Probar Envío desde Socket Local</h4>
@@ -827,6 +854,7 @@ export default function WhatsAppDashboardPage() {
               >
                 {status === 'CONNECTING' ? 'Forzar Inicialización' : 'Generar Código QR'}
               </button>
+              {sessionError && <p className="text-xs font-medium text-red-400">{sessionError}</p>}
             </div>
           )}
         </div>

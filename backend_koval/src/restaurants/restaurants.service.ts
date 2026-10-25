@@ -12,6 +12,7 @@ import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 import { isWompiReady } from '../payments/wompi-checkout.service';
+import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
 
@@ -21,6 +22,23 @@ const wompiSelect = {
   wompiEventSecret: true,
   wompiIntegritySecret: true,
 } as const;
+
+/** Credenciales de Meta (WhatsApp Cloud API): cambiarlas también exige Sudo Mode */
+const metaSelect = {
+  whatsappToken: true,
+  whatsappPhoneId: true,
+  whatsappWabaId: true,
+  whatsappVerifyToken: true,
+  metaAppSecret: true,
+} as const;
+
+/**
+ * ¿El pedido cambia algún campo sensible respecto a lo guardado? undefined = no se toca;
+ * vacío y null cuentan igual. Reenviar el mismo valor (el formulario lo hace) no cuenta.
+ */
+function changesSensitiveFields(current: Record<string, string | null>, next: Record<string, string | null | undefined>) {
+  return Object.entries(next).some(([field, value]) => value !== undefined && (value || null) !== (current[field] || null));
+}
 
 /** Estado de Wompi para el dashboard: la llave pública completa, los secretos solo enmascarados */
 function toPaymentsConfig(r: {
@@ -56,7 +74,11 @@ function toRestaurantResponse<T extends { users: { role: Role }[] }>(restaurant:
 
 @Injectable()
 export class RestaurantsService {
-  constructor(private prisma: PrismaService, private aiService: AiService) {}
+  constructor(
+    private prisma: PrismaService,
+    private aiService: AiService,
+    private twoFactorAuth: TwoFactorAuthService,
+  ) {}
 
   async findBySlug(slug: string) {
     const restaurant = await this.prisma.restaurant.findUnique({
@@ -149,8 +171,20 @@ export class RestaurantsService {
     return toRestaurantResponse(restaurant);
   }
 
-  async update(id: string, updateRestaurantDto: UpdateRestaurantDto) {
-    await this.findOne(id);
+  /** Identidad del local y credenciales de Meta; estas últimas solo en Sudo Mode */
+  async update(id: string, updateRestaurantDto: UpdateRestaurantDto, sudo: SudoCredentials) {
+    const current = await this.prisma.restaurant.findUnique({ where: { id }, select: metaSelect });
+    if (!current) throw new NotFoundException('Restaurante no encontrado');
+
+    const meta = {
+      whatsappToken: updateRestaurantDto.whatsappToken,
+      whatsappPhoneId: updateRestaurantDto.whatsappPhoneId,
+      whatsappWabaId: updateRestaurantDto.whatsappWabaId,
+      whatsappVerifyToken: updateRestaurantDto.whatsappVerifyToken,
+      // Vacío = no cambiar (el formulario no conoce el valor guardado)
+      metaAppSecret: updateRestaurantDto.metaAppSecret?.trim() || undefined,
+    };
+    if (changesSensitiveFields(current, meta)) await this.twoFactorAuth.assertSudo(sudo);
 
     // Si se intenta cambiar el slug, validar unicidad
     if (updateRestaurantDto.slug) {
@@ -183,12 +217,7 @@ export class RestaurantsService {
         bannerUrl: updateRestaurantDto.bannerUrl,
         currency: updateRestaurantDto.currency,
         botpressBotId: updateRestaurantDto.botpressBotId,
-        whatsappToken: updateRestaurantDto.whatsappToken,
-        whatsappPhoneId: updateRestaurantDto.whatsappPhoneId,
-        whatsappWabaId: updateRestaurantDto.whatsappWabaId,
-        whatsappVerifyToken: updateRestaurantDto.whatsappVerifyToken,
-        // Vacío = no cambiar (el formulario no conoce el valor guardado)
-        metaAppSecret: updateRestaurantDto.metaAppSecret?.trim() || undefined,
+        ...meta,
       },
       include: {
         users: { select: userSelect },
@@ -198,9 +227,13 @@ export class RestaurantsService {
     return toRestaurantResponse(updated);
   }
 
-  /** Configuración operativa del local: dirección, pagos, horarios y cierre de emergencia */
-  async updateConfig(id: string, dto: UpdateRestaurantConfigDto) {
-    await this.findOne(id);
+  /**
+   * Configuración operativa del local: dirección, pagos, horarios, cierre de emergencia y tema
+   * se guardan sin más; cambiar las llaves de Wompi exige Sudo Mode.
+   */
+  async updateConfig(id: string, dto: UpdateRestaurantConfigDto, sudo: SudoCredentials) {
+    const current = await this.prisma.restaurant.findUnique({ where: { id }, select: wompiSelect });
+    if (!current) throw new NotFoundException('Restaurante no encontrado');
 
     // Texto vacío o null = borrar; ausente (undefined) = no tocar
     const text = (value: string | null | undefined) =>
@@ -208,6 +241,14 @@ export class RestaurantsService {
     // Secretos: ausente o "" = conservar el guardado; null = borrar
     const secret = (value: string | null | undefined) =>
       value === null ? null : value?.trim() ? value.trim() : undefined;
+
+    const wompi = {
+      wompiPublicKey: text(dto.wompiPublicKey),
+      wompiPrivateKey: secret(dto.wompiPrivateKey),
+      wompiEventSecret: secret(dto.wompiEventSecret),
+      wompiIntegritySecret: secret(dto.wompiIntegritySecret),
+    };
+    if (changesSensitiveFields(current, wompi)) await this.twoFactorAuth.assertSudo(sudo);
 
     const { wompiPublicKey, wompiPrivateKey, wompiEventSecret, wompiIntegritySecret, ...config } =
       await this.prisma.restaurant.update({
@@ -218,10 +259,7 @@ export class RestaurantsService {
         closedMessage: text(dto.closedMessage),
         isTemporarilyClosed: dto.isTemporarilyClosed,
         theme: dto.theme,
-        wompiPublicKey: text(dto.wompiPublicKey),
-        wompiPrivateKey: secret(dto.wompiPrivateKey),
-        wompiEventSecret: secret(dto.wompiEventSecret),
-        wompiIntegritySecret: secret(dto.wompiIntegritySecret),
+        ...wompi,
         // Kill switch: activar la emergencia destruye cualquier prórroga vigente
         ...(dto.isTemporarilyClosed === true ? { extendedUntil: null } : {}),
         businessHours:

@@ -90,7 +90,7 @@ describe('RestaurantsService.importMenuFromSpreadsheet', () => {
       restaurant: { findUnique: jest.fn().mockResolvedValue({ id: 'rest-1', users: [], plan: null }) },
       $transaction: jest.fn().mockImplementation((fn) => fn(tx)),
     };
-    return { tx, prisma, service: new RestaurantsService(prisma, {} as AiService) };
+    return { tx, prisma, service: new RestaurantsService(prisma, {} as AiService, {} as any) };
   };
 
   it('reutiliza categorías existentes (sin importar tildes/mayúsculas), crea las nuevas una sola vez e inserta en una transacción', async () => {

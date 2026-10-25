@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { CreditCard, Lock } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useSudoMode } from '@/context/SudoContext';
 import { TwoFactorSection } from '@/components/security/TwoFactorSection';
@@ -232,7 +233,8 @@ export function RestaurantProfileSection() {
         isTemporarilyClosed,
         closedMessage: closedMessage.trim(),
         theme,
-        wompiPublicKey: wompiPublicKey.trim(),
+        // Solo si ya se cargó la configuración de Wompi: si no, se borraría la llave guardada
+        ...(payments ? { wompiPublicKey: wompiPublicKey.trim() } : {}),
         ...secrets,
       };
       const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}/config`, {
@@ -379,11 +381,16 @@ export function RestaurantProfileSection() {
       </div>
 
       {/* Pagos en línea (Wompi) */}
-      <details className="group rounded-2xl border border-slate-800/80 bg-slate-950/60 open:bg-slate-950/80" open={!payments?.wompiReady}>
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
-          <div>
-            <h3 className="text-sm font-bold text-white">Configuración de Pagos (Wompi)</h3>
-            <p className="text-[11px] text-slate-400">Cobra en línea con tarjeta, Nequi, PSE y Bancolombia.</p>
+      <section aria-labelledby="wompi-title" className="rounded-2xl border border-emerald-500/20 bg-slate-950/80">
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+              <CreditCard className="h-4 w-4" />
+            </span>
+            <div>
+              <h3 id="wompi-title" className="text-sm font-bold text-white">Configuración de Pagos (Wompi)</h3>
+              <p className="text-[11px] text-slate-400">Cobra en línea con tarjeta, Nequi, PSE y Bancolombia.</p>
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {payments?.wompiReady ? (
@@ -395,13 +402,14 @@ export function RestaurantProfileSection() {
                 Sin configurar
               </span>
             )}
-            <span className="text-slate-500 transition group-open:rotate-180" aria-hidden>
-              ▾
-            </span>
           </div>
-        </summary>
+        </div>
 
         <div className="space-y-4 border-t border-slate-800/80 p-4">
+          <p className="flex items-center gap-2 text-[11px] text-slate-400">
+            <Lock className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+            Por seguridad, cambiar estas llaves te pedirá el código de Google Authenticator.
+          </p>
           <div>
             <label htmlFor="wompi-public-key" className="block text-[11px] font-semibold text-slate-400 mb-1">
               Llave Pública
@@ -464,7 +472,7 @@ export function RestaurantProfileSection() {
             </button>
           )}
         </div>
-      </details>
+      </section>
 
       {/* Horarios: bloques tipo alarma (franja + días) */}
       <div className="space-y-3">

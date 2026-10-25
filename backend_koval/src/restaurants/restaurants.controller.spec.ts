@@ -3,7 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RestaurantsController } from './restaurants.controller';
 import { RestaurantsService } from './restaurants.service';
 import { AiService } from '../ai/ai.service';
-import { JwtService } from '@nestjs/jwt';
+import { TwoFactorAuthService } from '../auth/two-factor-auth.service';
 
 describe('RestaurantsController', () => {
   let controller: RestaurantsController;
@@ -25,8 +25,8 @@ describe('RestaurantsController', () => {
         },
         // La importación de menús (PDF) usa la IA; en estos tests no se invoca
         { provide: AiService, useValue: { extractMenuFromPdf: jest.fn() } },
-        // SudoGuard (rutas sensibles) verifica el x-sudo-token con JwtService
-        { provide: JwtService, useValue: { verifyAsync: jest.fn() } },
+        // Sudo Mode: el servicio lo exige al cambiar llaves de Wompi o credenciales de Meta
+        { provide: TwoFactorAuthService, useValue: { assertSudo: jest.fn() } },
         RestaurantsService,
       ],
     }).compile();
