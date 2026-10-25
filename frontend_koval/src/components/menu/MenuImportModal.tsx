@@ -3,7 +3,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  ChevronDown,
+  Copy,
   Download,
   FileSpreadsheet,
   FileText,
@@ -22,6 +25,10 @@ const ACCEPTED_FILES = '.pdf,application/pdf,.xlsx,.xls,.csv';
 /** Plantilla Excel estática (public/plantilla-menu.xlsx) */
 const TEMPLATE_XLSX_URL = '/plantilla-menu.xlsx';
 const TEMPLATE_COLUMNS = ['Categoría', 'Nombre', 'Descripción', 'Precio', 'Disponible', 'URL Imagen'];
+
+/** Prompt para ChatGPT / Claude: convierte un Excel desordenado al formato de la plantilla */
+const AI_FORMAT_PROMPT =
+  'Actúa como un experto en estructuración de datos. Te voy a pasar el Excel de mi menú actual. Necesito que extraigas todos los platos y me devuelvas un nuevo archivo Excel estructurado EXACTAMENTE con estas 6 columnas (respetando los nombres en la primera fila): "Categoría", "Nombre", "Descripción", "Precio", "Disponible", "URL Imagen". Asegúrate de que el Precio sea solo un número (sin símbolos de moneda) y Disponible diga SI o NO. Si no hay descripción o imagen, deja la celda vacía.';
 
 interface ImportedItem {
   name: string;
@@ -233,6 +240,8 @@ export default function MenuImportModal({ open, onClose, onImported }: MenuImpor
                 </div>
               </div>
 
+              <AiFormatHelp />
+
               {/* Zona de subida */}
               <button
                 type="button"
@@ -431,5 +440,73 @@ export default function MenuImportModal({ open, onClose, onImported }: MenuImpor
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Ayuda discreta (acordeón): prompt listo para copiar en ChatGPT o Claude y convertir un Excel
+ * desordenado al formato de la plantilla. No compite con la acción principal (subir el archivo).
+ */
+function AiFormatHelp() {
+  const [copied, setCopied] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(AI_FORMAT_PROMPT);
+    } catch {
+      // Sin Clipboard API (p. ej. contexto no seguro): copia seleccionando el texto
+      textareaRef.current?.select();
+      if (!document.execCommand('copy')) return;
+    }
+    setCopied(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <details className="group rounded-xl border border-slate-800 bg-slate-900/30">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-medium text-slate-400 transition hover:text-slate-200 [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-2">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
+          ¿Tu menú está en otro formato? Usa IA gratis para arreglarlo
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden />
+      </summary>
+
+      <div className="space-y-3 border-t border-slate-800 px-4 py-3">
+        <p className="text-xs text-slate-400">
+          Copia este texto, pégalo en ChatGPT o Claude junto con tu Excel actual y sube aquí el archivo que te devuelva.
+        </p>
+        <textarea
+          ref={textareaRef}
+          readOnly
+          value={AI_FORMAT_PROMPT}
+          rows={6}
+          aria-label="Prompt para formatear el menú con IA"
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full resize-none rounded-lg border border-slate-800 bg-slate-950/60 p-3 font-mono text-[11px] leading-relaxed text-slate-300 outline-none focus:border-slate-600"
+        />
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={copyPrompt}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+              copied
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                : 'border-slate-700 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+            <span aria-live="polite">{copied ? '¡Copiado!' : 'Copiar al portapapeles'}</span>
+          </button>
+        </div>
+      </div>
+    </details>
   );
 }
