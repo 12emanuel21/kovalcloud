@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { Camera, ImageIcon, Sparkles } from 'lucide-react';
+import { Camera, ImageIcon, Search, Sparkles, X } from 'lucide-react';
 import MenuImportModal from '@/components/menu/MenuImportModal';
 
 interface MenuItem {
@@ -26,6 +26,18 @@ interface Category {
 }
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
+
+type StatusFilter = 'ALL' | 'AVAILABLE' | 'OUT_OF_STOCK';
+
+const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
+  { value: 'ALL', label: 'Todos' },
+  { value: 'AVAILABLE', label: 'Disponibles' },
+  { value: 'OUT_OF_STOCK', label: 'Agotados' },
+];
+
+/** Búsqueda sin mayúsculas ni tildes: "jamon" encuentra "Jamón" */
+const normalizeSearch = (text: string) =>
+  text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
 /** Fotos de platos: deben coincidir con el backend (menu-item-image.ts) */
 const DISH_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -468,6 +480,50 @@ export default function MenuManagementPage() {
 
   const totalDishes = categories.reduce((acc, cat) => acc + (cat.items?.length || 0), 0);
 
+  // Filtros de "Estructura del Menú": solo cambian la vista, nunca los datos
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+
+  // Si se elimina la categoría seleccionada, el filtro vuelve a "Todas"
+  const categoryFilter = categories.some((cat) => cat.id === selectedCategoryFilter) ? selectedCategoryFilter : 'ALL';
+  const query = normalizeSearch(searchQuery);
+  const isFiltering = Boolean(query) || statusFilter !== 'ALL' || categoryFilter !== 'ALL';
+
+  const filteredMenu = useMemo(() => {
+    const matches = (item: MenuItem) => {
+      const available = item.isAvailable !== false;
+      if (statusFilter === 'AVAILABLE' && !available) return false;
+      if (statusFilter === 'OUT_OF_STOCK' && available) return false;
+      return !query || normalizeSearch(`${item.name} ${item.description ?? ''}`).includes(query);
+    };
+    return (
+      categories
+        .filter((cat) => categoryFilter === 'ALL' || cat.id === categoryFilter)
+        .map((cat) => ({ ...cat, items: (cat.items ?? []).filter(matches), totalItems: cat.items?.length ?? 0, source: cat }))
+        // Con búsqueda o estado activos se ocultan las categorías sin coincidencias; sin ellos,
+        // las categorías vacías siguen visibles para poder gestionarlas
+        .filter((cat) => (!query && statusFilter === 'ALL') || cat.items.length > 0)
+    );
+  }, [categories, categoryFilter, query, statusFilter]);
+
+  const visibleDishes = filteredMenu.reduce((acc, cat) => acc + cat.items.length, 0);
+  const outOfStockCount = categories.reduce(
+    (acc, cat) => acc + (cat.items ?? []).filter((item) => item.isAvailable === false).length,
+    0,
+  );
+  const statusCounts: Record<StatusFilter, number> = {
+    ALL: totalDishes,
+    AVAILABLE: totalDishes - outOfStockCount,
+    OUT_OF_STOCK: outOfStockCount,
+  };
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setSelectedCategoryFilter('ALL');
+    setStatusFilter('ALL');
+  };
+
   return (
     <div className="space-y-6">
       {/* Selector de foto de plato (lo abre el botón de cámara de cada plato) */}
@@ -868,6 +924,72 @@ export default function MenuManagementPage() {
 
         {/* Columna Derecha: Vista del Menú y Categorías */}
         <div className="lg:col-span-7 space-y-6">
+          {/* Toolbar: buscador, categoría y disponibilidad (filtran en tiempo real) */}
+          {categories.length > 0 && (
+            <div className="flex flex-wrap items-center gap-4 mb-6" role="search" aria-label="Filtrar platos del menú">
+              <div className="relative min-w-[220px] flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Escape' && setSearchQuery('')}
+                  placeholder="Buscar platos o descripciones..."
+                  aria-label="Buscar platos o descripciones"
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 py-2.5 pl-9 pr-9 text-sm text-white placeholder-slate-500 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 [&::-webkit-search-cancel-button]:hidden"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    aria-label="Borrar búsqueda"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-500 transition hover:bg-slate-800 hover:text-slate-200"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <select
+                value={categoryFilter}
+                onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                aria-label="Filtrar por categoría"
+                className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <option value="ALL">Todas las categorías</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+
+              <div className="flex items-center gap-1.5" role="group" aria-label="Filtrar por disponibilidad">
+                {STATUS_FILTERS.map(({ value, label }) => {
+                  const active = statusFilter === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setStatusFilter(value)}
+                      aria-pressed={active}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        active
+                          ? value === 'OUT_OF_STOCK'
+                            ? 'border-rose-500/40 bg-rose-500/15 text-rose-400'
+                            : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400'
+                          : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                      }`}
+                    >
+                      {label}
+                      <span className="ml-1.5 font-mono opacity-70">{statusCounts[value]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <span>Estructura del Menú</span>
@@ -875,6 +997,11 @@ export default function MenuManagementPage() {
                 {categories.length} {categories.length === 1 ? 'categoría' : 'categorías'}
               </span>
             </h2>
+            {isFiltering && (
+              <p className="text-xs text-slate-400" aria-live="polite">
+                {visibleDishes} de {totalDishes} {totalDishes === 1 ? 'plato' : 'platos'}
+              </p>
+            )}
           </div>
 
           {loading && categories.length === 0 ? (
@@ -914,9 +1041,28 @@ export default function MenuManagementPage() {
                 </p>
               </div>
             </div>
+          ) : filteredMenu.length === 0 ? (
+            <div className="bg-slate-900/40 border-2 border-dashed border-slate-800 rounded-3xl p-10 text-center space-y-3">
+              <div className="h-12 w-12 mx-auto rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-slate-400">
+                <Search className="h-5 w-5" aria-hidden />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-200">Ningún plato coincide con los filtros</h3>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                  {query ? <>No encontramos &quot;{searchQuery.trim()}&quot; con los filtros actuales.</> : 'Prueba con otra categoría o disponibilidad.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 transition"
+              >
+                Limpiar filtros
+              </button>
+            </div>
           ) : (
             <div className="space-y-5">
-              {categories.map((category) => (
+              {filteredMenu.map((category) => (
                 <section
                   key={category.id}
                   className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 shadow-lg backdrop-blur-sm space-y-4 transition hover:border-slate-700"
@@ -931,14 +1077,15 @@ export default function MenuManagementPage() {
                         {category.name}
                       </h3>
                       <span className="text-xs text-slate-400 font-medium">
-                        ({category.items?.length || 0} {(category.items?.length || 0) === 1 ? 'plato' : 'platos'})
+                        ({isFiltering ? `${category.items.length} de ` : ''}{category.totalItems} {category.totalItems === 1 ? 'plato' : 'platos'})
                       </span>
                     </div>
 
                     <button
                       type="button"
                       disabled={deletingCatId === category.id}
-                      onClick={() => handleDeleteCategory(category)}
+                      // La categoría original: el aviso debe contar todos sus platos, no solo los filtrados
+                      onClick={() => handleDeleteCategory(category.source)}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition disabled:opacity-50"
                       title="Eliminar categoría"
                     >
@@ -967,7 +1114,7 @@ export default function MenuManagementPage() {
                   </div>
 
                   {/* Listado de Platos */}
-                  {!category.items || category.items.length === 0 ? (
+                  {category.items.length === 0 ? (
                     <div className="p-4 rounded-xl bg-slate-950/40 border border-dashed border-slate-800 text-center">
                       <p className="text-xs text-slate-500 italic">
                         Esta categoría aún no contiene platos. Puedes crear uno usando el formulario.
