@@ -35,10 +35,10 @@ describe('ChatsService', () => {
   });
 
   it('el historial de un teléfono se filtra por restaurante y va en orden cronológico', async () => {
-    await service.getConversation('rest-1', '573107382726');
+    await service.getConversation('rest-1', '573001234567');
     expect(prisma.chatHistory.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { restaurantId: 'rest-1', customerPhone: '573107382726' },
+        where: { restaurantId: 'rest-1', customerPhone: '573001234567' },
         orderBy: { createdAt: 'asc' },
       }),
     );

@@ -685,7 +685,7 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
                   <textarea
                     value={paymentDetails}
                     onChange={(e) => setPaymentDetails(e.target.value)}
-                    placeholder={'Ej. Nequi 300 123 4567 (Juan Pérez)\nEfectivo y datáfono en el local'}
+                    placeholder={'Ej. Nequi: 300 000 0000 - A nombre de Carlos Gómez\nEfectivo y datáfono en el local'}
                     rows={3}
                     maxLength={1000}
                     className={`${inputClass} resize-y`}

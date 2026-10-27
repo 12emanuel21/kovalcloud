@@ -1,8 +1,14 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useSyncExternalStore } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { QRCodeCanvas } from 'qrcode.react';
+
+const noopSubscribe = () => () => {};
+/** Dominio desde el que se usa el panel (en producción, el mismo que sirve la carta pública) */
+const readOrigin = () => window.location.origin;
+// En SSR no hay window: NEXT_PUBLIC_SITE_URL si está configurada; si no, se completa al hidratar
+const readServerOrigin = () => process.env.NEXT_PUBLIC_SITE_URL ?? '';
 
 export default function QRGeneratorPage() {
   const { restaurant , token} = useAuth();
@@ -12,7 +18,10 @@ export default function QRGeneratorPage() {
 
   // Opciones de Configuración
   const [tableNumber, setTableNumber] = useState<string>('1');
-  const [baseUrl, setBaseUrl] = useState<string>('http://localhost:3030');
+  // Dominio real detectado; el dueño puede escribir otro (ej. un dominio propio) y volver al detectado
+  const detectedOrigin = useSyncExternalStore(noopSubscribe, readOrigin, readServerOrigin);
+  const [customBaseUrl, setCustomBaseUrl] = useState<string | null>(null);
+  const baseUrl = customBaseUrl ?? detectedOrigin;
   const [includeTableParam, setIncludeTableParam] = useState<boolean>(true);
   const [qrColor, setQrColor] = useState<string>('#0f172a');
   const [qrBgColor, setQrBgColor] = useState<string>('#ffffff');
@@ -226,10 +235,19 @@ export default function QRGeneratorPage() {
               <input
                 type="text"
                 value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="http://localhost:3030"
+                onChange={(e) => setCustomBaseUrl(e.target.value)}
+                placeholder={detectedOrigin || 'https://tu-dominio.com'}
                 className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 placeholder-slate-600 outline-none transition"
               />
+              {customBaseUrl !== null && customBaseUrl !== detectedOrigin && (
+                <button
+                  type="button"
+                  onClick={() => setCustomBaseUrl(null)}
+                  className="text-[11px] font-semibold text-purple-400 hover:underline"
+                >
+                  Usar el dominio actual ({detectedOrigin})
+                </button>
+              )}
 
               <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-1.5">
                 <div className="flex items-center justify-between">

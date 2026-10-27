@@ -5,6 +5,16 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { Camera, ImageIcon, Search, Sparkles, X } from 'lucide-react';
 import MenuImportModal from '@/components/menu/MenuImportModal';
+import {
+  DISH_IMAGE_TYPES,
+  DishImageField,
+  EMPTY_DISH_IMAGE,
+  MAX_DISH_IMAGE_BYTES,
+  dishImageFrom,
+  isExternalImageUrl,
+  validateDishImage,
+  type DishImageValue,
+} from '@/components/menu/DishImageField';
 
 interface MenuItem {
   id: string;
@@ -39,9 +49,6 @@ const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
 const normalizeSearch = (text: string) =>
   text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
-/** Fotos de platos: deben coincidir con el backend (menu-item-image.ts) */
-const DISH_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_DISH_IMAGE_BYTES = 5 * 1024 * 1024;
 
 /** Categorías del restaurante con sus platos (sin tocar estado: lo aplica quien llama) */
 async function requestCategories(restaurantId: string): Promise<Category[]> {
@@ -76,6 +83,7 @@ export default function MenuManagementPage() {
   const [dishDescription, setDishDescription] = useState('');
   const [dishPrice, setDishPrice] = useState<number | ''>('');
   const [dishCategoryId, setDishCategoryId] = useState('');
+  const [dishImage, setDishImage] = useState<DishImageValue>(EMPTY_DISH_IMAGE);
   const [isSubmittingDish, setIsSubmittingDish] = useState(false);
   const [dishMsg, setDishMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -86,6 +94,7 @@ export default function MenuManagementPage() {
   const [editPrice, setEditPrice] = useState<number | ''>('');
   const [editCategoryId, setEditCategoryId] = useState('');
   const [editIsAvailable, setEditIsAvailable] = useState<boolean>(true);
+  const [editImage, setEditImage] = useState<DishImageValue>(EMPTY_DISH_IMAGE);
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -210,6 +219,11 @@ export default function MenuManagementPage() {
       setDishMsg({ type: 'error', text: 'Debes seleccionar una categoría.' });
       return;
     }
+    const dishImageError = validateDishImage(dishImage);
+    if (dishImageError) {
+      setDishMsg({ type: 'error', text: dishImageError });
+      return;
+    }
 
     setIsSubmittingDish(true);
     setDishMsg(null);
@@ -228,6 +242,8 @@ export default function MenuManagementPage() {
         price: Number(dishPrice),
         categoryId: dishCategoryId,
         restaurantId,
+        // "Pegar Enlace": la URL se guarda tal cual, sin pasar por /uploads
+        ...(dishImage.mode === 'url' && dishImage.url.trim() ? { imageUrl: dishImage.url.trim() } : {}),
       };
 
       const res = await fetch(`${API_URL}/menu-items`, {
@@ -244,10 +260,24 @@ export default function MenuManagementPage() {
         throw new Error(errorData.message || `Error al crear plato (${res.status})`);
       }
 
-      setDishMsg({ type: 'success', text: `¡Plato "${dishName}" creado exitosamente!` });
+      // "Subir Foto": el archivo se sube al plato recién creado
+      const created: MenuItem = await res.json();
+      let photoError: string | null = null;
+      if (dishImage.mode === 'upload' && dishImage.file) {
+        photoError = await uploadDishImage(created.id, dishImage.file, currentToken)
+          .then(() => null)
+          .catch((err: unknown) => (err instanceof Error ? err.message : 'No se pudo subir la foto'));
+      }
+
+      setDishMsg(
+        photoError
+          ? { type: 'error', text: `Plato "${dishName}" creado, pero la foto no se pudo subir: ${photoError}` }
+          : { type: 'success', text: `¡Plato "${dishName}" creado exitosamente!` },
+      );
       setDishName('');
       setDishDescription('');
       setDishPrice('');
+      setDishImage(EMPTY_DISH_IMAGE);
 
       await fetchCategories(false);
       router.refresh();
@@ -302,6 +332,23 @@ export default function MenuManagementPage() {
     imageInputRef.current?.click();
   };
 
+  /** POST /restaurants/:id/menu-items/:itemId/image (multipart "image") -> plato con su nueva imageUrl */
+  const uploadDishImage = async (itemId: string, file: File, sessionToken: string | null): Promise<MenuItem> => {
+    const formData = new FormData();
+    formData.append('image', file);
+    const res = await fetch(`${API_URL}/restaurants/${restaurantId}/menu-items/${itemId}/image`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + sessionToken },
+      body: formData,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const message = Array.isArray(data.message) ? data.message.join('. ') : data.message;
+      throw new Error(res.status === 413 ? 'La imagen no puede superar 5 MB.' : message || 'No se pudo subir la imagen');
+    }
+    return res.json();
+  };
+
   const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // permite volver a elegir el mismo archivo
@@ -320,21 +367,7 @@ export default function MenuManagementPage() {
     setUploadingImageId(item.id);
     try {
       const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
-      const formData = new FormData();
-      formData.append('image', file);
-      const res = await fetch(`${API_URL}/restaurants/${restaurantId}/menu-items/${item.id}/image`, {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + currentToken },
-        body: formData,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const message = Array.isArray(data.message) ? data.message.join('. ') : data.message;
-        throw new Error(
-          res.status === 413 ? 'La imagen no puede superar 5 MB.' : message || 'No se pudo subir la imagen',
-        );
-      }
-      const updated: MenuItem = await res.json();
+      const updated = await uploadDishImage(item.id, file, currentToken);
       setCategories((prevCategories) =>
         prevCategories.map((cat) => ({
           ...cat,
@@ -357,6 +390,7 @@ export default function MenuManagementPage() {
     setEditPrice(item.price);
     setEditCategoryId(item.categoryId);
     setEditIsAvailable(item.isAvailable ?? true);
+    setEditImage(dishImageFrom(item.imageUrl));
     setEditError(null);
   };
 
@@ -373,6 +407,11 @@ export default function MenuManagementPage() {
       setEditError('Ingresa un precio válido.');
       return;
     }
+    const editImageError = validateDishImage(editImage);
+    if (editImageError) {
+      setEditError(editImageError);
+      return;
+    }
 
     setIsSubmittingEdit(true);
     setEditError(null);
@@ -385,6 +424,12 @@ export default function MenuManagementPage() {
         categoryId: editCategoryId,
         isAvailable: editIsAvailable,
       };
+      // "Pegar Enlace": se envía solo si cambió. Vacío quita un enlace externo, pero no borra una foto subida
+      if (editImage.mode === 'url') {
+        const nextUrl = editImage.url.trim();
+        const currentUrl = isExternalImageUrl(editingItem.imageUrl) ? editingItem.imageUrl : '';
+        if (nextUrl !== currentUrl && (nextUrl || currentUrl)) Object.assign(payload, { imageUrl: nextUrl });
+      }
 
       const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
       const res = await fetch(`${API_URL}/menu-items/${editingItem.id}`, {
@@ -399,6 +444,10 @@ export default function MenuManagementPage() {
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.message || 'Error al guardar cambios');
+      }
+      // "Subir Foto": reemplaza la foto con el archivo elegido
+      if (editImage.mode === 'upload' && editImage.file) {
+        await uploadDishImage(editingItem.id, editImage.file, currentToken);
       }
 
       await fetchCategories(false);
@@ -893,6 +942,8 @@ export default function MenuManagementPage() {
                     className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition resize-none"
                   />
                 </div>
+
+                <DishImageField value={dishImage} onChange={setDishImage} disabled={isSubmittingDish} />
 
                 <button
                   type="submit"
@@ -1393,6 +1444,13 @@ export default function MenuManagementPage() {
                   className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3.5 py-2 text-sm text-white outline-none transition resize-none"
                 />
               </div>
+
+              <DishImageField
+                value={editImage}
+                onChange={setEditImage}
+                currentImageUrl={editingItem.imageUrl}
+                disabled={isSubmittingEdit}
+              />
 
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/60 border border-slate-800">
                 <div>

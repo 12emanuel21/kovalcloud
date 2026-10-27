@@ -1,6 +1,6 @@
 /**
  * WhatsApp del local en la carta pública (wa.me/<número>).
- * wa.me exige el número internacional solo con dígitos: sin indicativo ("3107382726") o vacío
+ * wa.me exige el número internacional solo con dígitos: sin indicativo ("3001234567") o vacío
  * ("wa.me/?text=…") el enlace no llega al local (WhatsApp abre el selector de chats).
  */
 

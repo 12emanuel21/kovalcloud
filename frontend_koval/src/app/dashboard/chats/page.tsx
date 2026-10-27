@@ -37,7 +37,7 @@ async function apiErrorMessage(res: Response, fallback: string): Promise<string>
   return message || fallback;
 }
 
-/** "573107382726" -> "+57 310 738 2726" (números colombianos); otros: "+<dígitos>" */
+/** "573001234567" -> "+57 300 123 4567" (números colombianos); otros: "+<dígitos>" */
 function formatPhone(phone: string): string {
   const co = /^57(\d{3})(\d{3})(\d{4})$/.exec(phone);
   return co ? `+57 ${co[1]} ${co[2]} ${co[3]}` : `+${phone}`;

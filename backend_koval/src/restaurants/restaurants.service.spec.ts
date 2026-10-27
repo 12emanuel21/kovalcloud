@@ -287,9 +287,9 @@ describe('RestaurantsService · encendido automático de Wompi', () => {
 describe('toWhatsAppNumber (wa.me del local)', () => {
   it('normaliza a dígitos con indicativo 57 y descarta lo que no es un número', () => {
     const { toWhatsAppNumber } = jest.requireActual('./restaurants.service');
-    expect(toWhatsAppNumber('3107382726')).toBe('573107382726');
-    expect(toWhatsAppNumber('+57 310 738 2726')).toBe('573107382726');
-    expect(toWhatsAppNumber('(310) 738-2726')).toBe('573107382726');
+    expect(toWhatsAppNumber('3001234567')).toBe('573001234567');
+    expect(toWhatsAppNumber('+57 300 123 4567')).toBe('573001234567');
+    expect(toWhatsAppNumber('(300) 123-4567')).toBe('573001234567');
     expect(toWhatsAppNumber(null)).toBeNull();
     expect(toWhatsAppNumber('  ')).toBeNull();
     expect(toWhatsAppNumber('123')).toBeNull();

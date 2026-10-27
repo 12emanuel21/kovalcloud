@@ -46,13 +46,17 @@ export class MenuItemsService {
       data: { imageUrl: `${MENU_IMAGES_PUBLIC_PATH}${filename}` },
     });
 
-    const previous = localImageFilename(item.imageUrl);
-    if (previous) {
-      await fs.unlink(path.join(MENU_IMAGES_DIR, previous)).catch((err: NodeJS.ErrnoException) => {
-        if (err.code !== 'ENOENT') this.logger.warn(`No se pudo borrar la foto anterior ${previous}: ${err.message}`);
-      });
-    }
+    await this.deleteLocalImage(item.imageUrl);
     return updated;
+  }
+
+  /** Borra la foto subida a uploads/menu (las URLs externas no se tocan) */
+  private async deleteLocalImage(imageUrl: string | null | undefined) {
+    const previous = localImageFilename(imageUrl);
+    if (!previous) return;
+    await fs.unlink(path.join(MENU_IMAGES_DIR, previous)).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') this.logger.warn(`No se pudo borrar la foto anterior ${previous}: ${err.message}`);
+    });
   }
 
   /** Verifica que la categoría exista y pertenezca al restaurante indicado */
@@ -74,7 +78,7 @@ export class MenuItemsService {
         name,
         description,
         price,
-        imageUrl,
+        imageUrl: imageUrl?.trim() || null,
         isAvailable: isAvailable ?? true,
         restaurantId,
         categoryId,
@@ -115,10 +119,15 @@ export class MenuItemsService {
       await this.assertCategoryBelongsTo(data.categoryId, item.restaurantId);
     }
 
-    return await this.prisma.menuItem.update({
+    // Enlace externo: "" o null quita la foto
+    const imageUrl = data.imageUrl === undefined ? undefined : data.imageUrl?.trim() || null;
+    const updated = await this.prisma.menuItem.update({
       where: { id },
-      data,
+      data: { ...data, imageUrl },
     });
+    // Si se reemplazó o quitó una foto subida aquí, se borra el archivo
+    if (imageUrl !== undefined && imageUrl !== item.imageUrl) await this.deleteLocalImage(item.imageUrl);
+    return updated;
   }
 
   /**

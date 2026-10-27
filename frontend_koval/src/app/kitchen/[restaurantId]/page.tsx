@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, use, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/context/AuthContext';
 import PrepareActions from '@/components/orders/PrepareActions';
+import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import {
   ChefHat,
   CircleAlert,
@@ -271,16 +272,16 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
   const sortedOrders = useMemo(() => sortOldestFirst(orders), [orders]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans antialiased">
+    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col font-sans antialiased dark:bg-slate-950 dark:text-slate-100">
       {/* Header KDS */}
-      <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between dark:bg-slate-900 dark:border-slate-800">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
               <ChefHat className="h-5 w-5" />
             </span>
             <div>
-              <h1 className="text-lg font-semibold text-white tracking-tight leading-tight">Monitor de Cocina</h1>
+              <h1 className="text-lg font-semibold text-gray-900 tracking-tight leading-tight dark:text-white">Monitor de Cocina</h1>
               <p className="text-xs text-slate-500">
                 {orders.length} {orders.length === 1 ? 'pedido activo' : 'pedidos activos'}
               </p>
@@ -297,8 +298,11 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
             {isConnectedWs ? 'En línea' : 'Desconectado'}
           </div>
         </div>
-        <div className="font-mono text-2xl font-semibold text-slate-200 tabular-nums tracking-wide">
-          {currentTime || '00:00:00'}
+        <div className="flex items-center gap-4">
+          <ThemeToggle />
+          <div className="font-mono text-2xl font-semibold text-gray-800 tabular-nums tracking-wide dark:text-slate-200">
+            {currentTime || '00:00:00'}
+          </div>
         </div>
       </header>
 
