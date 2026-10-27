@@ -12,6 +12,7 @@ import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 import { isOnlinePaymentEnabled, isWompiReady } from '../payments/wompi-checkout.service';
+import { normalizeColombianPhone } from '../orders/phone';
 import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
@@ -39,6 +40,18 @@ const metaSelect = {
  */
 function changesSensitiveFields(current: Record<string, unknown>, next: Record<string, string | null | undefined>) {
   return Object.entries(next).some(([field, value]) => value !== undefined && (value || null) !== (current[field] || null));
+}
+
+/** Las 4 llaves de Wompi (pública, privada, eventos e integridad) guardadas */
+function hasAllWompiKeys(r: Record<string, unknown>): boolean {
+  return Boolean(r.wompiPublicKey && r.wompiPrivateKey && r.wompiEventSecret && r.wompiIntegritySecret);
+}
+
+/** Teléfono del local para wa.me/<número>: dígitos con indicativo; null si no alcanza para un número real */
+export function toWhatsAppNumber(phone: string | null | undefined): string | null {
+  if (!phone?.trim()) return null;
+  const digits = normalizeColombianPhone(phone);
+  return /^\d{10,15}$/.test(digits) ? digits : null;
 }
 
 /** Estado de Wompi para el dashboard: la llave pública completa, los secretos solo enmascarados */
@@ -112,6 +125,8 @@ export class RestaurantsService {
       ...sanitizeRestaurant(restaurant),
       isWompiEnabled: restaurant.isWompiEnabled,
       onlinePaymentsEnabled: isOnlinePaymentEnabled(restaurant),
+      // Número para wa.me (solo dígitos, con indicativo 57): null si el local no tiene teléfono válido
+      whatsappNumber: toWhatsAppNumber(restaurant.phone),
     };
   }
 
@@ -263,11 +278,14 @@ export class RestaurantsService {
 
     // Interruptor manual: encenderlo (o dejarlo encendido) exige llaves completas tras este guardado.
     // Apagarlo siempre se permite y no pide Sudo Mode (es la forma rápida de dejar de cobrar en línea).
-    const willBeEnabled = dto.isWompiEnabled ?? current.isWompiEnabled;
+    const merged = Object.fromEntries(
+      Object.entries(wompi).map(([field, value]) => [field, value === undefined ? current[field as keyof typeof wompi] : value]),
+    ) as Record<keyof typeof wompi, string | null>;
+    // Primera vez que quedan las 4 llaves completas: se enciende solo, salvo que se envíe false.
+    // Si el dueño lo apagó y luego cambia una llave, no se vuelve a encender (las llaves ya estaban completas).
+    const autoEnable = dto.isWompiEnabled === undefined && !hasAllWompiKeys(current) && hasAllWompiKeys(merged);
+    const willBeEnabled = autoEnable || (dto.isWompiEnabled ?? current.isWompiEnabled);
     if (dto.isWompiEnabled === true || (willBeEnabled && Object.values(wompi).some((v) => v !== undefined))) {
-      const merged = Object.fromEntries(
-        Object.entries(wompi).map(([field, value]) => [field, value === undefined ? current[field as keyof typeof wompi] : value]),
-      );
       if (willBeEnabled && !isWompiReady(merged)) {
         throw new BadRequestException(
           'Para habilitar los cobros en línea completa la llave pública, el secreto de eventos y el secreto de integridad de Wompi',
@@ -284,7 +302,7 @@ export class RestaurantsService {
         closedMessage: text(dto.closedMessage),
         isTemporarilyClosed: dto.isTemporarilyClosed,
         theme: dto.theme,
-        isWompiEnabled: dto.isWompiEnabled,
+        isWompiEnabled: autoEnable ? true : dto.isWompiEnabled,
         ...wompi,
         // Kill switch: activar la emergencia destruye cualquier prórroga vigente
         ...(dto.isTemporarilyClosed === true ? { extendedUntil: null } : {}),

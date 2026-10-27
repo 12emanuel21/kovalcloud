@@ -150,6 +150,8 @@ describe('Carta pública (findBySlug) · Wompi', () => {
 
     expect(result.wompiPublicKey).toBe('pub_test_abc');
     expect(result.onlinePaymentsEnabled).toBe(true);
+    // wompiRestaurant no tiene teléfono: la carta no debe armar un wa.me/ sin número
+    expect(result.whatsappNumber).toBeNull();
     for (const field of ['wompiPrivateKey', 'wompiEventSecret', 'wompiIntegritySecret']) {
       expect(result).not.toHaveProperty(field);
     }

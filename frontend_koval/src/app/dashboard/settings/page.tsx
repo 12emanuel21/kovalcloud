@@ -259,7 +259,7 @@ export default function SettingsPage() {
 
         <div>
           <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-            Teléfono Comercial / Atención
+            WhatsApp del Local (Teléfono Comercial)
           </label>
           <input
             type="text"
@@ -268,6 +268,11 @@ export default function SettingsPage() {
             placeholder="Ej. +57 300 123 4567"
             className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-sm text-white outline-none transition"
           />
+          <p className="text-[11px] text-slate-500 mt-1">
+            {phone.trim()
+              ? 'A este número llegan los pedidos en efectivo de la carta y el botón "Chatear por WhatsApp".'
+              : 'Sin este número la carta no puede abrir el chat de WhatsApp con tu local.'}
+          </p>
         </div>
 
         <div>

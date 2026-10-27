@@ -315,8 +315,16 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo guardar el perfil del local'));
-      applyPaymentsResponse(await res.json());
-      setFeedback({ type: 'success', text: 'Perfil del local guardado correctamente.' });
+      const saved = (await res.json()) as Partial<PaymentsConfig>;
+      const wasEnabled = Boolean(payments?.isWompiEnabled);
+      applyPaymentsResponse(saved);
+      // Al completar las 4 llaves el backend enciende Wompi; si siguen completas pero apagado, se avisa
+      const wompiNote = saved.onlinePaymentsEnabled && !wasEnabled
+        ? ' Wompi quedó activado: tu carta ya ofrece "Pagar en línea".'
+        : saved.wompiReady && saved.isWompiEnabled === false
+          ? ' Ojo: las llaves de Wompi están completas pero los cobros en línea siguen apagados (actívalos en Pagos).'
+          : '';
+      setFeedback({ type: 'success', text: `Perfil del local guardado correctamente.${wompiNote}` });
       setTimeout(() => setFeedback(null), 4000);
     } catch (err) {
       setFeedback({ type: 'error', text: err instanceof Error ? err.message : 'No se pudo guardar el perfil del local' });

@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useCart } from '@/context/CartContext';
 import { DEFAULT_MENU_THEME, type MenuTheme } from '@/lib/menu-themes';
+import { buildOrderWhatsAppMessage, shortOrderId, toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -68,7 +69,11 @@ const WhatsAppIcon = () => (
 
 interface CartDrawerProps {
   restaurantId: string;
+  restaurantName?: string;
+  /** Teléfono del local tal como se guardó (respaldo si el backend no envía whatsappNumber) */
   restaurantPhone?: string;
+  /** WhatsApp del local para wa.me (dígitos con indicativo); null = el local no tiene teléfono */
+  whatsappNumber?: string | null;
   tableNumber?: string;
   /** Local cerrado (emergencia u horario): no se pueden enviar pedidos */
   isClosed?: boolean;
@@ -86,7 +91,9 @@ interface CartDrawerProps {
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
   restaurantId,
-  restaurantPhone = '', // Strict usage
+  restaurantName,
+  restaurantPhone = '',
+  whatsappNumber,
   tableNumber,
   isClosed = false,
   closedNotice = 'En este momento estamos cerrados.',
@@ -107,6 +114,34 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   // Método con el que se está enviando (spinner en el botón correcto)
   const [submittingMethod, setSubmittingMethod] = useState<PaymentMethod | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Pedido recién creado (efectivo): se confirma dentro del drawer
+  const [confirmation, setConfirmation] = useState<{ orderId: string; whatsappUrl: string | null } | null>(null);
+  // El chat SIEMPRE va al WhatsApp del local, nunca al teléfono que escribe el cliente
+  const localWhatsApp = whatsappNumber ?? toWhatsAppNumber(restaurantPhone);
+  // Solo mientras el carrito siga vacío: si agregan platos de nuevo, vuelve el formulario
+  const shownConfirmation = items.length === 0 ? confirmation : null;
+
+  const closeDrawer = () => {
+    setIsOpen(false);
+    setConfirmation(null);
+  };
+
+  // Drawer abierto: Escape lo cierra y la página de fondo no hace scroll
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeDrawer();
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+    // closeDrawer cambia en cada render; solo importa si el drawer está abierto
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // Campos del formulario
   const [customerName, setCustomerName] = useState('');
@@ -183,29 +218,44 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         setCustomerPhone('');
         setDeliveryAddress('');
         setNotes('');
-        setIsOpen(false);
       };
 
       // Pago en línea: a la pasarela de Wompi (vuelve a la carta con ?pedido=<id>).
       // Si el backend no pudo generar el link, se sigue por WhatsApp (el pedido ya existe).
       if (paymentMethod === 'WOMPI' && createdOrder.wompiCheckoutUrl) {
         resetForm();
+        setIsOpen(false);
         window.location.href = createdOrder.wompiCheckoutUrl;
         return;
       }
 
-      // Carrito Híbrido: el pedido ya quedó registrado en el sistema (KDS); el cliente abre el
-      // chat del local con la referencia del pedido. Número = "Teléfono" del local (Ajustes).
-      const cleanPhone = restaurantPhone.replace(/\D/g, '');
-      const whatsappText = encodeURIComponent(`Hola, acabo de hacer el pedido #${createdOrder.id}`);
-      const whatsappUrl = `https://wa.me/${cleanPhone}?text=${whatsappText}`;
+      // Carrito Híbrido: el pedido ya quedó registrado (Kanban/KDS); el cliente abre el chat
+      // DEL LOCAL con el resumen. Sin teléfono del local no hay a dónde enviarlo: solo se confirma.
+      const whatsappUrl = localWhatsApp
+        ? whatsappLink(
+            localWhatsApp,
+            buildOrderWhatsAppMessage({
+              orderId: createdOrder.id,
+              restaurantName,
+              customerName: payload.customerName,
+              items: items.map(({ name, quantity, price }) => ({ name, quantity, price })),
+              total: totalAmount,
+              deliveryAddress: payload.deliveryAddress,
+              tableNumber: payload.tableNumber,
+              notes: payload.notes,
+            }),
+          )
+        : null;
 
       resetForm();
+      setConfirmation({ orderId: createdOrder.id, whatsappUrl });
 
       // Abrir WhatsApp en nueva pestaña. Tras un await, Safari/iOS suelen bloquear el popup:
       // en ese caso se navega en la misma pestaña (el pedido ya está guardado).
-      const popup = window.open(whatsappUrl, '_blank');
-      if (!popup) window.location.href = whatsappUrl;
+      if (whatsappUrl) {
+        const popup = window.open(whatsappUrl, '_blank');
+        if (!popup) window.location.href = whatsappUrl;
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error inesperado al crear el pedido';
       setErrorMsg(message);
@@ -275,19 +325,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         </div>
       )}
 
-      {/* Drawer Modal / Sheet de Checkout */}
+      {/* Drawer lateral derecho de checkout */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title">
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
-            onClick={() => setIsOpen(false)}
+            className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm animate-cart-backdrop-in motion-reduce:animate-none"
+            onClick={closeDrawer}
+            aria-hidden
           />
 
-          {/* Drawer Container */}
-          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col z-10 animate-in slide-in-from-bottom duration-300">
+          {/* Panel: cabecera fija, cuerpo con scroll y pie fijo */}
+          <aside className="fixed inset-y-0 right-0 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/60 animate-cart-drawer-in motion-reduce:animate-none">
             {/* Header */}
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 sticky top-0 z-20 backdrop-blur-md">
+            <div className="shrink-0 p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900">
               <div className="flex items-center gap-2.5">
                 <div className={`h-8 w-8 rounded-lg ${accent.soft} flex items-center justify-center font-bold text-xs border`}>
                   <svg
@@ -306,7 +357,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </svg>
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-white leading-tight">Tu Pedido</h2>
+                  <h2 id="cart-drawer-title" className="text-base font-bold text-white leading-tight">Tu Pedido</h2>
                   <p className="text-xs text-slate-400">
                     {totalCount} {totalCount === 1 ? 'producto' : 'productos'} añadidos
                   </p>
@@ -314,7 +365,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
 
               <button
-                onClick={() => setIsOpen(false)}
+                type="button"
+                onClick={closeDrawer}
+                aria-label="Cerrar carrito"
                 className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-sm transition"
               >
                 ✕
@@ -322,8 +375,36 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             </div>
 
             {/* Body desplazable */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-6">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-6">
+              {shownConfirmation && (
+                <div className="space-y-4 py-6 text-center" role="status">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-2xl">
+                    ✅
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-lg font-bold text-white">¡Pedido #{shortOrderId(shownConfirmation.orderId)} recibido!</h3>
+                    <p className="text-sm text-slate-400">
+                      {shownConfirmation.whatsappUrl
+                        ? 'Envía el mensaje que abrimos en WhatsApp para confirmarlo con el local.'
+                        : 'El local ya lo tiene en su sistema y te contactará al número que dejaste.'}
+                    </p>
+                  </div>
+                  {shownConfirmation.whatsappUrl && (
+                    <a
+                      href={shownConfirmation.whatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-95"
+                    >
+                      <WhatsAppIcon />
+                      Abrir WhatsApp de nuevo
+                    </a>
+                  )}
+                </div>
+              )}
+
               {/* Lista de Platos en el Carrito */}
+              {!shownConfirmation && (
               <div className="space-y-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                   Resumen de Productos
@@ -396,6 +477,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </div>
                 )}
               </div>
+              )}
 
               {/* Formulario de Datos de Entrega */}
               {items.length > 0 && (
@@ -483,9 +565,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               )}
             </div>
 
-            {/* Footer con Resumen y Botón de WhatsApp */}
+            {/* Footer fijo con Resumen y Botones de Pago */}
+            {shownConfirmation && (
+              <div className="shrink-0 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-slate-800 bg-slate-900">
+                <button
+                  type="button"
+                  onClick={closeDrawer}
+                  className="w-full rounded-xl border border-slate-600 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-800/60"
+                >
+                  Seguir viendo la carta
+                </button>
+              </div>
+            )}
             {items.length > 0 && (
-              <div className="p-5 border-t border-slate-800 bg-slate-900/90 space-y-3">
+              <div className="shrink-0 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-slate-800 bg-slate-900 space-y-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-400 font-medium">Total a Pagar:</span>
                   <span className={`text-xl font-extrabold ${accent.text} font-mono`}>
@@ -565,7 +658,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 )}
               </div>
             )}
-          </div>
+          </aside>
         </div>
       )}
     </>

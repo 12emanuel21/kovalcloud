@@ -21,6 +21,8 @@ export interface RestaurantData {
   name: string;
   slug: string;
   phone?: string;
+  /** WhatsApp del local para wa.me (dígitos con indicativo, lo calcula el backend); null = sin teléfono */
+  whatsappNumber?: string | null;
   description?: string | null;
   logoUrl?: string | null;
   bannerUrl?: string | null;

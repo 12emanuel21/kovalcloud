@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { CartDrawer } from '@/components/cart/CartDrawer';
+import { toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
 import {
   DAY_NAMES,
   WEEK_DAYS,
@@ -99,7 +100,8 @@ export function PremiumMenuLayout({
   };
 
   const initial = restaurant.name.trim().charAt(0).toUpperCase() || 'K';
-  const whatsappNumber = restaurant.phone?.replace(/\D/g, '') ?? '';
+  // Dígitos con indicativo (wa.me lo exige); lo calcula el backend, con respaldo local
+  const whatsappNumber = restaurant.whatsappNumber ?? toWhatsAppNumber(restaurant.phone);
   const today = getLocalWeekDay();
 
   return (
@@ -240,6 +242,17 @@ export function PremiumMenuLayout({
               >
                 Horarios y ubicación
               </a>
+              {whatsappNumber && (
+                <a
+                  href={whatsappLink(whatsappNumber, `¡Hola ${restaurant.name}! Tengo una consulta.`)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-12 items-center gap-2 rounded-xl bg-[#25D366] px-6 text-base font-bold text-white shadow-lg shadow-[#25D366]/25 transition hover:brightness-95 active:scale-[0.98]"
+                >
+                  <WhatsAppGlyph />
+                  Chatear por WhatsApp
+                </a>
+              )}
             </div>
 
             <ul className="grid gap-4 pt-2 sm:grid-cols-3">
@@ -406,7 +419,7 @@ export function PremiumMenuLayout({
                 )}
                 {whatsappNumber && (
                   <InfoRow icon={Phone} title="WhatsApp" palette={palette}>
-                    <a href={`https://wa.me/${whatsappNumber}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                    <a href={whatsappLink(whatsappNumber)} target="_blank" rel="noopener noreferrer" className="hover:underline">
                       {restaurant.phone}
                     </a>
                   </InfoRow>
@@ -483,7 +496,9 @@ export function PremiumMenuLayout({
         open={cartOpen}
         onOpenChange={setCartOpen}
         restaurantId={restaurant.id}
+        restaurantName={restaurant.name}
         restaurantPhone={restaurant.phone || ''}
+        whatsappNumber={whatsappNumber}
         tableNumber={tableNumber}
         isClosed={isClosed}
         closedNotice={closedNotice}
@@ -495,6 +510,15 @@ export function PremiumMenuLayout({
 }
 
 /* ───────────────────────── Piezas ───────────────────────── */
+
+/** Logo de WhatsApp (lucide no lo incluye) */
+function WhatsAppGlyph() {
+  return (
+    <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24" aria-hidden>
+      <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm.01 1.67c4.54 0 8.24 3.7 8.24 8.24 0 2.2-.86 4.27-2.42 5.83a8.188 8.188 0 0 1-5.82 2.41c-1.42 0-2.82-.37-4.06-1.07l-.29-.17-3.02.79.81-2.94-.19-.3a8.19 8.19 0 0 1-1.25-4.55c0-4.54 3.7-8.24 8.24-8.24zm4.72 11.64c-.26-.13-1.53-.76-1.77-.85-.24-.09-.41-.13-.58.13-.17.26-.67.85-.82 1.02-.15.17-.3.19-.56.06-.26-.13-1.1-.41-2.09-1.3-.77-.69-1.29-1.54-1.44-1.8-.15-.26-.02-.4.11-.53.12-.12.26-.3.39-.45.13-.15.17-.26.26-.43.09-.17.04-.32-.02-.45-.06-.13-.58-1.4-.79-1.92-.21-.51-.43-.44-.58-.45h-.5c-.17 0-.45.06-.69.32-.24.26-.91.89-.91 2.17s.93 2.52 1.06 2.69c.13.17 1.83 2.8 4.43 3.92.62.27 1.1.43 1.48.55.62.2 1.19.17 1.64.1.5-.07 1.53-.63 1.75-1.23.21-.6.21-1.12.15-1.23-.07-.11-.24-.17-.5-.3z" />
+    </svg>
+  );
+}
 
 function HeroFeature({
   icon: Icon,

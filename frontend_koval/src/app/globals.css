@@ -178,6 +178,20 @@ html:not(.dark) .koval-dashboard .text-slate-900 {
   --font-mono: var(--font-geist-mono);
   /* Titulares de la carta pública (Montserrat se carga en app/menu/[slug]) */
   --font-display: var(--font-display-family), var(--font-geist-sans), ui-sans-serif, sans-serif;
+
+  /* Carrito de la carta pública: drawer lateral derecho (animate-cart-drawer-in / animate-cart-backdrop-in) */
+  --animate-cart-drawer-in: cart-drawer-in 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-cart-backdrop-in: cart-backdrop-in 200ms ease-out;
+
+  @keyframes cart-drawer-in {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+
+  @keyframes cart-backdrop-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 }
 
 @media (prefers-color-scheme: dark) {

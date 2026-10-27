@@ -234,3 +234,64 @@ describe('RestaurantsService · Sudo Mode solo para campos sensibles', () => {
     }
   });
 });
+
+describe('RestaurantsService · encendido automático de Wompi', () => {
+  const keys = {
+    wompiPublicKey: 'pub_prod_abc',
+    wompiPrivateKey: 'prv_prod_abc',
+    wompiEventSecret: 'prod_events_abc',
+    wompiIntegritySecret: 'prod_integrity_abc',
+  };
+  const build = (stored: Record<string, unknown>) => {
+    const prisma: any = {
+      restaurant: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'rest-1', isWompiEnabled: false, ...stored }),
+        update: jest.fn().mockImplementation(({ data }) => ({ id: 'rest-1', isWompiEnabled: false, ...stored, ...data })),
+      },
+    };
+    const twoFactorAuth = { assertSudo: jest.fn().mockResolvedValue(undefined) };
+    return { prisma, service: new RestaurantsService(prisma, {} as AiService, twoFactorAuth as any) };
+  };
+  const empty = { wompiPublicKey: null, wompiPrivateKey: null, wompiEventSecret: null, wompiIntegritySecret: null };
+
+  it('al guardar las 4 llaves por primera vez enciende isWompiEnabled y lo informa', async () => {
+    const { prisma, service } = build(empty);
+    const result = await service.updateConfig('rest-1', keys, sudo);
+    expect(prisma.restaurant.update.mock.calls[0][0].data.isWompiEnabled).toBe(true);
+    expect(result).toMatchObject({ isWompiEnabled: true, onlinePaymentsEnabled: true });
+  });
+
+  it('completar la última llave que faltaba también lo enciende', async () => {
+    const { prisma, service } = build({ ...keys, wompiPrivateKey: null });
+    await service.updateConfig('rest-1', { wompiPrivateKey: 'prv_prod_nueva' }, sudo);
+    expect(prisma.restaurant.update.mock.calls[0][0].data.isWompiEnabled).toBe(true);
+  });
+
+  it('respeta isWompiEnabled=false explícito y no lo reenciende si el dueño lo apagó antes', async () => {
+    const explicit = build(empty);
+    await explicit.service.updateConfig('rest-1', { ...keys, isWompiEnabled: false }, sudo);
+    expect(explicit.prisma.restaurant.update.mock.calls[0][0].data.isWompiEnabled).toBe(false);
+
+    // Ya tenía las 4 llaves y estaba apagado: rotar una llave no lo enciende
+    const off = build(keys);
+    await off.service.updateConfig('rest-1', { wompiIntegritySecret: 'prod_integrity_rotada' }, sudo);
+    expect(off.prisma.restaurant.update.mock.calls[0][0].data.isWompiEnabled).toBeUndefined();
+
+    // Llaves incompletas: no se enciende
+    const partial = build(empty);
+    await partial.service.updateConfig('rest-1', { wompiPublicKey: 'pub_prod_abc' }, sudo);
+    expect(partial.prisma.restaurant.update.mock.calls[0][0].data.isWompiEnabled).toBeUndefined();
+  });
+});
+
+describe('toWhatsAppNumber (wa.me del local)', () => {
+  it('normaliza a dígitos con indicativo 57 y descarta lo que no es un número', () => {
+    const { toWhatsAppNumber } = jest.requireActual('./restaurants.service');
+    expect(toWhatsAppNumber('3107382726')).toBe('573107382726');
+    expect(toWhatsAppNumber('+57 310 738 2726')).toBe('573107382726');
+    expect(toWhatsAppNumber('(310) 738-2726')).toBe('573107382726');
+    expect(toWhatsAppNumber(null)).toBeNull();
+    expect(toWhatsAppNumber('  ')).toBeNull();
+    expect(toWhatsAppNumber('123')).toBeNull();
+  });
+});
