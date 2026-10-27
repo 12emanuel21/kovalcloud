@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { ExportOrdersButton } from '@/components/orders/ExportOrdersButton';
 import {
   computeMetrics,
   latestOrders,
@@ -202,6 +203,8 @@ export default function CommandCenterPage() {
       {/* Barra de herramientas */}
       <div className="flex items-center justify-between gap-4">
         <p className="text-sm text-slate-400">Resumen en tiempo real de tu operación de hoy.</p>
+        <div className="flex items-center gap-2">
+        <ExportOrdersButton />
         <button
           type="button"
           onClick={handleManualRefresh}
@@ -211,6 +214,7 @@ export default function CommandCenterPage() {
           <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Actualizar</span>
         </button>
+        </div>
       </div>
 
       {error && (

@@ -104,7 +104,8 @@ export class AiService {
     this.logger.log('Parsing order intent for message: ' + userMessage);
 
     const historyMessages: ModelMessage[] = chatHistory.map((item) => ({
-      role: (item.role === 'model' ? 'assistant' : 'user') as 'assistant' | 'user',
+      // "agent" (el equipo escribió desde el Inbox) también es la voz del local
+      role: (item.role === 'model' || item.role === 'agent' ? 'assistant' : 'user') as 'assistant' | 'user',
       content: item.message,
     }));
 

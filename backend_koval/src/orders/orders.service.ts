@@ -18,6 +18,7 @@ import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/ten
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 import { isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
 import { normalizeColombianPhone } from './phone';
+import { buildOrdersWorkbook, exportFilename, resolveExportRange } from './orders-export';
 
 /**
  * Confirmación inicial por WhatsApp. Con `paymentUrl` adjunta el link de pago (plan B si el cliente
@@ -218,6 +219,47 @@ export class OrdersService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Reporte contable .xlsx de los pedidos del local entre dos fechas (hora de Colombia).
+   * El SUPERADMIN debe indicar el restaurante: un reporte mezclando locales no sirve para contabilidad.
+   */
+  async exportExcel(user: TenantUser, requestedRestaurantId?: string, from?: string, to?: string) {
+    const restaurantId = resolveTenantFilter(user, requestedRestaurantId);
+    if (!restaurantId) throw new BadRequestException('Indica ?restaurantId= para exportar los pedidos de un local');
+    const range = resolveExportRange(from, to);
+
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { name: true, slug: true },
+    });
+    if (!restaurant) throw new NotFoundException('Restaurante no encontrado');
+
+    const orders = await this.prisma.order.findMany({
+      where: { restaurantId, createdAt: { gte: range.start, lt: range.end } },
+      select: {
+        id: true,
+        createdAt: true,
+        customerName: true,
+        customerPhone: true,
+        orderType: true,
+        tableNumber: true,
+        deliveryAddress: true,
+        status: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        paymentReference: true,
+        total: true,
+        items: { select: { quantity: true, menuItem: { select: { name: true } } } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return {
+      buffer: buildOrdersWorkbook(orders, range, restaurant.name),
+      filename: exportFilename(restaurant.slug, range),
+    };
   }
 
   async findOne(id: string, user: TenantUser) {

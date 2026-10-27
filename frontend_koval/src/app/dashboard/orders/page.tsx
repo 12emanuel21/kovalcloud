@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { ExportOrdersButton } from '@/components/orders/ExportOrdersButton';
 import { ShiftExtensionPanel } from '@/components/orders/ShiftExtensionPanel';
 import { io, Socket } from 'socket.io-client';
 import PrepareActions from '@/components/orders/PrepareActions';
@@ -499,8 +500,9 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        {/* Buscador y Actualizar */}
+        {/* Buscador, Exportar y Actualizar */}
         <div className="flex items-center gap-3">
+          <ExportOrdersButton />
           <div className="relative">
             <input
               type="text"

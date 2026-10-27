@@ -9,11 +9,13 @@ import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
 import { internalApiHeaders } from '../config/secrets';
 import { buildClosedMessage, isRestaurantClosed } from '../restaurants/business-hours';
 import {
+  CHAT_ROLE_AGENT,
   CHAT_ROLE_MODEL,
   CHAT_ROLE_SYSTEM,
   CHAT_ROLE_USER,
   RESET_CONTEXT_MARKER,
 } from '../chats/chat-history';
+import { getHandoverState } from '../chats/handover';
 import {
   buildConfirmationMessage,
   buildOrderLines,
@@ -467,6 +469,15 @@ export class MetaWhatsAppService {
         return;
       }
 
+      // 2.4. Handover humano: el equipo atiende esta conversación desde el Inbox. Se registra el
+      //      mensaje del cliente (sin transcribir audio ni llamar a la IA) y no se responde nada.
+      if ((await getHandoverState(this.prisma, restaurant.id, senderNumber)).botPaused) {
+        this.logger.log(`👤 [${restaurant.name}] Bot pausado para [${senderNumber}]: lo atiende un humano`);
+        const incomingText = extractPlainText(incomingMsg) || (incomingMsg.audio?.id ? '🎙️ [Nota de voz]' : '');
+        if (incomingText) await this.recordChat(restaurant.id, senderNumber, [{ role: CHAT_ROLE_USER, message: incomingText }]);
+        return;
+      }
+
       // 2.5. Escudo de horario: con el local cerrado (botón de emergencia o fuera de horario)
       //      no se transcribe audio ni se llama a la IA; se responde con el mensaje de cierre.
       if (isRestaurantClosed(restaurant)) {
@@ -594,7 +605,8 @@ export class MetaWhatsAppService {
         where: {
           restaurantId: restaurant.id,
           customerPhone: senderNumber,
-          role: { in: [CHAT_ROLE_USER, CHAT_ROLE_MODEL] },
+          // Los mensajes del equipo (agent) también dan contexto a la IA al reanudar el bot
+          role: { in: [CHAT_ROLE_USER, CHAT_ROLE_MODEL, CHAT_ROLE_AGENT] },
           ...(lastReset ? { createdAt: { gt: lastReset.createdAt } } : {}),
         },
         orderBy: { createdAt: 'desc' },

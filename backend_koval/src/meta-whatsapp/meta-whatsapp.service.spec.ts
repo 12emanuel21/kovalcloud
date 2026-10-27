@@ -174,7 +174,7 @@ describe('MetaWhatsAppService', () => {
         where: {
           restaurantId: 'rest-1',
           customerPhone: '573009876543',
-          role: { in: ['user', 'model'] },
+          role: { in: ['user', 'model', 'agent'] },
         },
         orderBy: { createdAt: 'desc' },
         take: 20,
@@ -221,9 +221,40 @@ describe('MetaWhatsAppService', () => {
       });
     });
 
+    it('con el bot pausado (handover humano) registra el mensaje del cliente y no responde', async () => {
+      (prismaService.chatHistory.findFirst as jest.Mock).mockImplementation(({ where }) =>
+        Promise.resolve(
+          where?.role === 'system' && where?.message?.in
+            ? { message: '[SYSTEM_BOT_PAUSED]', createdAt: new Date() }
+            : null,
+        ),
+      );
+      const send = jest.spyOn(service, 'sendTextMessage').mockResolvedValue({});
+
+      await service.processIncomingWebhook(
+        {
+          object: 'whatsapp_business_account',
+          entry: [{ id: '1', changes: [{ field: 'messages', value: {
+            metadata: { phone_number_id: '9988776655' },
+            messages: [{ from: '573009876543', id: 'w2', timestamp: '1', type: 'text', text: { body: '¿ya salió mi pedido?' } }],
+          } }] }],
+        },
+        'napoles-verify-token',
+      );
+
+      expect(send).not.toHaveBeenCalled();
+      expect(aiService.parseOrderIntent).not.toHaveBeenCalled();
+      expect(prismaService.chatHistory.create).toHaveBeenCalledWith({
+        data: { restaurantId: 'rest-1', customerPhone: '573009876543', role: 'user', message: '¿ya salió mi pedido?' },
+      });
+    });
+
     it('solo envía a la IA el historial posterior al último reset', async () => {
       const resetAt = new Date('2026-10-17T10:00:00Z');
-      (prismaService.chatHistory.findFirst as jest.Mock).mockResolvedValueOnce({ createdAt: resetAt });
+      // Solo la consulta del marcador de reset encuentra algo (no hay pausa del bot)
+      (prismaService.chatHistory.findFirst as jest.Mock).mockImplementation(({ where }) =>
+        Promise.resolve(where?.message === '[SYSTEM_RESET_CONTEXT]' ? { createdAt: resetAt } : null),
+      );
       jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
       (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({
         intent: 'GREETING',
@@ -264,7 +295,7 @@ describe('MetaWhatsAppService', () => {
       });
       expect(prismaService.chatHistory.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ createdAt: { gt: resetAt }, role: { in: ['user', 'model'] } }),
+          where: expect.objectContaining({ createdAt: { gt: resetAt }, role: { in: ['user', 'model', 'agent'] } }),
         }),
       );
     });

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Bot, MessagesSquare, RefreshCw, User } from 'lucide-react';
+import { ArrowLeft, Bot, Headset, Loader2, MessagesSquare, RefreshCw, Send, User } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { RESTAURANT_TIMEZONE } from '@/lib/business-hours';
 
@@ -13,16 +13,31 @@ const POLL_INTERVAL_MS = 10_000;
 /** Marcadores internos del bot (role "system", ver backend chats/chat-history.ts) */
 const SYSTEM_LABELS: Record<string, string> = {
   '[SYSTEM_RESET_CONTEXT]': '🧹 El cliente reinició el contexto del bot',
+  '[SYSTEM_BOT_PAUSED]': '👤 Bot pausado: el equipo atiende este chat',
+  '[SYSTEM_BOT_RESUMED]': '🤖 Bot reactivado',
 };
 const systemLabel = (message: string) => SYSTEM_LABELS[message] ?? `⚙️ ${message}`;
 
 interface Conversation {
   customerPhone: string;
   lastMessage: string;
-  lastRole: string; // "user" (cliente) | "model" (bot) | "system" (marcador interno)
+  lastRole: string; // "user" (cliente) | "model" (bot) | "agent" (equipo)
   lastMessageAt: string;
   messageCount: number;
+  /** Handover humano: el bot no responde en esta conversación */
+  botPaused?: boolean;
 }
+
+/** GET /restaurants/:id/chats/:phone/status */
+interface ConversationStatus {
+  botPaused: boolean;
+  resumesAt: string | null;
+  channel: 'META' | 'BAILEYS';
+  lastCustomerMessageAt: string | null;
+  outsideMetaWindow: boolean;
+}
+
+const MAX_MESSAGE_LENGTH = 4096;
 
 interface ChatMessage {
   id: string;
@@ -81,6 +96,15 @@ export default function ChatsPage() {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Intervención humana: estado del bot, borrador y envío manual
+  const [status, setStatus] = useState<ConversationStatus | null>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [togglingBot, setTogglingBot] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  // Chat abierto ahora mismo: descarta respuestas que llegan tarde de un chat anterior
+  const selectedRef = useRef<string | null>(null);
+
   const chatsUrl = restaurantId ? `${API_URL}/restaurants/${restaurantId}/chats` : null;
 
   const fetchJson = useCallback(
@@ -123,9 +147,15 @@ export default function ChatsPage() {
     if (!chatsUrl || !selectedPhone) return;
     let cancelled = false;
     const interval = setInterval(() => {
-      fetchJson<ChatMessage[]>(`${chatsUrl}/${selectedPhone}`, 'No se pudo actualizar el chat')
-        .then((data) => {
-          if (!cancelled) setMessages(data);
+      Promise.all([
+        fetchJson<ChatMessage[]>(`${chatsUrl}/${selectedPhone}`, 'No se pudo actualizar el chat'),
+        fetchJson<ConversationStatus>(`${chatsUrl}/${selectedPhone}/status`, 'No se pudo actualizar el chat'),
+      ])
+        .then(([data, chatStatus]) => {
+          if (!cancelled) {
+            setMessages(data);
+            setStatus(chatStatus);
+          }
         })
         .catch(() => {
           // El siguiente ciclo lo reintenta; el error de carga inicial ya se muestra
@@ -145,10 +175,20 @@ export default function ChatsPage() {
   const openConversation = async (phone: string) => {
     if (!chatsUrl) return;
     setSelectedPhone(phone);
+    selectedRef.current = phone;
     setMessages([]);
+    setStatus(null);
+    setDraft('');
+    setSendError(null);
     setChatLoading(true);
     try {
-      setMessages(await fetchJson<ChatMessage[]>(`${chatsUrl}/${phone}`, 'No se pudo cargar el chat'));
+      const [data, chatStatus] = await Promise.all([
+        fetchJson<ChatMessage[]>(`${chatsUrl}/${phone}`, 'No se pudo cargar el chat'),
+        fetchJson<ConversationStatus>(`${chatsUrl}/${phone}/status`, 'No se pudo cargar el chat'),
+      ]);
+      if (selectedRef.current !== phone) return;
+      setMessages(data);
+      setStatus(chatStatus);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar el chat');
@@ -164,6 +204,67 @@ export default function ChatsPage() {
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar los chats');
+    }
+  };
+
+  /** Refleja en la bandeja el estado del bot sin esperar al siguiente refresco */
+  const markConversation = (phone: string, patch: Partial<Conversation>) =>
+    setConversations((prev) => prev.map((c) => (c.customerPhone === phone ? { ...c, ...patch } : c)));
+
+  const sendMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const phone = selectedPhone;
+    const text = draft.trim();
+    if (!chatsUrl || !phone || !text || sending) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const res = await fetch(`${chatsUrl}/${phone}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo enviar el mensaje'));
+      const result: { message: ChatMessage; status: ConversationStatus } = await res.json();
+      if (selectedRef.current !== phone) return;
+      setDraft('');
+      setStatus(result.status);
+      // El historial incluye el marcador de pausa si el bot estaba activo: se recarga completo
+      setMessages(await fetchJson<ChatMessage[]>(`${chatsUrl}/${phone}`, 'No se pudo actualizar el chat'));
+      markConversation(phone, {
+        botPaused: result.status.botPaused,
+        lastMessage: result.message.message,
+        lastRole: 'agent',
+        lastMessageAt: result.message.createdAt,
+      });
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'No se pudo enviar el mensaje');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const toggleBot = async () => {
+    const phone = selectedPhone;
+    if (!chatsUrl || !phone || !status) return;
+    setTogglingBot(true);
+    setSendError(null);
+    try {
+      const res = await fetch(`${chatsUrl}/${phone}/handover`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ botPaused: !status.botPaused }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo cambiar el estado del bot'));
+      const next: ConversationStatus = await res.json();
+      if (selectedRef.current !== phone) return;
+      setStatus(next);
+      setMessages(await fetchJson<ChatMessage[]>(`${chatsUrl}/${phone}`, 'No se pudo actualizar el chat'));
+      markConversation(phone, { botPaused: next.botPaused });
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'No se pudo cambiar el estado del bot');
+    } finally {
+      setTogglingBot(false);
     }
   };
 
@@ -226,13 +327,22 @@ export default function ChatsPage() {
                     }`}
                   >
                     <div className="flex items-baseline justify-between gap-2">
-                      <span className={`truncate text-sm font-semibold ${active ? 'text-emerald-300' : 'text-white'}`}>
+                      <span className={`flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold ${active ? 'text-emerald-300' : 'text-white'}`}>
                         {formatPhone(conversation.customerPhone)}
+                        {conversation.botPaused && (
+                          <span
+                            className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-300"
+                            title="Bot pausado: lo atiende el equipo"
+                          >
+                            Humano
+                          </span>
+                        )}
                       </span>
                       <span className="shrink-0 text-[10px] text-slate-500">{formatListDate(conversation.lastMessageAt)}</span>
                     </div>
                     <p className="mt-0.5 line-clamp-2 text-xs text-slate-400">
                       {conversation.lastRole === 'model' && <span className="text-emerald-400/80">🤖 </span>}
+                      {conversation.lastRole === 'agent' && <span className="text-sky-400/90">👤 Tú: </span>}
                       {conversation.lastRole === 'system' ? systemLabel(conversation.lastMessage) : conversation.lastMessage}
                     </p>
                   </button>
@@ -259,7 +369,10 @@ export default function ChatsPage() {
               <div className="flex items-center gap-3 border-b border-slate-800 px-4 py-3">
                 <button
                   type="button"
-                  onClick={() => setSelectedPhone(null)}
+                  onClick={() => {
+                    setSelectedPhone(null);
+                    selectedRef.current = null;
+                  }}
                   className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 md:hidden"
                   aria-label="Volver a las conversaciones"
                 >
@@ -268,12 +381,43 @@ export default function ChatsPage() {
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-800 text-slate-300">
                   <User className="h-4 w-4" />
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-bold text-white">{formatPhone(selectedPhone)}</p>
                   <p className="text-[11px] text-slate-500">
                     {selected ? `${selected.messageCount} mensajes` : 'Historial del chat'}
+                    {status && ` · vía ${status.channel === 'META' ? 'Meta Cloud API' : 'WhatsApp Web'}`}
                   </p>
                 </div>
+                {status && (
+                  <button
+                    type="button"
+                    onClick={toggleBot}
+                    disabled={togglingBot}
+                    aria-pressed={status.botPaused}
+                    title={
+                      status.botPaused
+                        ? `Clic para reactivar el bot${status.resumesAt ? ` (se reactiva solo ${formatBubbleTime(status.resumesAt)})` : ''}`
+                        : 'Clic para pausar el bot y atender tú este chat'
+                    }
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition disabled:opacity-60 ${
+                      status.botPaused
+                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+                        : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                    }`}
+                  >
+                    {togglingBot ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : status.botPaused ? (
+                      <Headset className="h-3.5 w-3.5" />
+                    ) : (
+                      <Bot className="h-3.5 w-3.5" />
+                    )}
+                    <span className="hidden sm:inline">
+                      {status.botPaused ? '👤 Atendiendo Humano (Bot Pausado)' : '🤖 Bot Activo'}
+                    </span>
+                    <span className="sm:hidden">{status.botPaused ? '👤 Humano' : '🤖 Bot'}</span>
+                  </button>
+                )}
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto bg-slate-950/50 px-4 py-5">
@@ -292,26 +436,34 @@ export default function ChatsPage() {
                         </div>
                       );
                     }
+                    const fromAgent = msg.role === 'agent';
                     const fromBot = msg.role === 'model';
+                    const fromLocal = fromBot || fromAgent;
                     return (
-                      <div key={msg.id} className={`flex ${fromBot ? 'justify-end' : 'justify-start'}`}>
+                      <div key={msg.id} className={`flex ${fromLocal ? 'justify-end' : 'justify-start'}`}>
                         <div
                           className={`max-w-[85%] md:max-w-[70%] rounded-2xl px-3.5 py-2 shadow-sm ${
-                            fromBot
-                              ? 'rounded-br-md bg-emerald-600/90 text-white'
-                              : 'rounded-bl-md border border-slate-700/60 bg-slate-800 text-slate-100'
+                            fromAgent
+                              ? 'rounded-br-md bg-blue-600 text-white'
+                              : fromBot
+                                ? 'rounded-br-md bg-emerald-600/90 text-white'
+                                : 'rounded-bl-md border border-slate-700/60 bg-slate-800 text-slate-100'
                           }`}
                         >
                           <p
                             className={`mb-0.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider ${
-                              fromBot ? 'text-emerald-100/80' : 'text-slate-400'
+                              fromAgent ? 'text-blue-100/80' : fromBot ? 'text-emerald-100/80' : 'text-slate-400'
                             }`}
                           >
-                            {fromBot ? <Bot className="h-3 w-3" /> : <User className="h-3 w-3" />}
-                            {fromBot ? 'Bot' : 'Cliente'}
+                            {fromAgent ? <Headset className="h-3 w-3" /> : fromBot ? <Bot className="h-3 w-3" /> : <User className="h-3 w-3" />}
+                            {fromAgent ? 'Equipo' : fromBot ? 'Bot' : 'Cliente'}
                           </p>
                           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.message}</p>
-                          <p className={`mt-1 text-right text-[10px] ${fromBot ? 'text-emerald-100/70' : 'text-slate-500'}`}>
+                          <p
+                            className={`mt-1 text-right text-[10px] ${
+                              fromAgent ? 'text-blue-100/70' : fromBot ? 'text-emerald-100/70' : 'text-slate-500'
+                            }`}
+                          >
                             {formatBubbleTime(msg.createdAt)}
                           </p>
                         </div>
@@ -321,6 +473,52 @@ export default function ChatsPage() {
                 )}
                 <div ref={bottomRef} />
               </div>
+
+              {/* Barra de escritura: envío manual por WhatsApp (pausa el bot de este chat) */}
+              <form onSubmit={sendMessage} className="space-y-2 border-t border-slate-800 bg-slate-900 px-3 py-3">
+                {status?.outsideMetaWindow && (
+                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+                    El cliente no escribe hace más de 24 h: Meta solo permite plantillas aprobadas y el mensaje puede ser rechazado.
+                  </p>
+                )}
+                {sendError && (
+                  <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">
+                    {sendError}
+                  </p>
+                )}
+                <div className="flex items-end gap-2">
+                  <textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Enter envía; Shift+Enter, salto de línea
+                      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    rows={1}
+                    maxLength={MAX_MESSAGE_LENGTH}
+                    placeholder="Escribe un mensaje al cliente..."
+                    aria-label="Mensaje para el cliente"
+                    disabled={sending}
+                    className="max-h-32 min-h-[42px] flex-1 resize-none rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition [field-sizing:content] focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 disabled:opacity-60"
+                  />
+                  <button
+                    type="submit"
+                    disabled={sending || !draft.trim()}
+                    className="inline-flex h-[42px] shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    <span className="hidden sm:inline">Enviar</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  {status?.botPaused
+                    ? 'El bot no responderá en este chat mientras lo atiendas (se reactiva solo tras 12 h sin mensajes tuyos).'
+                    : 'Al enviar, el bot se pausa en este chat para no interrumpirte.'}
+                </p>
+              </form>
             </>
           )}
         </section>

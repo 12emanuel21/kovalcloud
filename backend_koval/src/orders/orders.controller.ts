@@ -1,4 +1,8 @@
-import { UseGuards } from '@nestjs/common';
+import { Res, StreamableFile, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
+import { Role } from '@prisma/client';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -29,6 +33,27 @@ export class OrdersController {
   @Post()
   create(@Body() createOrderDto: CreateOrderDto) {
     return this.ordersService.create(createOrderDto);
+  }
+
+  // Reporte contable .xlsx (?from=AAAA-MM-DD&to=AAAA-MM-DD, hora de Colombia; por defecto el mes en curso).
+  // Datos financieros: solo OWNER o SUPERADMIN (la cocina queda fuera). Antes de ':id' para no confundirse.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.OWNER, Role.SUPERADMIN)
+  @Get('export/excel')
+  async exportExcel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+    @Query('restaurantId') restaurantId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const { buffer, filename } = await this.ordersService.exportExcel(user, restaurantId, from, to);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store',
+    });
+    return new StreamableFile(buffer);
   }
 
   // A partir de aquí todo exige sesión y queda limitado al restaurante del usuario.
