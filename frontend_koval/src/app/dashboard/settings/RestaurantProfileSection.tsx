@@ -691,7 +691,9 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
                     className={`${inputClass} resize-y`}
                   />
                 </div>
-              <p className="text-[11px] text-slate-500 mt-1">El bot los comparte con los clientes que no pagan en línea.</p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                El bot los comparte con los clientes que no pagan en línea. Es solo texto informativo: no cambia el WhatsApp de atención del Perfil.
+              </p>
             </div>
           </>
         )}

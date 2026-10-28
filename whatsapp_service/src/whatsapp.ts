@@ -8,7 +8,7 @@ import pino from 'pino';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import { sendToNestjs } from './nestjsBridge';
+import { notifySessionNumber, sendToNestjs } from './nestjsBridge';
 
 dotenv.config();
 
@@ -40,6 +40,12 @@ const RESTAURANT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function isValidRestaurantId(restaurantId: string): boolean {
   return RESTAURANT_ID_PATTERN.test(restaurantId);
+}
+
+/** Número de la SIM vinculada a partir del JID propio: "573001234567:12@s.whatsapp.net" -> "573001234567" */
+export function phoneFromJid(jid: string | undefined): string | null {
+  const digits = (jid ?? '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  return /^\d{10,15}$/.test(digits) ? digits : null;
 }
 
 const authPathFor = (restaurantId: string) => path.join(AUTH_ROOT, restaurantId);
@@ -122,6 +128,8 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
         session.sock = null;
         sessions.delete(restaurantId);
         removeAuthFolder(restaurantId);
+        // Desvinculada desde el teléfono: la carta vuelve al teléfono del local
+        void notifySessionNumber(restaurantId, null);
         return;
       }
 
@@ -145,6 +153,9 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
       session.status = 'CONNECTED';
       session.user = sock.user || null;
       console.log(`✅ ${tag} Conexión a WhatsApp establecida: ${sock.user?.name || sock.user?.id || 'Bot Koval'}`);
+      // El backend guarda el número real de la SIM: la carta pública dirige pedidos y chats a esta línea
+      const phoneNumber = phoneFromJid(sock.user?.id);
+      if (phoneNumber) void notifySessionNumber(restaurantId, phoneNumber);
     }
   });
 
@@ -221,6 +232,8 @@ export async function logoutWhatsApp(restaurantId: string): Promise<void> {
   }
 
   removeAuthFolder(restaurantId);
+  // También cancela cualquier reintento pendiente que reportara la SIM anterior
+  void notifySessionNumber(restaurantId, null);
 
   setTimeout(() => {
     connectToWhatsApp(restaurantId).catch((e) => console.error(`[${restaurantId}] Error reconectando:`, e));

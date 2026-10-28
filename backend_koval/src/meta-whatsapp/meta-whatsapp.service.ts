@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { syncWhatsAppBotNumber } from '../restaurants/whatsapp-bot-number';
 import { AiService } from '../ai/ai.service';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { OrderStatus } from '@prisma/client';
@@ -454,6 +455,11 @@ export class MetaWhatsAppService {
           `⚠️ [Multi-Tenant] No se encontró ningún restaurante registrado en BD para verifyToken="${verifyToken}" / phoneNumberId="${phoneNumberId}"`,
         );
         return;
+      }
+
+      // Línea de Meta verificada (webhook firmado): su número pasa a ser el de la carta pública
+      if (!isBaileys && displayPhoneNumber) {
+        void syncWhatsAppBotNumber(this.prisma, restaurant.id, displayPhoneNumber, restaurant.whatsappBotNumber);
       }
 
       // 2. Validar que el restaurante tenga configuradas sus credenciales oficiales de Meta.

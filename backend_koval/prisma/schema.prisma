@@ -81,6 +81,9 @@ model Restaurant {
   whatsappPhoneId     String?
   whatsappWabaId      String?
   whatsappVerifyToken String? @default(uuid())
+  // Número real (solo dígitos, con indicativo) de la línea conectada al bot: la SIM vinculada a
+  // Baileys (al conectar) o el display_phone_number de Meta. null = sin sesión vinculada.
+  whatsappBotNumber   String?
   // BYOA (Bring Your Own App): App Secret de la app de Meta del restaurante.
   // Verifica la firma x-hub-signature-256 de SUS webhooks. Nunca se devuelve en la API.
   metaAppSecret       String?

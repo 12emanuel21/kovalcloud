@@ -12,7 +12,7 @@ import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 import { isOnlinePaymentEnabled, isWompiReady } from '../payments/wompi-checkout.service';
-import { normalizeColombianPhone } from '../orders/phone';
+import { publicWhatsAppNumber } from './whatsapp-bot-number';
 import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
@@ -47,12 +47,7 @@ function hasAllWompiKeys(r: Record<string, unknown>): boolean {
   return Boolean(r.wompiPublicKey && r.wompiPrivateKey && r.wompiEventSecret && r.wompiIntegritySecret);
 }
 
-/** Teléfono del local para wa.me/<número>: dígitos con indicativo; null si no alcanza para un número real */
-export function toWhatsAppNumber(phone: string | null | undefined): string | null {
-  if (!phone?.trim()) return null;
-  const digits = normalizeColombianPhone(phone);
-  return /^\d{10,15}$/.test(digits) ? digits : null;
-}
+export { toWhatsAppNumber } from './whatsapp-bot-number';
 
 /** Estado de Wompi para el dashboard: la llave pública completa, los secretos solo enmascarados */
 function toPaymentsConfig(r: {
@@ -125,8 +120,9 @@ export class RestaurantsService {
       ...sanitizeRestaurant(restaurant),
       isWompiEnabled: restaurant.isWompiEnabled,
       onlinePaymentsEnabled: isOnlinePaymentEnabled(restaurant),
-      // Número para wa.me (solo dígitos, con indicativo 57): null si el local no tiene teléfono válido
-      whatsappNumber: toWhatsAppNumber(restaurant.phone),
+      // Número para wa.me (solo dígitos, con indicativo): la SIM/línea conectada al bot y, si no hay
+      // sesión vinculada, el teléfono del local. null oculta el botón de WhatsApp de la carta.
+      whatsappNumber: publicWhatsAppNumber(restaurant),
     };
   }
 

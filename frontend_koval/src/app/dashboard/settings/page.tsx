@@ -21,12 +21,26 @@ import {
 
 const API_URL = typeof window !== "undefined" ? "/api" : "http://koval_backend:4000";
 
+/** "573001234567" -> "+57 300 123 4567" (otros países: "+<dígitos>") */
+function formatWhatsAppNumber(digits: string): string {
+  const co = /^57(\d{3})(\d{3})(\d{4})$/.exec(digits);
+  return co ? `+57 ${co[1]} ${co[2]} ${co[3]}` : `+${digits}`;
+}
+
+/** Número de la SIM vinculada a Baileys desde el JID ("573001234567:12@s.whatsapp.net") */
+function phoneFromJid(jid: string | undefined): string | null {
+  const digits = (jid ?? '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  return /^\d{10,15}$/.test(digits) ? digits : null;
+}
+
 interface RestaurantData {
   id: string;
   name: string;
   slug: string;
   description?: string | null;
   phone?: string | null;
+  /** Línea real conectada al bot (SIM de Baileys o número de Meta) */
+  whatsappBotNumber?: string | null;
   logoUrl?: string | null;
   bannerUrl?: string | null;
   currency?: string | null;
@@ -55,6 +69,8 @@ export default function SettingsPage() {
   const [name, setName] = useState<string>('');
   const [slug, setSlug] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
+  // Número al que la carta envía pedidos y chats cuando hay una línea vinculada al bot
+  const [botNumber, setBotNumber] = useState<string | null>(null);
   const [currency, setCurrency] = useState<string>('COP');
   const [description, setDescription] = useState<string>('');
   const [logoUrl, setLogoUrl] = useState<string>('');
@@ -83,6 +99,7 @@ export default function SettingsPage() {
       setName(data.name || '');
       setSlug(data.slug || '');
       setPhone(data.phone || '');
+      setBotNumber(data.whatsappBotNumber || null);
       setCurrency(data.currency || 'COP');
       setDescription(data.description || '');
       setLogoUrl(data.logoUrl || '');
@@ -101,6 +118,25 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchRestaurantSettings();
   }, [fetchRestaurantSettings]);
+
+  // Sesión de WhatsApp Web en vivo: si está conectada, su SIM es la línea real de la carta
+  useEffect(() => {
+    if (!restaurantId || !token) return;
+    let cancelled = false;
+    fetch(`${API_URL}/whatsapp-gateway/status?restaurantId=${encodeURIComponent(restaurantId)}`, {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { status?: string; user?: { id?: string } | null } | null) => {
+        const live = data?.status === 'CONNECTED' ? phoneFromJid(data.user?.id) : null;
+        if (!cancelled && live) setBotNumber(live);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantId, token]);
 
   // Guardar Cambios de Identidad
   const handleSaveSettings = async (e: React.FormEvent) => {
@@ -259,8 +295,14 @@ export default function SettingsPage() {
 
         <div>
           <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-            WhatsApp del Local (Teléfono Comercial)
+            WhatsApp de Atención / Pedidos
           </label>
+          {botNumber && (
+            <p className="mb-1.5 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
+              Bot conectado al número {formatWhatsAppNumber(botNumber)}
+            </p>
+          )}
           <input
             type="text"
             value={phone}
@@ -269,9 +311,11 @@ export default function SettingsPage() {
             className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-sm text-white outline-none transition"
           />
           <p className="text-[11px] text-slate-500 mt-1">
-            {phone.trim()
-              ? 'A este número llegan los pedidos en efectivo de la carta y el botón "Chatear por WhatsApp".'
-              : 'Sin este número la carta no puede abrir el chat de WhatsApp con tu local.'}
+            {botNumber
+              ? 'La carta envía los pedidos y el botón "Chatear por WhatsApp" al número del bot. Este teléfono queda de respaldo si desvinculas la línea.'
+              : phone.trim()
+                ? 'A este número llegan los pedidos en efectivo de la carta y el botón "Chatear por WhatsApp".'
+                : 'Sin este número ni un WhatsApp vinculado, la carta no puede abrir el chat con tu local.'}
           </p>
         </div>
 

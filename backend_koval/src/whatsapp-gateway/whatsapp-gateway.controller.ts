@@ -19,6 +19,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { internalApiHeaders } from '../config/secrets';
+import { PrismaService } from '../prisma/prisma.service';
+import { syncWhatsAppBotNumber } from '../restaurants/whatsapp-bot-number';
 
 /**
  * Puente autenticado entre el dashboard y el microservicio Baileys.
@@ -32,6 +34,8 @@ import { internalApiHeaders } from '../config/secrets';
 @UseGuards(JwtAuthGuard)
 export class WhatsappGatewayController {
   private readonly logger = new Logger(WhatsappGatewayController.name);
+
+  constructor(private readonly prisma: PrismaService) {}
 
   /** Base del microservicio a partir de WHATSAPP_SERVICE_URL (".../send") */
   private get baseUrl(): string {
@@ -99,8 +103,12 @@ export class WhatsappGatewayController {
   @UseGuards(RolesGuard, SudoGuard)
   @Roles(Role.SUPERADMIN, Role.OWNER)
   @Post('logout')
-  logout(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
-    return this.callBaileys(this.resolveRestaurantId(user, restaurantId), '/logout', 'POST');
+  async logout(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
+    const id = this.resolveRestaurantId(user, restaurantId);
+    const data = await this.callBaileys(id, '/logout', 'POST');
+    // Sin SIM vinculada, la carta vuelve a usar el teléfono del local
+    await syncWhatsAppBotNumber(this.prisma, id, null);
+    return data;
   }
 
   @UseGuards(RolesGuard)
