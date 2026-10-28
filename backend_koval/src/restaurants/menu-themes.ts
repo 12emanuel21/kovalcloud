@@ -32,7 +32,7 @@ export function resolveMenuColorMode(mode: string | null | undefined, theme: str
  * Estructura de la carta pública (cómo se disponen los platos). Deben coincidir con
  * frontend_koval/src/components/storefront/templates.
  */
-export const MENU_LAYOUTS = ['visual-grid', 'compact-row'] as const;
+export const MENU_LAYOUTS = ['visual-grid', 'compact-row', 'bistro-classic'] as const;
 export type MenuLayout = (typeof MENU_LAYOUTS)[number];
 export const DEFAULT_MENU_LAYOUT: MenuLayout = 'visual-grid';
 

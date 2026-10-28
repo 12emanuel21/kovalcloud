@@ -107,6 +107,11 @@ export const MENU_LAYOUTS = [
     label: 'Lista Compacta (Compact Row)',
     description: 'Estilo delivery moderno / sushi. Ideal para cartas extensas con muchos platos.',
   },
+  {
+    value: 'bistro-classic',
+    label: 'Bistró Tradicional',
+    description: 'Estilo restaurante clásico / parrilla. Líneas punteadas, tipografía sobria y fotos elegantes.',
+  },
 ] as const;
 
 export type MenuLayout = (typeof MENU_LAYOUTS)[number]['value'];

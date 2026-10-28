@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { ChefHat, Search } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChefHat, Search, UtensilsCrossed } from 'lucide-react';
 import type { MenuPalette } from '@/app/menu/[slug]/templates/palettes';
 import type { Category, MenuItem } from '@/app/menu/[slug]/templates/types';
 
@@ -72,6 +72,46 @@ export function MenuEmptyState({
           Limpiar búsqueda
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Foto del plato (item.imageUrl) que llena su contenedor. Sin foto, o si el enlace falla,
+ * un placeholder tenue con cubiertos: el espacio de la imagen nunca se colapsa.
+ */
+export function DishImage({
+  src,
+  alt,
+  dimmed = false,
+  iconClassName = 'h-7 w-7',
+}: {
+  src?: string | null;
+  alt: string;
+  dimmed?: boolean;
+  iconClassName?: string;
+}) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (src && failedSrc !== src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- imágenes de platos en dominios arbitrarios
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        onError={() => setFailedSrc(src)}
+        // La carta se renderiza en el servidor: si la foto falló antes de hidratar, onError ya no
+        // se dispara. Al montar se revisa si quedó rota (cargada sin dimensiones).
+        ref={(img) => {
+          if (img?.complete && img.naturalWidth === 0) setFailedSrc(src);
+        }}
+        className={`h-full w-full object-cover ${dimmed ? 'grayscale' : ''}`}
+      />
+    );
+  }
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-sf-border/40 to-sf-card" aria-hidden>
+      <UtensilsCrossed className={`${iconClassName} text-sf-muted/50`} strokeWidth={1.5} />
     </div>
   );
 }

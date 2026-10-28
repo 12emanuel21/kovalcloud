@@ -88,7 +88,8 @@ describe('Modo claro / oscuro con el que abre la carta', () => {
 });
 
 describe('Estructura del menú (layout)', () => {
-  it('PATCH /restaurants/:id acepta visual-grid y compact-row y rechaza otras', async () => {
+  it('PATCH /restaurants/:id acepta visual-grid, compact-row y bistro-classic y rechaza otras', async () => {
+    expect(MENU_LAYOUTS).toEqual(['visual-grid', 'compact-row', 'bistro-classic']);
     for (const layout of MENU_LAYOUTS) {
       expect(await validate(plainToInstance(UpdateRestaurantDto, { layout }))).toHaveLength(0);
     }

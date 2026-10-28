@@ -1,20 +1,20 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Check, Plus } from 'lucide-react';
 import { formatPrice } from '@/app/menu/[slug]/templates/useMenuLogic';
 import type { MenuItem } from '@/app/menu/[slug]/templates/types';
-import { MenuEmptyState, MobileSearch, filterCategories } from './shared';
+import { DishImage, MenuEmptyState, MobileSearch, filterCategories } from './shared';
 import type { MenuSectionProps } from './types';
+import { categorySectionId, useCategoryScrollSpy } from './useCategoryScrollSpy';
 
 /** Alto del header (h-16) + barra de categorías: el título de la categoría queda visible al saltar */
 const SECTION_SCROLL_MARGIN = 'scroll-mt-[8.5rem]';
-const sectionId = (categoryId: string) => `categoria-${categoryId}`;
 
 /**
  * Plantilla "Lista Compacta" (compact-row), estilo apps de delivery: barra de categorías en píldoras
  * que lleva a cada sección con scroll suave (y se resalta sola al hacer scroll) y platos en filas
- * densas con la foto pequeña a la derecha. Ideal para cartas extensas (sushi, comida asiática…).
+ * densas con la foto (o un placeholder) a la derecha. Ideal para cartas extensas (sushi, comida asiática…).
  */
 export function CompactRowTemplate({
   categories,
@@ -27,57 +27,7 @@ export function CompactRowTemplate({
   isJustAdded,
 }: MenuSectionProps) {
   const visibleCategories = useMemo(() => filterCategories(categories, query), [categories, query]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const navRef = useRef<HTMLElement>(null);
-  const pillRefs = useRef(new Map<string, HTMLButtonElement>());
-  // Durante el scroll suave tras un clic no se van marcando las categorías intermedias
-  const scrollLock = useRef<number | null>(null);
-
-  // Categoría en pantalla: la última sección cuyo título ya pasó bajo la barra pegajosa
-  useEffect(() => {
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      if (scrollLock.current !== null) return;
-      const threshold = (navRef.current?.getBoundingClientRect().bottom ?? 128) + 24;
-      let current: string | null = null;
-      for (const category of visibleCategories) {
-        const section = document.getElementById(sectionId(category.id));
-        if (section && section.getBoundingClientRect().top <= threshold) current = category.id;
-      }
-      setActiveId(current);
-    };
-    const onScroll = () => {
-      if (!frame) frame = window.requestAnimationFrame(update);
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      if (frame) window.cancelAnimationFrame(frame);
-    };
-  }, [visibleCategories]);
-
-  useEffect(() => () => {
-    if (scrollLock.current !== null) window.clearTimeout(scrollLock.current);
-  }, []);
-
-  const currentId = activeId && visibleCategories.some((c) => c.id === activeId) ? activeId : visibleCategories[0]?.id;
-
-  // La píldora activa se mantiene visible: solo se desplaza la barra (no interrumpe el scroll de la página)
-  useEffect(() => {
-    const nav = navRef.current;
-    const pill = currentId ? pillRefs.current.get(currentId) : undefined;
-    if (nav && pill) nav.scrollTo({ left: pill.offsetLeft - (nav.clientWidth - pill.clientWidth) / 2, behavior: 'smooth' });
-  }, [currentId]);
-
-  const goToCategory = (id: string) => {
-    setActiveId(id);
-    if (scrollLock.current !== null) window.clearTimeout(scrollLock.current);
-    scrollLock.current = window.setTimeout(() => {
-      scrollLock.current = null;
-    }, 900);
-    document.getElementById(sectionId(id))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  const { navRef, currentId, goToCategory, registerItem } = useCategoryScrollSpy(visibleCategories);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -95,10 +45,7 @@ export function CompactRowTemplate({
             return (
               <button
                 key={category.id}
-                ref={(el) => {
-                  if (el) pillRefs.current.set(category.id, el);
-                  else pillRefs.current.delete(category.id);
-                }}
+                ref={registerItem(category.id)}
                 type="button"
                 onClick={() => goToCategory(category.id)}
                 aria-current={active ? 'true' : undefined}
@@ -122,7 +69,7 @@ export function CompactRowTemplate({
           </div>
         ) : (
           visibleCategories.map((category) => (
-            <section key={category.id} id={sectionId(category.id)} className={`${SECTION_SCROLL_MARGIN} pt-6`}>
+            <section key={category.id} id={categorySectionId(category.id)} className={`${SECTION_SCROLL_MARGIN} pt-6`}>
               <div className="flex items-baseline justify-between gap-3 px-3.5 pb-1">
                 <h2 className="text-lg font-bold text-sf-text">{category.name}</h2>
                 <span className="text-xs text-sf-muted">
@@ -194,48 +141,27 @@ function DishRow({
         </div>
       </div>
 
-      {item.imageUrl ? (
-        <div className="relative h-[84px] w-[84px] shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element -- imágenes de platos en dominios arbitrarios */}
-          <img
-            src={item.imageUrl}
-            alt={item.name}
-            loading="lazy"
-            className={`h-full w-full rounded-sf border border-sf-border object-cover ${isSoldOut ? 'grayscale' : ''}`}
-          />
-          <button
-            type="button"
-            onClick={onAdd}
-            disabled={disabled}
-            aria-label={addLabel}
-            className={`absolute -bottom-2 -right-2 flex h-9 w-9 items-center justify-center rounded-full shadow-lg ring-2 ring-sf-bg transition focus-visible:outline-none focus-visible:ring-sf-primary ${
-              disabled
-                ? 'cursor-not-allowed bg-sf-border text-sf-muted'
-                : justAdded
-                  ? 'scale-110 bg-emerald-500 text-white'
-                  : 'bg-sf-primary text-sf-on-primary hover:bg-sf-primary-hover active:scale-90'
-            }`}
-          >
-            {justAdded ? <Check className="h-4 w-4" strokeWidth={3} /> : <Plus className="h-5 w-5" strokeWidth={2.5} />}
-          </button>
+      {/* Foto siempre visible (o placeholder): todas las filas mantienen el mismo ritmo */}
+      <div className="relative h-24 w-24 shrink-0">
+        <div className="h-full w-full overflow-hidden rounded-sf border border-sf-border bg-sf-card">
+          <DishImage src={item.imageUrl} alt={item.name} dimmed={isSoldOut} />
         </div>
-      ) : (
         <button
           type="button"
           onClick={onAdd}
           disabled={disabled}
           aria-label={addLabel}
-          className={`shrink-0 rounded-sf border px-3 py-1.5 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sf-primary ${
+          className={`absolute -bottom-2 -right-2 flex h-9 w-9 items-center justify-center rounded-full shadow-lg ring-2 ring-sf-bg transition focus-visible:outline-none focus-visible:ring-sf-primary ${
             disabled
-              ? 'cursor-not-allowed border-sf-border text-sf-muted'
+              ? 'cursor-not-allowed bg-sf-border text-sf-muted'
               : justAdded
-                ? 'border-emerald-500 bg-emerald-500 text-white'
-                : 'border-sf-primary/40 text-sf-primary hover:bg-sf-primary/10'
+                ? 'scale-110 bg-emerald-500 text-white'
+                : 'bg-sf-primary text-sf-on-primary hover:bg-sf-primary-hover active:scale-90'
           }`}
         >
-          {isSoldOut ? 'Agotado' : isClosed ? 'Cerrado' : justAdded ? '¡Listo!' : '+ Agregar'}
+          {justAdded ? <Check className="h-4 w-4" strokeWidth={3} /> : <Plus className="h-5 w-5" strokeWidth={2.5} />}
         </button>
-      )}
+      </div>
     </li>
   );
 }
