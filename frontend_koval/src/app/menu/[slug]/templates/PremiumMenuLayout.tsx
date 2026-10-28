@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { CartDrawer } from '@/components/cart/CartDrawer';
+import { StorefrontModeToggle } from '@/components/theme/StorefrontModeToggle';
 import { toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
 import {
   DAY_NAMES,
@@ -153,6 +154,8 @@ export function PremiumMenuLayout({
                 Mesa {tableNumber}
               </span>
             )}
+
+            <StorefrontModeToggle />
 
             <button
               type="button"

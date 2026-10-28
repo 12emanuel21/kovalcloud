@@ -281,6 +281,62 @@ body {
   color-scheme: dark;
 }
 
+/* ── Modo claro / oscuro elegido por el cliente (☀️/🌙, next-themes: clase "dark" en <html>) ──
+   Los bloques de arriba son el modo natural de cada tema; aquí, su variante en el modo contrario.
+   El acento conserva la identidad del local, ajustado para contraste AA en cada fondo. */
+
+/* Street & Burger · claro: blanco limpio, mismo rojo fuego */
+html:not(.dark) [data-theme="street-burger"] {
+  --storefront-bg: #fafafa;
+  --storefront-card: #ffffff;
+  --storefront-border: #e4e4e7;
+  --storefront-text: #18181b;
+  --storefront-muted: #71717a;
+  --storefront-primary: #dc2626;
+  --storefront-primary-hover: #b91c1c;
+  --storefront-primary-text: #ffffff;
+  color-scheme: light;
+}
+
+/* Café & Bakery · oscuro: espresso profundo con caramelo claro (texto oscuro sobre el acento) */
+.dark [data-theme="cafe-bakery"] {
+  --storefront-bg: #1a1411;
+  --storefront-card: #261e19;
+  --storefront-border: #3d322a;
+  --storefront-text: #faf7f2;
+  --storefront-muted: #b3a79c;
+  --storefront-primary: #d9a066;
+  --storefront-primary-hover: #c58a4f;
+  --storefront-primary-text: #1a1411;
+  color-scheme: dark;
+}
+
+/* Sushi & Asian · claro: blanco papel de arroz, jade más profundo */
+html:not(.dark) [data-theme="sushi-dark"] {
+  --storefront-bg: #f9fafb;
+  --storefront-card: #ffffff;
+  --storefront-border: #e5e7eb;
+  --storefront-text: #111827;
+  --storefront-muted: #6b7280;
+  --storefront-primary: #047857;
+  --storefront-primary-hover: #065f46;
+  --storefront-primary-text: #ffffff;
+  color-scheme: light;
+}
+
+/* Bistró & Parrilla · claro: piedra cálida, ámbar tostado */
+html:not(.dark) [data-theme="bistro-grill"] {
+  --storefront-bg: #fafaf9;
+  --storefront-card: #ffffff;
+  --storefront-border: #e7e5e4;
+  --storefront-text: #1c1917;
+  --storefront-muted: #78716c;
+  --storefront-primary: #b45309;
+  --storefront-primary-hover: #92400e;
+  --storefront-primary-text: #ffffff;
+  color-scheme: light;
+}
+
 /* Derivados comunes: texto de párrafos entre el titular y el texto atenuado */
 [data-theme] {
   --storefront-body: color-mix(in srgb, var(--storefront-text) 80%, var(--storefront-bg));
