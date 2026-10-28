@@ -37,6 +37,14 @@ export interface RestaurantData {
   menuColorMode?: 'light' | 'dark' | null;
   /** Estructura de los platos: visual-grid (tarjetas) | compact-row (lista estilo delivery) | bistro-classic */
   layout?: string | null;
+  /** Acento propio #RRGGBB (null = el del tema) */
+  customColor?: string | null;
+  /** Tipografía: sans-modern | street-urban | serif-elegant | warm-rounded */
+  fontFamily?: string | null;
+  /** Platos más pedidos del último mes (badge "Popular") */
+  popularItemIds?: string[];
+  /** Platos agregados hace poco (badge "Nuevo"); lo calcula el backend */
+  newItemIds?: string[];
   /** Pública por diseño (checkout de Wompi); los secretos nunca llegan a la carta */
   wompiPublicKey?: string | null;
   /** Interruptor manual del dueño para encender o apagar la pasarela */

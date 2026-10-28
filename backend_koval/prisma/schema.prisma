@@ -77,8 +77,11 @@ model Restaurant {
   theme               String    @default("street-burger")
   // Modo con el que abre la carta (light | dark); luego el cliente lo cambia con el botón ☀️/🌙
   menuColorMode       String    @default("dark")
-  // Estructura de la carta: visual-grid (tarjetas grandes) | compact-row (lista estilo delivery) | bistro-classic (carta clásica)
+  // Estructura de la carta: visual-grid | compact-row | bistro-classic | modern-tabs
   layout              String    @default("visual-grid")
+  // Marca propia: color de acento libre (HEX "#e11d48"; null = el del tema) y tipografía de la carta
+  customColor         String?
+  fontFamily          String    @default("sans-modern")
 
   // Integración Meta WhatsApp Cloud API (Multi-Tenant)
   whatsappToken       String?

@@ -2,13 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { useCart } from '@/context/CartContext';
-import { DEFAULT_MENU_THEME, type MenuTheme } from '@/lib/menu-themes';
 import { buildOrderWhatsAppMessage, shortOrderId, toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
 /**
- * Colores del carrito: leen el tema de la carta (variables --storefront-* de data-theme),
+ * Colores del carrito: heredan el tema de la carta (variables --storefront-* del contenedor con
+ * data-theme, incluido el color propio del restaurante),
  * así el drawer combina con la carta en los temas claros y oscuros.
  */
 const ACCENT = {
@@ -63,8 +63,6 @@ interface CartDrawerProps {
   /** Local cerrado (emergencia u horario): no se pueden enviar pedidos */
   isClosed?: boolean;
   closedNotice?: string;
-  /** Tema de la carta: define el color de acento de los botones */
-  theme?: MenuTheme;
   /** El backend confirma que el local puede cobrar en línea (llaves completas + interruptor) */
   onlinePaymentsEnabled?: boolean;
   /** Interruptor manual del dueño: apagado = solo efectivo / WhatsApp, aunque haya llaves */
@@ -82,7 +80,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   tableNumber,
   isClosed = false,
   closedNotice = 'En este momento estamos cerrados.',
-  theme = DEFAULT_MENU_THEME,
   open,
   onOpenChange,
   onlinePaymentsEnabled = false,
@@ -251,7 +248,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   };
 
   return (
-    <div data-theme={theme} className="contents">
+    <>
       {/* Botón Flotante Inferior (Sticky Bottom Bar) */}
       {totalCount > 0 && !isOpen && (
         <div className="fixed bottom-4 left-4 right-4 z-40 max-w-md mx-auto animate-in fade-in slide-in-from-bottom-5 duration-300">
@@ -646,6 +643,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           </aside>
         </div>
       )}
-    </div>
+    </>
   );
 };

@@ -10,15 +10,20 @@ import { TeamSection } from './TeamSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
 import { MenuLayoutPicker } from './MenuLayoutPicker';
+import { AccentColorPicker, MenuFontSelect } from './BrandControls';
 import {
+  DEFAULT_MENU_FONT,
   DEFAULT_MENU_LAYOUT,
   DEFAULT_MENU_THEME,
   MENU_COLOR_MODES,
   MENU_THEMES,
+  isHexColor,
   resolveMenuColorMode,
+  resolveMenuFont,
   resolveMenuLayout,
   resolveMenuTheme,
   type MenuColorMode,
+  type MenuFont,
   type MenuLayout,
   type MenuTheme,
 } from '@/lib/menu-themes';
@@ -61,6 +66,8 @@ interface RestaurantData {
   theme?: string | null;
   menuColorMode?: string | null;
   layout?: string | null;
+  customColor?: string | null;
+  fontFamily?: string | null;
   owner?: {
     id: string;
     email: string;
@@ -97,6 +104,9 @@ export default function SettingsPage() {
   const [menuColorMode, setMenuColorMode] = useState<MenuColorMode>('dark');
   // Estructura de los platos en la carta (cuadrícula visual o lista compacta)
   const [layout, setLayout] = useState<MenuLayout>(DEFAULT_MENU_LAYOUT);
+  // Marca propia: color de acento libre (null = el del tema) y tipografía de la carta
+  const [customColor, setCustomColor] = useState<string | null>(null);
+  const [fontFamily, setFontFamily] = useState<MenuFont>(DEFAULT_MENU_FONT);
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [ownerEmail, setOwnerEmail] = useState<string>('');
   const [planName, setPlanName] = useState<string>('Plan Pro');
@@ -132,6 +142,8 @@ export default function SettingsPage() {
       setTheme(resolveMenuTheme(data.theme));
       setMenuColorMode(resolveMenuColorMode(data.menuColorMode, data.theme));
       setLayout(resolveMenuLayout(data.layout));
+      setCustomColor(isHexColor(data.customColor) ? data.customColor.toLowerCase() : null);
+      setFontFamily(resolveMenuFont(data.fontFamily));
       const email = data.owner?.email || 'admin@kovalcloud.com';
       setOwnerEmail(email);
       if (data.plan?.name) setPlanName(data.plan.name);
@@ -189,6 +201,8 @@ export default function SettingsPage() {
         theme,
         menuColorMode,
         layout,
+        customColor,
+        fontFamily,
       };
 
       const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}`, {
@@ -452,11 +466,23 @@ export default function SettingsPage() {
             Así se ve la carta al abrirla. Cada cliente puede cambiarlo con el botón ☀️/🌙 y su elección se recuerda en su teléfono.
           </p>
 
+          <span className="mt-5 mb-2 block text-xs font-semibold text-slate-300">Color de Acento</span>
+          <AccentColorPicker
+            value={customColor}
+            onChange={setCustomColor}
+            themeAccent={selectedTheme.swatches[menuColorMode].primary}
+            background={selectedTheme.swatches[menuColorMode].bg}
+            disabled={saving}
+          />
+
+          <span className="mt-5 mb-2 block text-xs font-semibold text-slate-300">Tipografía de la Carta</span>
+          <MenuFontSelect value={fontFamily} onChange={setFontFamily} restaurantName={name} disabled={saving} />
+
           <span className="mt-5 mb-2 block text-xs font-semibold text-slate-300">Estructura del Menú</span>
           <MenuLayoutPicker
             value={layout}
             onChange={setLayout}
-            swatch={selectedTheme.swatches[menuColorMode]}
+            swatch={{ ...selectedTheme.swatches[menuColorMode], primary: customColor ?? selectedTheme.swatches[menuColorMode].primary }}
             radius={selectedTheme.radius}
             disabled={saving}
           />

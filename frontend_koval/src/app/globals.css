@@ -177,7 +177,10 @@ html:not(.dark) .koval-dashboard .text-slate-900 {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   /* Titulares de la carta pública (Montserrat se carga en app/menu/[slug]) */
-  --font-display: var(--font-display-family), var(--font-geist-sans), ui-sans-serif, sans-serif;
+  /* --sf-font-display la define la tipografía elegida (.font-<familia>); por defecto Montserrat */
+  --font-display: var(--sf-font-display, var(--font-display-family)), var(--font-geist-sans), ui-sans-serif, sans-serif;
+  /* Serif editorial (Bistró Tradicional y tipografía serif-elegant): clase font-sf-serif */
+  --font-sf-serif: var(--font-playfair), Georgia, "Times New Roman", serif;
 
   /* Carta pública: utilidades que leen el tema activo ([data-theme]), ej. bg-sf-primary,
      text-sf-on-primary, border-sf-border, shadow-sf-primary/25, rounded-sf */
@@ -340,4 +343,40 @@ html:not(.dark) [data-theme="bistro-grill"] {
 /* Derivados comunes: texto de párrafos entre el titular y el texto atenuado */
 [data-theme] {
   --storefront-body: color-mix(in srgb, var(--storefront-text) 80%, var(--storefront-bg));
+}
+
+/* ── Tipografía de la carta (Ajustes > Perfil > Tipografía): clase font-<familia> en su contenedor ──
+   --sf-font-body es el texto general y --sf-font-display los titulares (utilidad font-display).
+   Deben coincidir con src/lib/menu-themes.ts (MENU_FONTS) y el backend. */
+.font-sans-modern {
+  --sf-font-body: var(--font-inter), "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --sf-font-display: var(--font-display-family), var(--font-inter), ui-sans-serif, sans-serif;
+}
+.font-street-urban {
+  --sf-font-body: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --sf-font-display: var(--font-oswald), Impact, "Arial Narrow", sans-serif;
+}
+.font-serif-elegant {
+  --sf-font-body: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --sf-font-display: var(--font-playfair), Georgia, "Times New Roman", serif;
+}
+.font-warm-rounded {
+  --sf-font-body: var(--font-outfit), Quicksand, Poppins, ui-sans-serif, sans-serif;
+  --sf-font-display: var(--font-outfit), Quicksand, Poppins, ui-sans-serif, sans-serif;
+}
+.font-sans-modern,
+.font-street-urban,
+.font-serif-elegant,
+.font-warm-rounded {
+  font-family: var(--sf-font-body);
+}
+
+/* Titulares editoriales: la serif con peso sobrio en vez del display ultra-pesado.
+   Lo usan Bistró Tradicional (cualquier tipografía) y la tipografía serif-elegant. */
+.sf-editorial {
+  --sf-font-display: var(--font-playfair), Georgia, "Times New Roman", serif;
+}
+.sf-editorial .font-display {
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }

@@ -48,7 +48,7 @@ export function BistroClassicTemplate({
                 type="button"
                 onClick={() => goToCategory(category.id)}
                 aria-current={active ? 'true' : undefined}
-                className={`shrink-0 whitespace-nowrap border-b-2 pb-1 font-serif text-sm uppercase tracking-[0.18em] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sf-primary ${
+                className={`shrink-0 whitespace-nowrap border-b-2 pb-1 font-sf-serif text-sm uppercase tracking-[0.18em] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sf-primary ${
                   active ? 'border-sf-primary text-sf-text' : 'border-transparent text-sf-muted hover:text-sf-text'
                 }`}
               >
@@ -74,13 +74,13 @@ export function BistroClassicTemplate({
                   <span className="text-xs text-sf-primary">✦</span>
                   <span className="h-px flex-1 bg-gradient-to-l from-transparent to-sf-border" />
                 </div>
-                <h2 className="mt-2 font-serif text-2xl font-semibold uppercase tracking-[0.2em] text-sf-text md:text-3xl">
+                <h2 className="mt-2 font-sf-serif text-2xl font-semibold uppercase tracking-[0.2em] text-sf-text md:text-3xl">
                   {category.name}
                 </h2>
               </header>
 
               {category.items.length === 0 ? (
-                <p className="text-center font-serif text-sm italic text-sf-muted">No hay platos disponibles en esta categoría.</p>
+                <p className="text-center font-sf-serif text-sm italic text-sf-muted">No hay platos disponibles en esta categoría.</p>
               ) : (
                 <ul className="space-y-6">
                   {category.items.map((item) => (
@@ -153,9 +153,9 @@ function BistroDish({
       <div className={`min-w-0 flex-1 ${isSoldOut ? 'opacity-60' : ''}`}>
         {/* Nombre ··········· Precio */}
         <div className="flex items-end">
-          <h3 className="min-w-0 font-serif text-base font-semibold leading-snug text-sf-text sm:text-lg">{item.name}</h3>
+          <h3 className="min-w-0 font-sf-serif text-base font-semibold leading-snug text-sf-text sm:text-lg">{item.name}</h3>
           <span className="mx-3 mb-1.5 min-w-6 flex-1 border-b-2 border-dotted border-sf-border" aria-hidden />
-          <span className={`shrink-0 font-serif text-base font-semibold sm:text-lg ${isSoldOut ? 'text-sf-muted line-through' : 'text-sf-primary'}`}>
+          <span className={`shrink-0 font-sf-serif text-base font-semibold sm:text-lg ${isSoldOut ? 'text-sf-muted line-through' : 'text-sf-primary'}`}>
             {formatPrice(item.price)}
           </span>
         </div>
@@ -244,8 +244,8 @@ function PhotoPreview({
         </div>
         <figcaption className="space-y-2 p-5">
           <div className="flex items-baseline justify-between gap-4">
-            <p className="font-serif text-xl font-semibold text-sf-text">{item.name}</p>
-            <p className="shrink-0 font-serif text-lg font-semibold text-sf-primary">{formatPrice(item.price)}</p>
+            <p className="font-sf-serif text-xl font-semibold text-sf-text">{item.name}</p>
+            <p className="shrink-0 font-sf-serif text-lg font-semibold text-sf-primary">{formatPrice(item.price)}</p>
           </div>
           {item.description && <p className="text-sm italic leading-relaxed text-sf-muted">{item.description}</p>}
           <div className="flex justify-end pt-2">

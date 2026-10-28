@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,7 +13,13 @@ import { parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 import { isOnlinePaymentEnabled, isWompiReady } from '../payments/wompi-checkout.service';
 import { publicWhatsAppNumber } from './whatsapp-bot-number';
-import { resolveMenuColorMode, resolveMenuLayout, resolveMenuTheme } from './menu-themes';
+import {
+  normalizeCustomColor,
+  resolveMenuColorMode,
+  resolveMenuFont,
+  resolveMenuLayout,
+  resolveMenuTheme,
+} from './menu-themes';
 import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
@@ -49,6 +55,29 @@ function hasAllWompiKeys(r: Record<string, unknown>): boolean {
 }
 
 export { toWhatsAppNumber } from './whatsapp-bot-number';
+
+/** Badge "Popular" de la carta: top de unidades vendidas en la ventana */
+const POPULAR_WINDOW_DAYS = 30;
+const POPULAR_MAX_ITEMS = 3;
+const POPULAR_MIN_UNITS = 3;
+
+/** Badge "Nuevo": creado en los últimos días, y al menos una semana después de la carga inicial de la carta */
+const NEW_ITEM_DAYS = 14;
+const NEW_AFTER_FIRST_LOAD_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function newMenuItemIds(items: Array<{ id: string; createdAt?: Date | null }>, now: Date = new Date()): string[] {
+  const dated = items.filter((item): item is { id: string; createdAt: Date } => item.createdAt instanceof Date);
+  if (dated.length === 0) return [];
+  const firstLoad = Math.min(...dated.map((item) => item.createdAt.getTime()));
+  return dated
+    .filter(
+      (item) =>
+        item.createdAt.getTime() >= now.getTime() - NEW_ITEM_DAYS * DAY_MS &&
+        item.createdAt.getTime() >= firstLoad + NEW_AFTER_FIRST_LOAD_DAYS * DAY_MS,
+    )
+    .map((item) => item.id);
+}
 
 /** Estado de Wompi para el dashboard: la llave pública completa, los secretos solo enmascarados */
 function toPaymentsConfig(r: {
@@ -89,6 +118,8 @@ function toRestaurantResponse<T extends { users: { role: Role }[] }>(restaurant:
 
 @Injectable()
 export class RestaurantsService {
+  private readonly logger = new Logger(RestaurantsService.name);
+
   constructor(
     private prisma: PrismaService,
     private aiService: AiService,
@@ -130,7 +161,36 @@ export class RestaurantsService {
       menuColorMode: resolveMenuColorMode(restaurant.menuColorMode, restaurant.theme),
       // Estructura de los platos (visual-grid si falta o no existe)
       layout: resolveMenuLayout(restaurant.layout),
+      // Marca propia: acento libre (null = el del tema) y tipografía
+      customColor: normalizeCustomColor(restaurant.customColor),
+      fontFamily: resolveMenuFont(restaurant.fontFamily),
+      // Badge "Popular" de la carta: los más pedidos del último mes
+      popularItemIds: await this.popularItemIds(restaurant.id),
+      // Badge "Nuevo": agregados hace poco (no los de la carga inicial de la carta)
+      newItemIds: newMenuItemIds(restaurant.categories.flatMap((category) => category.items)),
     };
+  }
+
+  /**
+   * Platos más pedidos de los últimos 30 días (sin pedidos cancelados): hasta 3, con un mínimo de
+   * unidades para que "Popular" signifique algo. Para el badge de la carta pública.
+   */
+  private async popularItemIds(restaurantId: string): Promise<string[]> {
+    const since = new Date(Date.now() - POPULAR_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    try {
+      const top = await this.prisma.orderItem.groupBy({
+        by: ['menuItemId'],
+        where: { order: { restaurantId, createdAt: { gte: since }, status: { not: 'CANCELLED' } } },
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: 'desc' } },
+        take: POPULAR_MAX_ITEMS,
+      });
+      return top.filter((row) => (row._sum.quantity ?? 0) >= POPULAR_MIN_UNITS).map((row) => row.menuItemId);
+    } catch (error: any) {
+      // Un badge nunca debe tumbar la carta pública
+      this.logger.warn(`No se pudieron calcular los platos populares de ${restaurantId}: ${error?.message || error}`);
+      return [];
+    }
   }
 
   async create(createRestaurantDto: CreateRestaurantDto) {
@@ -249,6 +309,10 @@ export class RestaurantsService {
         theme: updateRestaurantDto.theme,
         menuColorMode: updateRestaurantDto.menuColorMode,
         layout: updateRestaurantDto.layout,
+        // undefined = no se toca; null = volver al color del tema
+        customColor:
+          updateRestaurantDto.customColor === undefined ? undefined : normalizeCustomColor(updateRestaurantDto.customColor),
+        fontFamily: updateRestaurantDto.fontFamily,
         ...meta,
       },
       include: {

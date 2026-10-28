@@ -32,10 +32,27 @@ export function resolveMenuColorMode(mode: string | null | undefined, theme: str
  * Estructura de la carta pública (cómo se disponen los platos). Deben coincidir con
  * frontend_koval/src/components/storefront/templates.
  */
-export const MENU_LAYOUTS = ['visual-grid', 'compact-row', 'bistro-classic'] as const;
+export const MENU_LAYOUTS = ['visual-grid', 'compact-row', 'bistro-classic', 'modern-tabs'] as const;
 export type MenuLayout = (typeof MENU_LAYOUTS)[number];
 export const DEFAULT_MENU_LAYOUT: MenuLayout = 'visual-grid';
 
 export function resolveMenuLayout(layout: string | null | undefined): MenuLayout {
   return layout && (MENU_LAYOUTS as readonly string[]).includes(layout) ? (layout as MenuLayout) : DEFAULT_MENU_LAYOUT;
+}
+
+/** Tipografías de la carta (clases .font-<valor> de frontend_koval/src/app/globals.css) */
+export const MENU_FONTS = ['sans-modern', 'street-urban', 'serif-elegant', 'warm-rounded'] as const;
+export type MenuFont = (typeof MENU_FONTS)[number];
+export const DEFAULT_MENU_FONT: MenuFont = 'sans-modern';
+
+export function resolveMenuFont(font: string | null | undefined): MenuFont {
+  return font && (MENU_FONTS as readonly string[]).includes(font) ? (font as MenuFont) : DEFAULT_MENU_FONT;
+}
+
+/** Color de acento propio: HEX #RRGGBB */
+export const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+/** Color propio válido en minúsculas, o null (la carta usa el acento del tema) */
+export function normalizeCustomColor(color: string | null | undefined): string | null {
+  return color && HEX_COLOR_PATTERN.test(color) ? color.toLowerCase() : null;
 }

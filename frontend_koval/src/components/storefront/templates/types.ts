@@ -16,4 +16,8 @@ export interface MenuSectionProps {
   onAdd: (item: MenuItem) => void;
   getQuantity: (itemId: string) => number;
   isJustAdded: (itemId: string) => boolean;
+  /** Platos más pedidos del último mes (badge "Popular") */
+  popularItemIds: string[];
+  /** Platos agregados hace poco (badge "Nuevo") */
+  newItemIds: string[];
 }

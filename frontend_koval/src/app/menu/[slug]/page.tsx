@@ -1,6 +1,6 @@
 import { CartProvider } from '@/context/CartContext';
 import { MenuView, RestaurantData } from './MenuView';
-import { displayFont } from './fonts';
+import { storefrontFontVariables } from './fonts';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -62,7 +62,7 @@ export default async function MenuPage({
 
   return (
     <CartProvider>
-      <div className={displayFont.variable}>
+      <div className={storefrontFontVariables}>
         <MenuView restaurant={restaurant} tableNumber={table} returnedOrderId={returnedOrderId} />
       </div>
     </CartProvider>

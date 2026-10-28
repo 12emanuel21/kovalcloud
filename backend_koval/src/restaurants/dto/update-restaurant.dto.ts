@@ -1,11 +1,14 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRestaurantDto } from './create-restaurant.dto';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
 import {
+  HEX_COLOR_PATTERN,
   MENU_COLOR_MODES,
+  MENU_FONTS,
   MENU_LAYOUTS,
   MENU_THEMES,
   type MenuColorMode,
+  type MenuFont,
   type MenuLayout,
   type MenuTheme,
 } from '../menu-themes';
@@ -71,4 +74,15 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsOptional()
   @IsIn(MENU_LAYOUTS, { message: `La estructura debe ser una de: ${MENU_LAYOUTS.join(', ')}` })
   layout?: MenuLayout;
+
+  // Color de acento propio (#RRGGBB). null = volver al color del tema
+  @IsOptional()
+  @IsString()
+  @Matches(HEX_COLOR_PATTERN, { message: 'El color debe tener el formato #RRGGBB' })
+  customColor?: string | null;
+
+  // Tipografía de la carta pública
+  @IsOptional()
+  @IsIn(MENU_FONTS, { message: `La tipografía debe ser una de: ${MENU_FONTS.join(', ')}` })
+  fontFamily?: MenuFont;
 }

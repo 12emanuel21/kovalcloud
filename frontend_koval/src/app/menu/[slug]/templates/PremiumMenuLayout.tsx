@@ -27,7 +27,6 @@ import {
   getLocalWeekDay,
   hasActiveExtension,
 } from '@/lib/business-hours';
-import type { MenuTheme } from '@/lib/menu-themes';
 import { useMenuLogic } from './useMenuLogic';
 import type { MenuPalette } from './palettes';
 import type { MenuTemplateProps } from './types';
@@ -41,7 +40,6 @@ const MENU_ANCHOR = 'menu';
 
 interface PremiumMenuLayoutProps extends MenuTemplateProps {
   palette: MenuPalette;
-  theme: MenuTheme;
   /** Plantilla estructural de los platos (cuadrícula visual, lista compacta…) */
   renderMenu: (props: MenuSectionProps) => React.ReactNode;
 }
@@ -57,7 +55,6 @@ export function PremiumMenuLayout({
   tableNumber,
   returnedOrderId,
   palette,
-  theme,
   renderMenu,
 }: PremiumMenuLayoutProps) {
   const { isClosed, closedNotice, scheduleGroups, handleAddItem, getItemCartQuantity, isJustAdded } =
@@ -287,6 +284,8 @@ export function PremiumMenuLayout({
             onAdd: handleAddItem,
             getQuantity: getItemCartQuantity,
             isJustAdded,
+            popularItemIds: restaurant.popularItemIds ?? [],
+            newItemIds: restaurant.newItemIds ?? [],
           })}
         </section>
 
@@ -415,7 +414,6 @@ export function PremiumMenuLayout({
       </footer>
 
       <CartDrawer
-        theme={theme}
         open={cartOpen}
         onOpenChange={setCartOpen}
         restaurantId={restaurant.id}

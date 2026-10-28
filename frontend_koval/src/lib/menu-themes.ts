@@ -1,3 +1,5 @@
+import type React from 'react';
+
 /**
  * Temas visuales de la carta pública. Deben coincidir con backend_koval/src/restaurants/menu-themes.ts
  * y con los bloques [data-theme="..."] de app/globals.css (variables --storefront-*).
@@ -112,6 +114,11 @@ export const MENU_LAYOUTS = [
     label: 'Bistró Tradicional',
     description: 'Estilo restaurante clásico / parrilla. Líneas punteadas, tipografía sobria y fotos elegantes.',
   },
+  {
+    value: 'modern-tabs',
+    label: 'Pestañas Modernas (App Tabs)',
+    description: 'Estilo app delivery. Navegación por pestañas limpias sin scroll infinito.',
+  },
 ] as const;
 
 export type MenuLayout = (typeof MENU_LAYOUTS)[number]['value'];
@@ -119,3 +126,56 @@ export const DEFAULT_MENU_LAYOUT: MenuLayout = 'visual-grid';
 
 export const resolveMenuLayout = (value: unknown): MenuLayout =>
   MENU_LAYOUTS.some((layout) => layout.value === value) ? (value as MenuLayout) : DEFAULT_MENU_LAYOUT;
+
+/** Tipografías de la carta (clases .font-<valor> de globals.css). Deben coincidir con el backend */
+export const MENU_FONTS = [
+  { value: 'sans-modern', label: 'Sans Moderna', sample: 'Inter + Montserrat · limpia y versátil' },
+  { value: 'street-urban', label: 'Urbana Display', sample: 'Oswald · condensada, alto impacto' },
+  { value: 'serif-elegant', label: 'Serif Elegante', sample: 'Playfair Display · editorial y sofisticada' },
+  { value: 'warm-rounded', label: 'Redondeada Cálida', sample: 'Outfit · amable y cercana' },
+] as const;
+
+export type MenuFont = (typeof MENU_FONTS)[number]['value'];
+export const DEFAULT_MENU_FONT: MenuFont = 'sans-modern';
+
+export const resolveMenuFont = (value: unknown): MenuFont =>
+  MENU_FONTS.some((font) => font.value === value) ? (value as MenuFont) : DEFAULT_MENU_FONT;
+
+/** Colores sugeridos para el acento propio (los de los 4 temas) */
+export const ACCENT_PRESETS = [
+  { value: '#dc2626', label: 'Rojo fuego' },
+  { value: '#854d0e', label: 'Café caramelo' },
+  { value: '#059669', label: 'Verde jade' },
+  { value: '#d97706', label: 'Ámbar dorado' },
+] as const;
+
+export const isHexColor = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+
+/** Luminancia relativa WCAG de un #RRGGBB */
+function luminance(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Contraste WCAG entre dos colores #RRGGBB (1 a 21) */
+export function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Variables del acento propio para el contenedor de la carta (pisan las del tema en claro y oscuro):
+ * hover un poco más oscuro y texto del botón blanco o casi negro, el que contraste más.
+ */
+export function customAccentStyle(color: string | null | undefined): React.CSSProperties | undefined {
+  if (!isHexColor(color)) return undefined;
+  const onPrimary = contrastRatio(color, '#ffffff') >= contrastRatio(color, '#111111') ? '#ffffff' : '#111111';
+  return {
+    '--storefront-primary': color,
+    '--storefront-primary-hover': `color-mix(in srgb, ${color} 82%, black)`,
+    '--storefront-primary-text': onPrimary,
+  } as React.CSSProperties;
+}

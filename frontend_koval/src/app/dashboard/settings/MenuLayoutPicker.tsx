@@ -13,10 +13,10 @@ interface MenuLayoutPickerProps {
   disabled?: boolean;
 }
 
-/** "Estructura del Menú": cuadrícula de tarjetas grandes, lista compacta estilo delivery o bistró tradicional */
+/** "Estructura del Menú": cuadrícula visual, lista compacta, bistró tradicional o pestañas modernas */
 export function MenuLayoutPicker({ value, onChange, swatch, radius, disabled }: MenuLayoutPickerProps) {
   return (
-    <div role="radiogroup" aria-label="Estructura del menú" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div role="radiogroup" aria-label="Estructura del menú" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {MENU_LAYOUTS.map((option) => {
         const selected = option.value === value;
         return (
@@ -36,8 +36,10 @@ export function MenuLayoutPicker({ value, onChange, swatch, radius, disabled }: 
                 <GridPreview swatch={swatch} radius={radius} />
               ) : option.value === 'compact-row' ? (
                 <RowsPreview swatch={swatch} radius={radius} />
-              ) : (
+              ) : option.value === 'bistro-classic' ? (
                 <BistroPreview swatch={swatch} />
+              ) : (
+                <TabsPreview swatch={swatch} radius={radius} />
               )}
             </div>
             <div className="flex w-full flex-1 items-start gap-2 border-t border-slate-800 bg-slate-950 p-3">
@@ -122,6 +124,37 @@ function BistroPreview({ swatch }: { swatch: ThemeSwatch }) {
           {n % 2 === 0 && <div className="h-4 w-4 shrink-0 rounded-sm border" style={{ background: swatch.border, borderColor: swatch.border }} />}
         </div>
       ))}
+    </div>
+  );
+}
+
+function TabsPreview({ swatch, radius }: { swatch: ThemeSwatch; radius: string }) {
+  return (
+    <div>
+      <div className="mb-2 flex gap-2.5 border-b pb-1" style={{ borderColor: swatch.border }}>
+        {[0, 1, 2].map((n) => (
+          <div key={n} className="relative pb-1">
+            <div className="h-1.5 w-9 rounded-full" style={{ background: n === 0 ? swatch.primary : swatch.muted, opacity: n === 0 ? 1 : 0.6 }} />
+            {n === 0 && <span className="absolute -bottom-1 left-0 h-0.5 w-full rounded-full" style={{ background: swatch.primary }} />}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {[0, 1].map((n) => (
+          <div key={n} className="overflow-hidden border" style={{ background: swatch.card, borderColor: swatch.border, borderRadius: radius }}>
+            <div className="relative aspect-video" style={{ background: swatch.border }}>
+              {n === 0 && <span className="absolute left-1 top-1 h-1.5 w-5 rounded-full" style={{ background: swatch.primary }} />}
+            </div>
+            <div className="space-y-1 p-1.5">
+              <div className="h-1 w-3/4 rounded-full" style={{ background: swatch.text, opacity: 0.85 }} />
+              <div className="flex items-center justify-between">
+                <div className="h-1.5 w-6 rounded-full" style={{ background: swatch.primary }} />
+                <div className="h-3 w-3 rounded-full" style={{ background: swatch.primary }} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
