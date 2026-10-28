@@ -134,7 +134,8 @@ export function MenuFontSelect({
   const current = MENU_FONTS.find((font) => font.value === value) ?? MENU_FONTS[0];
   return (
     <div className="grid gap-3 md:grid-cols-[minmax(0,16rem)_1fr] md:items-center">
-      <div>
+      {/* relative: contiene el label sr-only (position: absolute) */}
+      <div className="relative">
         <label htmlFor={selectId} className="sr-only">
           Tipografía de la carta
         </label>

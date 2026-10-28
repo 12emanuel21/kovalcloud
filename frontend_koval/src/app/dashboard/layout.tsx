@@ -72,7 +72,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar onMenuClick={() => setMobileSidebarOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-6">
+        {/* relative: los elementos absolutos (ej. sr-only) quedan dentro del scroll de main; sin esto
+            escapan al documento, lo alargan y debajo del panel asoma el fondo del body */}
+        <main className="relative flex-1 overflow-y-auto p-6">
           <div className="mx-auto w-full max-w-7xl">{children}</div>
         </main>
       </div>
