@@ -2,7 +2,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { RestaurantsService } from './restaurants.service';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
-import { MENU_THEMES, resolveMenuColorMode, resolveMenuTheme } from './menu-themes';
+import { MENU_LAYOUTS, MENU_THEMES, resolveMenuColorMode, resolveMenuLayout, resolveMenuTheme } from './menu-themes';
 import type { AiService } from '../ai/ai.service';
 import type { SudoCredentials } from '../auth/two-factor-auth.service';
 
@@ -84,5 +84,34 @@ describe('Modo claro / oscuro con el que abre la carta', () => {
     };
     const service = new RestaurantsService(prisma, {} as AiService, {} as any);
     await expect(service.findBySlug('demo')).resolves.toMatchObject({ theme: 'bistro-grill', menuColorMode: 'light' });
+  });
+});
+
+describe('Estructura del menú (layout)', () => {
+  it('PATCH /restaurants/:id acepta visual-grid y compact-row y rechaza otras', async () => {
+    for (const layout of MENU_LAYOUTS) {
+      expect(await validate(plainToInstance(UpdateRestaurantDto, { layout }))).toHaveLength(0);
+    }
+    const errors = await validate(plainToInstance(UpdateRestaurantDto, { layout: 'masonry' }));
+    expect(errors.map((e) => e.property)).toEqual(['layout']);
+  });
+
+  it('se guarda con "Guardar identidad" y la carta pública lo recibe con fallback a visual-grid', async () => {
+    const prisma: any = {
+      restaurant: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'rest-1' }),
+        update: jest.fn().mockImplementation(({ data }) => ({ id: 'rest-1', users: [], ...data })),
+      },
+    };
+    const service = new RestaurantsService(prisma, {} as AiService, { assertSudo: jest.fn() } as any);
+    await service.update('rest-1', { layout: 'compact-row' }, {} as SudoCredentials);
+    expect(prisma.restaurant.update.mock.calls[0][0].data.layout).toBe('compact-row');
+
+    expect(resolveMenuLayout(null)).toBe('visual-grid');
+    expect(resolveMenuLayout('otra')).toBe('visual-grid');
+    for (const [stored, expected] of [['compact-row', 'compact-row'], [null, 'visual-grid']] as const) {
+      prisma.restaurant.findUnique.mockResolvedValue({ id: 'r', slug: 'demo', layout: stored, categories: [] });
+      await expect(service.findBySlug('demo')).resolves.toMatchObject({ layout: expected });
+    }
   });
 });

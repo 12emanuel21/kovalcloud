@@ -35,6 +35,8 @@ export interface RestaurantData {
   theme?: string | null;
   /** Modo con el que abre la carta (elegido por el dueño); el cliente lo cambia con ☀️/🌙 */
   menuColorMode?: 'light' | 'dark' | null;
+  /** Estructura de los platos: visual-grid (tarjetas) | compact-row (lista estilo delivery) */
+  layout?: string | null;
   /** Pública por diseño (checkout de Wompi); los secretos nunca llegan a la carta */
   wompiPublicKey?: string | null;
   /** Interruptor manual del dueño para encender o apagar la pasarela */

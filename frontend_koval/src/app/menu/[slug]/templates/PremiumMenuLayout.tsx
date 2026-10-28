@@ -11,7 +11,6 @@ import {
   MapPin,
   MessageCircle,
   Phone,
-  Plus,
   Search,
   ShoppingCart,
 } from 'lucide-react';
@@ -29,10 +28,10 @@ import {
   hasActiveExtension,
 } from '@/lib/business-hours';
 import type { MenuTheme } from '@/lib/menu-themes';
-import { formatPrice, useMenuLogic } from './useMenuLogic';
-import { getCategoryIcon } from './categoryIcons';
+import { useMenuLogic } from './useMenuLogic';
 import type { MenuPalette } from './palettes';
-import type { Category, MenuItem, MenuTemplateProps } from './types';
+import type { MenuTemplateProps } from './types';
+import type { MenuSectionProps } from '@/components/storefront/templates/types';
 
 /** Borde izquierdo "rasgado" del hero en el tema claro */
 const TORN_EDGE =
@@ -40,21 +39,17 @@ const TORN_EDGE =
 
 const MENU_ANCHOR = 'menu';
 
-const normalize = (text: string) =>
-  text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase();
-
 interface PremiumMenuLayoutProps extends MenuTemplateProps {
   palette: MenuPalette;
   theme: MenuTheme;
+  /** Plantilla estructural de los platos (cuadrícula visual, lista compacta…) */
+  renderMenu: (props: MenuSectionProps) => React.ReactNode;
 }
 
 /**
- * Carta pública premium (inspirada en sitios de cadenas de comida): header con buscador y carrito,
- * hero a pantalla completa, barra de categorías con iconos, tarjetas con imagen, pasos para pedir,
- * horarios/contacto y footer. Los temas solo cambian la paleta.
+ * Carcasa de la carta pública: header con buscador y carrito, hero, aviso de cierre, pasos para pedir,
+ * horarios/contacto y footer. Los platos los dibuja la plantilla estructural (renderMenu: cuadrícula
+ * visual o lista compacta) y los temas solo cambian la paleta.
  */
 export function PremiumMenuLayout({
   restaurant,
@@ -63,12 +58,12 @@ export function PremiumMenuLayout({
   returnedOrderId,
   palette,
   theme,
+  renderMenu,
 }: PremiumMenuLayoutProps) {
   const { isClosed, closedNotice, scheduleGroups, handleAddItem, getItemCartQuantity, isJustAdded } =
     useMenuLogic(restaurant);
   const { totalCount } = useCart();
 
-  const [activeCategory, setActiveCategory] = useState<'all' | string>('all');
   const [query, setQuery] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
   const [showPaymentReturn, setShowPaymentReturn] = useState(Boolean(returnedOrderId));
@@ -82,23 +77,7 @@ export function PremiumMenuLayout({
     return closing ? `Abierto hasta las ${formatClock12h(closing)}` : 'Abierto ahora';
   }, [isClosed, restaurant.extendedUntil, restaurant.businessHours]);
 
-  // Categoría elegida + búsqueda por nombre o descripción
-  const visibleCategories = useMemo(() => {
-    const q = normalize(query.trim());
-    const matches = (item: MenuItem) =>
-      !q || normalize(item.name).includes(q) || normalize(item.description ?? '').includes(q);
-    return categories
-      .filter((category) => activeCategory === 'all' || category.id === activeCategory)
-      .map((category) => ({ ...category, items: category.items.filter(matches) }))
-      .filter((category) => !q || category.items.length > 0);
-  }, [categories, activeCategory, query]);
-
   const scrollToMenu = () => document.getElementById(MENU_ANCHOR)?.scrollIntoView({ behavior: 'smooth' });
-
-  const selectCategory = (id: 'all' | string) => {
-    setActiveCategory(id);
-    scrollToMenu();
-  };
 
   const initial = restaurant.name.trim().charAt(0).toUpperCase() || 'K';
   // Dígitos con indicativo (wa.me lo exige); lo calcula el backend, con respaldo local
@@ -299,75 +278,16 @@ export function PremiumMenuLayout({
 
         {/* ───────── Menú ───────── */}
         <section id={MENU_ANCHOR} className="mx-auto max-w-7xl scroll-mt-20 px-4 pt-8 md:px-6">
-          {/* Barra de categorías con iconos (pegajosa bajo el header) */}
-          <div className={`sticky top-16 z-30 -mx-4 px-4 py-3 backdrop-blur-xl md:-mx-6 md:px-6 ${palette.page}`}>
-            <label className="relative mb-3 block md:hidden">
-              <Search className={`pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${palette.muted}`} />
-              <input
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Buscar platos..."
-                aria-label="Buscar platos"
-                className={`h-11 w-full rounded-sf border pl-9 pr-3 text-sm outline-none transition ${palette.input}`}
-              />
-            </label>
-
-            {categories.length > 0 && (
-              <nav
-                aria-label="Categorías"
-                className={`flex gap-1 overflow-x-auto rounded-sf-lg border p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${palette.softSurface}`}
-              >
-                <CategoryTab
-                  label="Todo"
-                  icon={LayoutGrid}
-                  active={activeCategory === 'all'}
-                  onClick={() => selectCategory('all')}
-                  palette={palette}
-                />
-                {categories.map((category) => (
-                  <CategoryTab
-                    key={category.id}
-                    label={category.name}
-                    icon={getCategoryIcon(category.name)}
-                    active={activeCategory === category.id}
-                    onClick={() => selectCategory(category.id)}
-                    palette={palette}
-                  />
-                ))}
-              </nav>
-            )}
-          </div>
-
-          <div className="space-y-14 pb-6 pt-6">
-            {categories.length === 0 ? (
-              <EmptyState palette={palette} title="Este restaurante aún no tiene categorías publicadas." />
-            ) : visibleCategories.length === 0 ? (
-              <EmptyState
-                palette={palette}
-                title={`No encontramos platos para "${query.trim()}"`}
-                action={
-                  <button type="button" onClick={() => setQuery('')} className="text-sm font-bold text-sf-primary hover:underline">
-                    Limpiar búsqueda
-                  </button>
-                }
-              />
-            ) : (
-              visibleCategories.map((category) => (
-                <CategorySection
-                  key={category.id}
-                  category={category}
-                  palette={palette}
-                  isClosed={isClosed}
-                  showViewOnly={activeCategory === 'all' && !query}
-                  onViewOnly={() => selectCategory(category.id)}
-                  onAdd={handleAddItem}
-                  getQuantity={getItemCartQuantity}
-                  isJustAdded={isJustAdded}
-                />
-              ))
-            )}
-          </div>
+          {renderMenu({
+            categories,
+            query,
+            onQueryChange: setQuery,
+            palette,
+            isClosed,
+            onAdd: handleAddItem,
+            getQuantity: getItemCartQuantity,
+            isJustAdded,
+          })}
         </section>
 
         {/* ───────── Cómo pedir ───────── */}
@@ -581,201 +501,6 @@ function HeroVisual({ restaurant, palette, initial }: { restaurant: MenuTemplate
   );
 }
 
-function CategoryTab({
-  label,
-  icon: Icon,
-  active,
-  onClick,
-  palette,
-}: {
-  label: string;
-  icon: React.ElementType;
-  active: boolean;
-  onClick: () => void;
-  palette: MenuPalette;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className="group relative flex min-w-[5.5rem] shrink-0 flex-col items-center gap-1.5 rounded-sf px-3 pb-2.5 pt-2 transition"
-    >
-      <span
-        className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
-          active ? 'border-sf-primary bg-sf-primary text-sf-on-primary shadow-lg shadow-sf-primary/30' : palette.iconCircle
-        }`}
-      >
-        <Icon className="h-5 w-5" strokeWidth={1.75} />
-      </span>
-      <span
-        className={`max-w-[7rem] truncate text-xs ${active ? `font-bold ${palette.heading}` : `font-medium ${palette.body}`}`}
-      >
-        {label}
-      </span>
-      <span
-        className={`absolute bottom-0 left-1/2 h-0.5 w-10 -translate-x-1/2 rounded-full bg-sf-primary transition-opacity ${
-          active ? 'opacity-100' : 'opacity-0'
-        }`}
-        aria-hidden
-      />
-    </button>
-  );
-}
-
-function CategorySection({
-  category,
-  palette,
-  isClosed,
-  showViewOnly,
-  onViewOnly,
-  onAdd,
-  getQuantity,
-  isJustAdded,
-}: {
-  category: Category;
-  palette: MenuPalette;
-  isClosed: boolean;
-  showViewOnly: boolean;
-  onViewOnly: () => void;
-  onAdd: (item: MenuItem) => void;
-  getQuantity: (id: string) => number;
-  isJustAdded: (id: string) => boolean;
-}) {
-  const Icon = getCategoryIcon(category.name);
-  return (
-    <section className="space-y-5">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h2 className={`font-display text-2xl font-black uppercase tracking-tight md:text-3xl ${palette.heading}`}>
-            {category.name}
-          </h2>
-          <p className={`text-sm ${palette.muted}`}>
-            {category.items.length} {category.items.length === 1 ? 'opción' : 'opciones'}
-          </p>
-        </div>
-        {showViewOnly && (
-          <button
-            type="button"
-            onClick={onViewOnly}
-            className="inline-flex shrink-0 items-center gap-1 text-sm font-bold text-sf-primary hover:underline"
-          >
-            Ver solo esta <ArrowRight className="h-4 w-4" />
-          </button>
-        )}
-      </div>
-
-      {category.items.length === 0 ? (
-        <p className={`text-sm italic ${palette.muted}`}>No hay platos disponibles en esta categoría.</p>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {category.items.map((item) => (
-            <ProductCard
-              key={item.id}
-              item={item}
-              fallbackIcon={Icon}
-              palette={palette}
-              isClosed={isClosed}
-              quantity={getQuantity(item.id)}
-              justAdded={isJustAdded(item.id)}
-              onAdd={() => onAdd(item)}
-            />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ProductCard({
-  item,
-  fallbackIcon: FallbackIcon,
-  palette,
-  isClosed,
-  quantity,
-  justAdded,
-  onAdd,
-}: {
-  item: MenuItem;
-  fallbackIcon: React.ElementType;
-  palette: MenuPalette;
-  isClosed: boolean;
-  quantity: number;
-  justAdded: boolean;
-  onAdd: () => void;
-}) {
-  const isSoldOut = !item.isAvailable;
-  const disabled = isSoldOut || isClosed;
-
-  return (
-    <article
-      className={`group flex flex-row overflow-hidden rounded-sf-lg border sm:flex-col transition-all duration-300 ${palette.surface} ${
-        isSoldOut ? '' : `${palette.surfaceHover} hover:-translate-y-0.5`
-      }`}
-    >
-      <div className={`relative w-28 shrink-0 overflow-hidden sm:h-44 sm:w-full ${palette.imageBg}`}>
-        {item.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- imágenes de platos en dominios arbitrarios
-          <img
-            src={item.imageUrl}
-            alt={item.name}
-            loading="lazy"
-            className={`h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 ${
-              isSoldOut ? 'grayscale' : ''
-            }`}
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <FallbackIcon className={`h-10 w-10 sm:h-16 sm:w-16 transition-transform duration-500 group-hover:scale-110 ${palette.placeholderIcon}`} strokeWidth={1.25} />
-          </div>
-        )}
-
-        {isSoldOut && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-            <span className="rounded-full bg-white px-2.5 py-1 text-[10px] sm:px-4 sm:py-1.5 sm:text-xs font-black uppercase tracking-wider text-zinc-950 shadow-lg">
-              Agotado
-            </span>
-          </div>
-        )}
-        {quantity > 0 && (
-          <span className="absolute right-2 top-2 rounded-full bg-sf-primary px-2 py-0.5 text-[10px] sm:right-3 sm:top-3 sm:px-2.5 sm:py-1 sm:text-[11px] font-bold text-sf-on-primary shadow-lg">
-            {quantity} en tu pedido
-          </span>
-        )}
-      </div>
-
-      <div className={`flex min-w-0 flex-1 flex-col p-3.5 sm:p-4 ${isSoldOut ? 'opacity-60' : ''}`}>
-        <h3 className={`text-base font-bold leading-snug ${palette.heading}`}>{item.name}</h3>
-        {item.description && <p className={`mt-1 line-clamp-2 text-sm ${palette.muted}`}>{item.description}</p>}
-
-        <div className="mt-auto flex items-center justify-between gap-2 pt-3 sm:gap-3 sm:pt-4">
-          <p
-            className={`whitespace-nowrap font-display text-base font-black sm:text-lg ${isSoldOut ? `line-through ${palette.muted}` : palette.heading}`}
-          >
-            {formatPrice(item.price)}
-          </p>
-          <button
-            type="button"
-            onClick={onAdd}
-            disabled={disabled}
-            aria-label={isSoldOut ? `${item.name} agotado` : `Agregar ${item.name}`}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-sf px-3 py-1.5 text-xs font-bold transition sm:gap-1.5 sm:px-3.5 sm:py-2 sm:text-sm ${
-              disabled
-                ? 'cursor-not-allowed bg-zinc-500/15 text-zinc-500'
-                : justAdded
-                  ? 'scale-105 bg-emerald-500 text-white'
-                  : 'bg-sf-primary text-sf-on-primary shadow-md shadow-sf-primary/25 hover:bg-sf-primary-hover active:scale-95'
-            }`}
-          >
-            {!disabled && !justAdded && <Plus className="h-4 w-4" />}
-            {isSoldOut ? 'Sin stock' : isClosed ? 'Cerrado' : justAdded ? '¡Listo!' : 'Agregar'}
-          </button>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 function InfoRow({
   icon: Icon,
   title,
@@ -797,15 +522,5 @@ function InfoRow({
         {children}
       </div>
     </li>
-  );
-}
-
-function EmptyState({ title, action, palette }: { title: string; action?: React.ReactNode; palette: MenuPalette }) {
-  return (
-    <div className={`flex flex-col items-center gap-3 rounded-sf-lg border px-6 py-16 text-center ${palette.softSurface}`}>
-      <ChefHat className={`h-10 w-10 ${palette.placeholderIcon}`} strokeWidth={1.5} />
-      <p className={`text-sm font-semibold ${palette.heading}`}>{title}</p>
-      {action}
-    </div>
   );
 }

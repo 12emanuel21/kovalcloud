@@ -9,12 +9,17 @@ import { TwoFactorSection } from '@/components/security/TwoFactorSection';
 import { TeamSection } from './TeamSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
+import { MenuLayoutPicker } from './MenuLayoutPicker';
 import {
+  DEFAULT_MENU_LAYOUT,
   DEFAULT_MENU_THEME,
   MENU_COLOR_MODES,
+  MENU_THEMES,
   resolveMenuColorMode,
+  resolveMenuLayout,
   resolveMenuTheme,
   type MenuColorMode,
+  type MenuLayout,
   type MenuTheme,
 } from '@/lib/menu-themes';
 import {
@@ -55,6 +60,7 @@ interface RestaurantData {
   currency?: string | null;
   theme?: string | null;
   menuColorMode?: string | null;
+  layout?: string | null;
   owner?: {
     id: string;
     email: string;
@@ -89,6 +95,8 @@ export default function SettingsPage() {
   const [theme, setTheme] = useState<MenuTheme>(DEFAULT_MENU_THEME);
   // Modo con el que abre la carta (el cliente luego lo cambia con ☀️/🌙)
   const [menuColorMode, setMenuColorMode] = useState<MenuColorMode>('dark');
+  // Estructura de los platos en la carta (cuadrícula visual o lista compacta)
+  const [layout, setLayout] = useState<MenuLayout>(DEFAULT_MENU_LAYOUT);
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [ownerEmail, setOwnerEmail] = useState<string>('');
   const [planName, setPlanName] = useState<string>('Plan Pro');
@@ -98,6 +106,8 @@ export default function SettingsPage() {
 
 
   
+  const selectedTheme = MENU_THEMES.find((t) => t.value === theme) ?? MENU_THEMES[0];
+
   // Cargar datos actuales del restaurante
   const fetchRestaurantSettings = useCallback(async () => {
     if (!restaurantId) return;
@@ -121,6 +131,7 @@ export default function SettingsPage() {
       setBannerUrl(data.bannerUrl || '');
       setTheme(resolveMenuTheme(data.theme));
       setMenuColorMode(resolveMenuColorMode(data.menuColorMode, data.theme));
+      setLayout(resolveMenuLayout(data.layout));
       const email = data.owner?.email || 'admin@kovalcloud.com';
       setOwnerEmail(email);
       if (data.plan?.name) setPlanName(data.plan.name);
@@ -177,6 +188,7 @@ export default function SettingsPage() {
         bannerUrl: bannerUrl.trim() || undefined,
         theme,
         menuColorMode,
+        layout,
       };
 
       const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}`, {
@@ -439,6 +451,15 @@ export default function SettingsPage() {
           <p className="text-[11px] text-slate-500 mt-1.5">
             Así se ve la carta al abrirla. Cada cliente puede cambiarlo con el botón ☀️/🌙 y su elección se recuerda en su teléfono.
           </p>
+
+          <span className="mt-5 mb-2 block text-xs font-semibold text-slate-300">Estructura del Menú</span>
+          <MenuLayoutPicker
+            value={layout}
+            onChange={setLayout}
+            swatch={selectedTheme.swatches[menuColorMode]}
+            radius={selectedTheme.radius}
+            disabled={saving}
+          />
         </div>
       </div>
             </div>

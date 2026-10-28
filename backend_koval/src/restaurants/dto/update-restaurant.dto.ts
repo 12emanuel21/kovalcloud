@@ -1,7 +1,14 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRestaurantDto } from './create-restaurant.dto';
 import { IsIn, IsOptional, IsString } from 'class-validator';
-import { MENU_COLOR_MODES, MENU_THEMES, type MenuColorMode, type MenuTheme } from '../menu-themes';
+import {
+  MENU_COLOR_MODES,
+  MENU_LAYOUTS,
+  MENU_THEMES,
+  type MenuColorMode,
+  type MenuLayout,
+  type MenuTheme,
+} from '../menu-themes';
 
 export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsOptional()
@@ -59,4 +66,9 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsOptional()
   @IsIn(MENU_COLOR_MODES, { message: 'El modo de la carta debe ser light o dark' })
   menuColorMode?: MenuColorMode;
+
+  // Estructura del menú: cuadrícula visual o lista compacta estilo delivery
+  @IsOptional()
+  @IsIn(MENU_LAYOUTS, { message: `La estructura debe ser una de: ${MENU_LAYOUTS.join(', ')}` })
+  layout?: MenuLayout;
 }

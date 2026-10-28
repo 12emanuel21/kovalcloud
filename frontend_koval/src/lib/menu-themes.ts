@@ -94,3 +94,23 @@ export function resolveMenuColorMode(mode: unknown, theme: unknown): MenuColorMo
   if (mode === 'light' || mode === 'dark') return mode;
   return isLightMenuTheme(resolveMenuTheme(theme)) ? 'light' : 'dark';
 }
+
+/** Estructura de la carta (cómo se disponen los platos). Deben coincidir con el backend (menu-themes.ts) */
+export const MENU_LAYOUTS = [
+  {
+    value: 'visual-grid',
+    label: 'Cuadrícula Visual (Grid)',
+    description: 'Ideal para hamburguesas, pizzas y locales donde la foto grande es protagonista.',
+  },
+  {
+    value: 'compact-row',
+    label: 'Lista Compacta (Compact Row)',
+    description: 'Estilo delivery moderno / sushi. Ideal para cartas extensas con muchos platos.',
+  },
+] as const;
+
+export type MenuLayout = (typeof MENU_LAYOUTS)[number]['value'];
+export const DEFAULT_MENU_LAYOUT: MenuLayout = 'visual-grid';
+
+export const resolveMenuLayout = (value: unknown): MenuLayout =>
+  MENU_LAYOUTS.some((layout) => layout.value === value) ? (value as MenuLayout) : DEFAULT_MENU_LAYOUT;

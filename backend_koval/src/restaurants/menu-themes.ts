@@ -27,3 +27,15 @@ export function resolveMenuColorMode(mode: string | null | undefined, theme: str
   if (mode && (MENU_COLOR_MODES as readonly string[]).includes(mode)) return mode as MenuColorMode;
   return resolveMenuTheme(theme) === 'cafe-bakery' ? 'light' : 'dark';
 }
+
+/**
+ * Estructura de la carta pública (cómo se disponen los platos). Deben coincidir con
+ * frontend_koval/src/components/storefront/templates.
+ */
+export const MENU_LAYOUTS = ['visual-grid', 'compact-row'] as const;
+export type MenuLayout = (typeof MENU_LAYOUTS)[number];
+export const DEFAULT_MENU_LAYOUT: MenuLayout = 'visual-grid';
+
+export function resolveMenuLayout(layout: string | null | undefined): MenuLayout {
+  return layout && (MENU_LAYOUTS as readonly string[]).includes(layout) ? (layout as MenuLayout) : DEFAULT_MENU_LAYOUT;
+}
