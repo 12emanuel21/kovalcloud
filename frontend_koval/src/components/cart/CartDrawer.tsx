@@ -8,32 +8,17 @@ import { buildOrderWhatsAppMessage, shortOrderId, toWhatsAppNumber, whatsappLink
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
 /**
- * Acento del carrito según el tema de la carta: solo CTA y bordes activos.
- * El resto del drawer es neutro (casi negro) en todos los temas.
+ * Colores del carrito: leen el tema de la carta (variables --storefront-* de data-theme),
+ * así el drawer combina con la carta en los temas claros y oscuros.
  */
-const ACCENTS: Record<
-  MenuTheme,
-  { cta: string; ctaShadow: string; barBorder: string; badge: string; text: string; soft: string; focus: string }
-> = {
-  'dark-premium': {
-    cta: 'bg-red-600 hover:bg-red-700 text-white',
-    ctaShadow: 'shadow-red-950/50',
-    barBorder: 'border-red-600/40',
-    badge: 'bg-red-500 text-white',
-    text: 'text-red-400',
-    soft: 'bg-red-500/10 text-red-400 border-red-500/20',
-    focus: 'focus:border-red-500 focus:ring-red-500',
-  },
-  // Mismo acento rojo que el tema oscuro (diseño de referencia en claro y oscuro)
-  'clean-light': {
-    cta: 'bg-red-600 hover:bg-red-700 text-white',
-    ctaShadow: 'shadow-red-900/30',
-    barBorder: 'border-red-600/40',
-    badge: 'bg-red-500 text-white',
-    text: 'text-red-400',
-    soft: 'bg-red-500/10 text-red-400 border-red-500/20',
-    focus: 'focus:border-red-500 focus:ring-red-500',
-  },
+const ACCENT = {
+  cta: 'bg-sf-primary hover:bg-sf-primary-hover text-sf-on-primary',
+  ctaShadow: 'shadow-sf-primary/25',
+  barBorder: 'border-sf-primary/40',
+  badge: 'bg-sf-primary text-sf-on-primary',
+  text: 'text-sf-primary',
+  soft: 'bg-sf-primary/10 text-sf-primary border-sf-primary/20',
+  focus: 'focus:border-sf-primary focus:ring-sf-primary',
 };
 
 type PaymentMethod = 'WOMPI' | 'CASH';
@@ -105,7 +90,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 }) => {
   // "Pagar en línea" solo con el interruptor del dueño encendido Y las llaves completas
   const canPayOnline = isWompiEnabled && onlinePaymentsEnabled;
-  const accent = ACCENTS[theme] ?? ACCENTS[DEFAULT_MENU_THEME];
+  const accent = ACCENT;
   const { items, totalCount, totalAmount, updateQuantity, removeItem, clearCart } = useCart();
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
@@ -266,14 +251,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   };
 
   return (
-    <>
+    <div data-theme={theme} className="contents">
       {/* Botón Flotante Inferior (Sticky Bottom Bar) */}
       {totalCount > 0 && !isOpen && (
         <div className="fixed bottom-4 left-4 right-4 z-40 max-w-md mx-auto animate-in fade-in slide-in-from-bottom-5 duration-300">
-          <div className={`bg-slate-900/95 border ${accent.barBorder} backdrop-blur-xl rounded-2xl p-3.5 shadow-2xl shadow-black/60 flex items-center justify-between gap-4`}>
+          <div className={`bg-sf-card/95 border ${accent.barBorder} backdrop-blur-xl rounded-sf-lg p-3.5 shadow-2xl shadow-black/60 flex items-center justify-between gap-4`}>
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className={`h-11 w-11 rounded-xl ${accent.cta} flex items-center justify-center font-black shadow-lg ${accent.ctaShadow}`}>
+                <div className={`h-11 w-11 rounded-sf ${accent.cta} flex items-center justify-center font-black shadow-lg ${accent.ctaShadow}`}>
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     className="h-6 w-6"
@@ -289,15 +274,15 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
                   </svg>
                 </div>
-                <span className={`absolute -top-1.5 -right-1.5 ${accent.badge} text-[11px] font-black h-5 min-w-5 px-1 rounded-full flex items-center justify-center border-2 border-slate-900 shadow`}>
+                <span className={`absolute -top-1.5 -right-1.5 ${accent.badge} text-[11px] font-black h-5 min-w-5 px-1 rounded-full flex items-center justify-center border-2 border-sf-card shadow`}>
                   {totalCount}
                 </span>
               </div>
               <div>
-                <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+                <p className="text-[11px] font-medium text-sf-muted uppercase tracking-wider">
                   Total Carrito
                 </p>
-                <p className="text-base font-extrabold text-white tracking-tight">
+                <p className="text-base font-extrabold text-sf-text tracking-tight">
                   {formatCOP(totalAmount)}
                 </p>
               </div>
@@ -305,7 +290,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
             <button
               onClick={() => setIsOpen(true)}
-              className={`${accent.cta} font-bold text-sm px-5 py-2.5 rounded-xl transition shadow-lg ${accent.ctaShadow} active:scale-95 flex items-center gap-2`}
+              className={`${accent.cta} font-bold text-sm px-5 py-2.5 rounded-sf transition shadow-lg ${accent.ctaShadow} active:scale-95 flex items-center gap-2`}
             >
               <span>Ver Pedido</span>
               <svg
@@ -330,17 +315,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title">
           {/* Backdrop */}
           <div
-            className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm animate-cart-backdrop-in motion-reduce:animate-none"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-cart-backdrop-in motion-reduce:animate-none"
             onClick={closeDrawer}
             aria-hidden
           />
 
           {/* Panel: cabecera fija, cuerpo con scroll y pie fijo */}
-          <aside className="fixed inset-y-0 right-0 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/60 animate-cart-drawer-in motion-reduce:animate-none">
+          <aside className="fixed inset-y-0 right-0 flex h-full w-full max-w-md flex-col border-l border-sf-border bg-sf-card shadow-2xl shadow-black/60 animate-cart-drawer-in motion-reduce:animate-none">
             {/* Header */}
-            <div className="shrink-0 p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900">
+            <div className="shrink-0 p-5 border-b border-sf-border flex items-center justify-between bg-sf-card">
               <div className="flex items-center gap-2.5">
-                <div className={`h-8 w-8 rounded-lg ${accent.soft} flex items-center justify-center font-bold text-xs border`}>
+                <div className={`h-8 w-8 rounded-sf ${accent.soft} flex items-center justify-center font-bold text-xs border`}>
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     className="h-4 w-4"
@@ -357,8 +342,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </svg>
                 </div>
                 <div>
-                  <h2 id="cart-drawer-title" className="text-base font-bold text-white leading-tight">Tu Pedido</h2>
-                  <p className="text-xs text-slate-400">
+                  <h2 id="cart-drawer-title" className="text-base font-bold text-sf-text leading-tight">Tu Pedido</h2>
+                  <p className="text-xs text-sf-muted">
                     {totalCount} {totalCount === 1 ? 'producto' : 'productos'} añadidos
                   </p>
                 </div>
@@ -368,7 +353,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 type="button"
                 onClick={closeDrawer}
                 aria-label="Cerrar carrito"
-                className="h-8 w-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-sm transition"
+                className="h-8 w-8 rounded-full bg-sf-border hover:bg-sf-border text-sf-body flex items-center justify-center text-sm transition"
               >
                 ✕
               </button>
@@ -378,12 +363,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-6">
               {shownConfirmation && (
                 <div className="space-y-4 py-6 text-center" role="status">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-2xl">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-sf-lg border border-emerald-500/30 bg-emerald-500/10 text-2xl">
                     ✅
                   </div>
                   <div className="space-y-1">
-                    <h3 className="text-lg font-bold text-white">¡Pedido #{shortOrderId(shownConfirmation.orderId)} recibido!</h3>
-                    <p className="text-sm text-slate-400">
+                    <h3 className="text-lg font-bold text-sf-text">¡Pedido #{shortOrderId(shownConfirmation.orderId)} recibido!</h3>
+                    <p className="text-sm text-sf-muted">
                       {shownConfirmation.whatsappUrl
                         ? 'Envía el mensaje que abrimos en WhatsApp para confirmarlo con el local.'
                         : 'El local ya lo tiene en su sistema y te contactará al número que dejaste.'}
@@ -394,7 +379,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       href={shownConfirmation.whatsappUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-95"
+                      className="inline-flex items-center gap-2 rounded-sf bg-[#25D366] px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-95"
                     >
                       <WhatsAppIcon />
                       Abrir WhatsApp de nuevo
@@ -406,12 +391,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               {/* Lista de Platos en el Carrito */}
               {!shownConfirmation && (
               <div className="space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-sf-muted">
                   Resumen de Productos
                 </h3>
 
                 {items.length === 0 ? (
-                  <div className="text-center py-8 text-slate-500 space-y-2">
+                  <div className="text-center py-8 text-sf-muted space-y-2">
                     <p className="text-sm">No hay productos en el carrito.</p>
                   </div>
                 ) : (
@@ -419,10 +404,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     {items.map((item) => (
                       <div
                         key={item.id}
-                        className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3"
+                        className="bg-sf-bg/70 border border-sf-border rounded-sf p-3 flex items-center justify-between gap-3"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-white truncate">{item.name}</p>
+                          <p className="text-sm font-semibold text-sf-text truncate">{item.name}</p>
                           <p className={`text-xs ${accent.text} font-medium`}>
                             {formatCOP(item.price * item.quantity)}
                           </p>
@@ -430,21 +415,21 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
                         {/* Controles de Cantidad */}
                         <div className="flex items-center gap-2">
-                          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+                          <div className="flex items-center bg-sf-card border border-sf-border rounded-sf p-0.5">
                             <button
                               type="button"
                               onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                              className="h-6 w-6 rounded flex items-center justify-center text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                              className="h-6 w-6 rounded flex items-center justify-center text-xs font-bold text-sf-muted hover:text-sf-text hover:bg-sf-border/60 transition"
                             >
                               -
                             </button>
-                            <span className="w-6 text-center text-xs font-bold text-white">
+                            <span className="w-6 text-center text-xs font-bold text-sf-text">
                               {item.quantity}
                             </span>
                             <button
                               type="button"
                               onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                              className="h-6 w-6 rounded flex items-center justify-center text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                              className="h-6 w-6 rounded flex items-center justify-center text-xs font-bold text-sf-muted hover:text-sf-text hover:bg-sf-border/60 transition"
                             >
                               +
                             </button>
@@ -453,7 +438,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           <button
                             type="button"
                             onClick={() => removeItem(item.id)}
-                            className="h-7 w-7 rounded-lg text-red-400/80 hover:text-red-400 hover:bg-red-500/10 flex items-center justify-center transition"
+                            className="h-7 w-7 rounded-sf text-red-500/80 hover:text-red-500 hover:bg-red-500/10 flex items-center justify-center transition"
                             title="Eliminar plato"
                           >
                             <svg
@@ -481,13 +466,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
               {/* Formulario de Datos de Entrega */}
               {items.length > 0 && (
-                <form id="checkout-form" onSubmit={handleCheckout} className="space-y-4 pt-2 border-t border-slate-800">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <form id="checkout-form" onSubmit={handleCheckout} className="space-y-4 pt-2 border-t border-sf-border">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-sf-muted">
                     Datos de Entrega
                   </h3>
 
                   {errorMsg && (
-                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium flex items-center gap-2">
+                    <div className="p-3 rounded-sf bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-medium flex items-center gap-2">
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
                         className="h-4 w-4 shrink-0"
@@ -507,7 +492,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   )}
 
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                    <label className="block text-xs font-medium text-sf-body mb-1">
                       Nombre Completo <span className={accent.text}>*</span>
                     </label>
                     <input
@@ -516,12 +501,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       onChange={(e) => setCustomerName(e.target.value)}
                       placeholder="Ej. Carlos Gómez"
                       required
-                      className={`w-full bg-slate-950 border border-slate-800 ${accent.focus} focus:ring-1 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition`}
+                      className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                    <label className="block text-xs font-medium text-sf-body mb-1">
                       Teléfono / WhatsApp <span className={accent.text}>*</span>
                     </label>
                     <input
@@ -530,13 +515,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       onChange={(e) => setCustomerPhone(e.target.value)}
                       placeholder="Ej. 300 123 4567"
                       required
-                      className={`w-full bg-slate-950 border border-slate-800 ${accent.focus} focus:ring-1 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition`}
+                      className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                     />
                   </div>
 
                   {!tableNumber && (
                     <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">
+                      <label className="block text-xs font-medium text-sf-body mb-1">
                         Dirección de Entrega (Opcional)
                       </label>
                       <input
@@ -544,13 +529,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         value={deliveryAddress}
                         onChange={(e) => setDeliveryAddress(e.target.value)}
                         placeholder="Ej. Cra 45 # 26-85 Apto 401"
-                        className={`w-full bg-slate-950 border border-slate-800 ${accent.focus} focus:ring-1 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition`}
+                        className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                       />
                     </div>
                   )}
 
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                    <label className="block text-xs font-medium text-sf-body mb-1">
                       Notas del Pedido (Opcional)
                     </label>
                     <textarea
@@ -558,7 +543,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder="Ej. Sin cebolla en la pizza, llevar cambio de 50mil..."
                       rows={2}
-                      className={`w-full bg-slate-950 border border-slate-800 ${accent.focus} focus:ring-1 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition resize-none`}
+                      className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2 text-sm text-sf-text placeholder-sf-muted outline-none transition resize-none`}
                     />
                   </div>
                 </form>
@@ -567,20 +552,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
             {/* Footer fijo con Resumen y Botones de Pago */}
             {shownConfirmation && (
-              <div className="shrink-0 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-slate-800 bg-slate-900">
+              <div className="shrink-0 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-sf-border bg-sf-card">
                 <button
                   type="button"
                   onClick={closeDrawer}
-                  className="w-full rounded-xl border border-slate-600 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-800/60"
+                  className="w-full rounded-sf border border-sf-border py-3 text-sm font-semibold text-sf-body transition hover:bg-sf-border/50"
                 >
                   Seguir viendo la carta
                 </button>
               </div>
             )}
             {items.length > 0 && (
-              <div className="shrink-0 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-slate-800 bg-slate-900 space-y-3">
+              <div className="shrink-0 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-sf-border bg-sf-card space-y-3">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-400 font-medium">Total a Pagar:</span>
+                  <span className="text-sf-muted font-medium">Total a Pagar:</span>
                   <span className={`text-xl font-extrabold ${accent.text} font-mono`}>
                     {formatCOP(totalAmount)}
                   </span>
@@ -590,7 +575,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   <button
                     type="button"
                     disabled
-                    className="w-full bg-slate-800 text-slate-400 font-bold py-3.5 px-4 rounded-xl opacity-70"
+                    className="w-full bg-sf-border text-sf-muted font-bold py-3.5 px-4 rounded-sf opacity-70"
                   >
                     🔒 Local cerrado: no estamos recibiendo pedidos
                   </button>
@@ -601,7 +586,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       form="checkout-form"
                       value="WOMPI"
                       disabled={isSubmitting}
-                      className={`w-full ${accent.cta} disabled:opacity-50 font-bold py-3.5 px-4 rounded-xl transition shadow-lg ${accent.ctaShadow} active:scale-[0.98] flex items-center justify-center gap-2.5`}
+                      className={`w-full ${accent.cta} disabled:opacity-50 font-bold py-3.5 px-4 rounded-sf transition shadow-lg ${accent.ctaShadow} active:scale-[0.98] flex items-center justify-center gap-2.5`}
                     >
                       {submittingMethod === 'WOMPI' ? (
                         <>
@@ -620,7 +605,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       form="checkout-form"
                       value="CASH"
                       disabled={isSubmitting}
-                      className="w-full border border-slate-600 hover:border-slate-400 hover:bg-slate-800/60 disabled:opacity-50 text-slate-200 font-semibold py-3 px-4 rounded-xl transition active:scale-[0.98] flex items-center justify-center gap-2.5"
+                      className="w-full border border-sf-border hover:border-sf-muted hover:bg-sf-border/50 disabled:opacity-50 text-sf-body font-semibold py-3 px-4 rounded-sf transition active:scale-[0.98] flex items-center justify-center gap-2.5"
                     >
                       {submittingMethod === 'CASH' ? (
                         <>
@@ -631,7 +616,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         <span>Pago en Efectivo / Contra Entrega</span>
                       )}
                     </button>
-                    <p className="text-center text-[11px] text-slate-500">
+                    <p className="text-center text-[11px] text-sf-muted">
                       Pago seguro con Wompi (Bancolombia). Te enviaremos el link también por WhatsApp.
                     </p>
                   </>
@@ -641,7 +626,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     form="checkout-form"
                     value="CASH"
                     disabled={isSubmitting}
-                    className={`w-full ${accent.cta} disabled:opacity-50 font-bold py-3.5 px-4 rounded-xl transition shadow-lg ${accent.ctaShadow} active:scale-[0.98] flex items-center justify-center gap-2.5`}
+                    className={`w-full ${accent.cta} disabled:opacity-50 font-bold py-3.5 px-4 rounded-sf transition shadow-lg ${accent.ctaShadow} active:scale-[0.98] flex items-center justify-center gap-2.5`}
                   >
                     {isSubmitting ? (
                       <>
@@ -661,6 +646,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           </aside>
         </div>
       )}
-    </>
+    </div>
   );
 };

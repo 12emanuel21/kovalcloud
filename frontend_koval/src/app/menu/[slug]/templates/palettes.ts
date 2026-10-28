@@ -1,6 +1,6 @@
 /**
- * Paletas del layout premium. Las clases van completas (no interpoladas)
- * para que Tailwind las detecte al compilar.
+ * Paleta del layout premium. Las clases van completas (no interpoladas) para que Tailwind
+ * las detecte al compilar, y leen el tema activo (variables --storefront-* de [data-theme]).
  */
 export interface MenuPalette {
   page: string;
@@ -24,60 +24,38 @@ export interface MenuPalette {
   closedText: string;
   closedDivider: string;
   todayRow: string;
-  /** Borde rasgado rojo del hero (tema claro) o fundido con el fondo (tema oscuro) */
+  /** Borde rasgado del color de acento (tema claro) o fundido con el fondo (temas oscuros) */
   heroStyle: 'torn' | 'fade';
   heroFade: string;
   heroPlaceholder: string;
 }
 
-export const DARK_PALETTE: MenuPalette = {
-  page: 'bg-[#0a0a0b] text-zinc-300',
-  nav: 'bg-[#0a0a0b]/85 border-zinc-800/80',
-  heading: 'text-white',
-  body: 'text-zinc-300',
-  muted: 'text-zinc-400',
-  surface: 'bg-zinc-900/80 border-zinc-800',
-  surfaceHover: 'hover:border-zinc-700 hover:bg-zinc-900',
-  softSurface: 'bg-zinc-900/60 border-zinc-800',
-  border: 'border-zinc-800',
-  input: 'bg-zinc-900 border-zinc-800 text-white placeholder-zinc-500 focus:border-red-500',
-  imageBg: 'bg-gradient-to-br from-zinc-800/80 to-zinc-900',
-  placeholderIcon: 'text-zinc-700',
-  iconCircle: 'border-zinc-700 text-zinc-300 group-hover:border-zinc-500 group-hover:text-white',
-  secondaryButton: 'border-zinc-700 text-white hover:bg-zinc-800/80',
-  chip: 'bg-zinc-800/80 text-zinc-200 border-zinc-700',
-  closedBanner: 'bg-red-950/40 border-red-900/60',
-  closedTitle: 'text-white',
-  closedText: 'text-zinc-200',
-  closedDivider: 'border-red-900/50',
-  todayRow: 'bg-red-600/10 text-white',
-  heroStyle: 'fade',
-  heroFade: 'bg-gradient-to-r from-[#0a0a0b] via-[#0a0a0b]/40 to-transparent',
-  heroPlaceholder: 'bg-[radial-gradient(circle_at_60%_45%,rgba(220,38,38,0.35),transparent_55%),linear-gradient(135deg,#18181b,#09090b)]',
+const STOREFRONT_CLASSES: Omit<MenuPalette, 'heroStyle'> = {
+  page: 'bg-sf-bg text-sf-body',
+  nav: 'bg-sf-bg/85 border-sf-border',
+  heading: 'text-sf-text',
+  body: 'text-sf-body',
+  muted: 'text-sf-muted',
+  surface: 'bg-sf-card border-sf-border shadow-sm',
+  surfaceHover: 'hover:shadow-md hover:border-sf-muted/50',
+  softSurface: 'bg-sf-card/70 border-sf-border',
+  border: 'border-sf-border',
+  input: 'bg-sf-card border-sf-border text-sf-text placeholder-sf-muted focus:border-sf-primary',
+  imageBg: 'bg-gradient-to-br from-sf-border/70 to-sf-card',
+  placeholderIcon: 'text-sf-muted/40',
+  iconCircle: 'border-sf-border text-sf-body group-hover:border-sf-muted group-hover:text-sf-text',
+  secondaryButton: 'border-sf-border bg-sf-card/40 text-sf-text hover:bg-sf-card',
+  chip: 'bg-sf-card text-sf-body border-sf-border',
+  closedBanner: 'bg-sf-primary/10 border-sf-primary/40',
+  closedTitle: 'text-sf-text',
+  closedText: 'text-sf-body',
+  closedDivider: 'border-sf-primary/30',
+  todayRow: 'bg-sf-primary/10 text-sf-text',
+  heroFade: 'bg-gradient-to-r from-sf-bg via-sf-bg/40 to-transparent',
+  // Siempre oscuro (contraste del logo y las etiquetas blancas), con el brillo del color de acento
+  heroPlaceholder:
+    'bg-[radial-gradient(circle_at_60%_45%,color-mix(in_srgb,var(--storefront-primary)_40%,transparent),transparent_55%),linear-gradient(135deg,#1c1917,#09090b)]',
 };
 
-export const LIGHT_PALETTE: MenuPalette = {
-  page: 'bg-[#faf8f5] text-slate-600',
-  nav: 'bg-white/90 border-slate-200',
-  heading: 'text-zinc-950',
-  body: 'text-slate-600',
-  muted: 'text-slate-500',
-  surface: 'bg-white border-slate-200/80 shadow-sm',
-  surfaceHover: 'hover:shadow-md hover:border-slate-300/80',
-  softSurface: 'bg-white border-slate-200/80',
-  border: 'border-slate-200',
-  input: 'bg-white border-slate-200 text-slate-900 placeholder-slate-400 focus:border-red-500',
-  imageBg: 'bg-gradient-to-br from-slate-100 to-stone-100',
-  placeholderIcon: 'text-slate-300',
-  iconCircle: 'border-slate-300 text-slate-700 group-hover:border-slate-400 group-hover:text-zinc-950',
-  secondaryButton: 'border-slate-300 bg-white text-zinc-950 hover:bg-slate-50',
-  chip: 'bg-white text-slate-700 border-slate-200',
-  closedBanner: 'bg-red-50 border-red-200',
-  closedTitle: 'text-red-700',
-  closedText: 'text-red-950',
-  closedDivider: 'border-red-200',
-  todayRow: 'bg-red-50 text-zinc-950',
-  heroStyle: 'torn',
-  heroFade: '',
-  heroPlaceholder: 'bg-[radial-gradient(circle_at_60%_45%,rgba(220,38,38,0.45),transparent_55%),linear-gradient(135deg,#1c1917,#0c0a09)]',
-};
+export const STOREFRONT_PALETTE: MenuPalette = { ...STOREFRONT_CLASSES, heroStyle: 'fade' };
+export const STOREFRONT_LIGHT_PALETTE: MenuPalette = { ...STOREFRONT_CLASSES, heroStyle: 'torn' };

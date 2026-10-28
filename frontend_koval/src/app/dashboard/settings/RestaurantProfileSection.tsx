@@ -13,7 +13,6 @@ import {
   type SettingsTab,
 } from './settings-ui';
 import { WEEK_DAYS, type BusinessHours, type WeekDay } from '@/lib/business-hours';
-import { DEFAULT_MENU_THEME, MENU_THEMES, isMenuTheme, type MenuTheme } from '@/lib/menu-themes';
 import {
   DAY_PILLS,
   blocksToHours,
@@ -129,7 +128,6 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
   const [isTemporarilyClosed, setIsTemporarilyClosed] = useState(false);
   const [closedMessage, setClosedMessage] = useState('');
   const [blocks, setBlocks] = useState<ScheduleBlock[]>([]);
-  const [theme, setTheme] = useState<MenuTheme>(DEFAULT_MENU_THEME);
 
   // Wompi: la llave pública se edita tal cual; los secretos vacíos = conservar el guardado
   const [payments, setPayments] = useState<PaymentsConfig | null>(null);
@@ -157,7 +155,6 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
         setIsTemporarilyClosed(Boolean(data.isTemporarilyClosed));
         setClosedMessage(data.closedMessage ?? '');
         setBlocks(hoursToBlocks(data.businessHours));
-        setTheme(isMenuTheme(data.theme) ? data.theme : DEFAULT_MENU_THEME);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -304,7 +301,6 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
         businessHours: blocksToHours(blocks),
         isTemporarilyClosed,
         closedMessage: closedMessage.trim(),
-        theme,
         // Solo si ya se cargó la configuración de Wompi: si no, se borraría la llave guardada
         ...(payments ? { wompiPublicKey: wompiPublicKey.trim() } : {}),
         ...secrets,
@@ -366,25 +362,6 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
                   className={inputClass}
                 />
               </div>
-            </div>
-            {/* Tema de la carta pública */}
-            <div className="max-w-sm">
-              <label htmlFor="menu-theme" className="block text-[11px] font-semibold text-slate-400 mb-1">
-                Tema del Menú Web
-              </label>
-              <select
-                id="menu-theme"
-                value={theme}
-                onChange={(e) => setTheme(e.target.value as MenuTheme)}
-                className={`${inputClass} [color-scheme:dark]`}
-              >
-                {MENU_THEMES.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-slate-500 mt-1">Diseño que ven tus clientes al abrir la carta o escanear el QR.</p>
             </div>
           </>
         )}

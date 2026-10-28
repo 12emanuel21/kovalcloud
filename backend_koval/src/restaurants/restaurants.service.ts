@@ -13,6 +13,7 @@ import { parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 import { isOnlinePaymentEnabled, isWompiReady } from '../payments/wompi-checkout.service';
 import { publicWhatsAppNumber } from './whatsapp-bot-number';
+import { resolveMenuTheme } from './menu-themes';
 import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
@@ -123,6 +124,8 @@ export class RestaurantsService {
       // Número para wa.me (solo dígitos, con indicativo): la SIM/línea conectada al bot y, si no hay
       // sesión vinculada, el teléfono del local. null oculta el botón de WhatsApp de la carta.
       whatsappNumber: publicWhatsAppNumber(restaurant),
+      // Tema visual de la carta (data-theme): siempre uno válido, street-burger si falta
+      theme: resolveMenuTheme(restaurant.theme),
     };
   }
 
@@ -239,6 +242,7 @@ export class RestaurantsService {
         bannerUrl: updateRestaurantDto.bannerUrl,
         currency: updateRestaurantDto.currency,
         botpressBotId: updateRestaurantDto.botpressBotId,
+        theme: updateRestaurantDto.theme,
         ...meta,
       },
       include: {

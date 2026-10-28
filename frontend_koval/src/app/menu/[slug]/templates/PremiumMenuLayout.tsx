@@ -114,7 +114,7 @@ export function PremiumMenuLayout({
               // eslint-disable-next-line @next/next/no-img-element -- logo en dominio arbitrario del restaurante
               <img src={restaurant.logoUrl} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
             ) : (
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-600 font-display text-base font-black text-white shadow-lg shadow-red-600/30">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sf-primary font-display text-base font-black text-sf-on-primary shadow-lg shadow-sf-primary/30">
                 {initial}
               </span>
             )}
@@ -124,13 +124,13 @@ export function PremiumMenuLayout({
           </a>
 
           <nav className={`hidden items-center gap-6 text-sm font-semibold lg:flex ${palette.heading}`}>
-            <a href={`#${MENU_ANCHOR}`} className="transition hover:text-red-500">
+            <a href={`#${MENU_ANCHOR}`} className="transition hover:text-sf-primary">
               Menú
             </a>
-            <a href="#como-pedir" className="transition hover:text-red-500">
+            <a href="#como-pedir" className="transition hover:text-sf-primary">
               Cómo pedir
             </a>
-            <a href="#horarios" className="transition hover:text-red-500">
+            <a href="#horarios" className="transition hover:text-sf-primary">
               Horarios
             </a>
           </nav>
@@ -144,12 +144,12 @@ export function PremiumMenuLayout({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Buscar platos..."
                 aria-label="Buscar platos"
-                className={`h-10 w-56 rounded-xl border pl-9 pr-3 text-sm outline-none transition lg:w-72 ${palette.input}`}
+                className={`h-10 w-56 rounded-sf border pl-9 pr-3 text-sm outline-none transition lg:w-72 ${palette.input}`}
               />
             </label>
 
             {tableNumber && (
-              <span className={`hidden rounded-lg border px-2.5 py-1.5 text-xs font-bold sm:inline-block ${palette.chip}`}>
+              <span className={`hidden rounded-sf border px-2.5 py-1.5 text-xs font-bold sm:inline-block ${palette.chip}`}>
                 Mesa {tableNumber}
               </span>
             )}
@@ -158,10 +158,10 @@ export function PremiumMenuLayout({
               type="button"
               onClick={() => setCartOpen(true)}
               aria-label={`Ver pedido (${totalCount} productos)`}
-              className={`relative flex h-10 w-10 items-center justify-center rounded-xl border transition ${palette.secondaryButton}`}
+              className={`relative flex h-10 w-10 items-center justify-center rounded-sf border transition ${palette.secondaryButton}`}
             >
               <ShoppingCart className="h-5 w-5" />
-              <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-black text-white">
+              <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-sf-primary px-1 text-[11px] font-black text-sf-on-primary">
                 {totalCount}
               </span>
             </button>
@@ -170,7 +170,7 @@ export function PremiumMenuLayout({
               type="button"
               onClick={scrollToMenu}
               disabled={isClosed}
-              className="hidden h-10 items-center rounded-xl bg-red-600 px-4 text-sm font-bold text-white shadow-lg shadow-red-600/25 transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex"
+              className="hidden h-10 items-center rounded-sf bg-sf-primary px-4 text-sm font-bold text-sf-on-primary shadow-lg shadow-sf-primary/25 transition hover:bg-sf-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:flex"
             >
               {isClosed ? 'Cerrado' : 'Pedir ahora'}
             </button>
@@ -182,7 +182,7 @@ export function PremiumMenuLayout({
         {/* Regreso desde el checkout de Wompi: la confirmación real llega por webhook + WhatsApp */}
         {showPaymentReturn && returnedOrderId && (
           <div className="mx-auto max-w-7xl px-4 pt-4 md:px-6">
-            <div role="status" className="flex items-start gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
+            <div role="status" className="flex items-start gap-3 rounded-sf-lg border border-emerald-500/40 bg-emerald-500/10 p-4">
               <span className="text-xl" aria-hidden>
                 💳
               </span>
@@ -199,7 +199,7 @@ export function PremiumMenuLayout({
                 type="button"
                 onClick={() => setShowPaymentReturn(false)}
                 aria-label="Cerrar aviso"
-                className={`shrink-0 rounded-lg px-2 text-lg leading-none ${palette.muted} hover:opacity-80`}
+                className={`shrink-0 rounded-sf px-2 text-lg leading-none ${palette.muted} hover:opacity-80`}
               >
                 ×
               </button>
@@ -219,7 +219,7 @@ export function PremiumMenuLayout({
 
             <h1 className="font-display text-5xl font-black uppercase leading-[0.92] tracking-tight sm:text-6xl xl:text-7xl">
               <span className={`block break-words ${palette.heading}`}>{restaurant.name}.</span>
-              <span className="block text-red-600">Pide en línea.</span>
+              <span className="block text-sf-primary">Pide en línea.</span>
             </h1>
 
             <p className={`max-w-lg text-lg leading-relaxed ${palette.body}`}>
@@ -231,14 +231,14 @@ export function PremiumMenuLayout({
               <button
                 type="button"
                 onClick={scrollToMenu}
-                className="inline-flex h-12 items-center gap-2 rounded-xl bg-red-600 px-7 text-base font-bold text-white shadow-xl shadow-red-600/25 transition hover:bg-red-700 active:scale-[0.98]"
+                className="inline-flex h-12 items-center gap-2 rounded-sf bg-sf-primary px-7 text-base font-bold text-sf-on-primary shadow-xl shadow-sf-primary/25 transition hover:bg-sf-primary-hover active:scale-[0.98]"
               >
                 {isClosed ? 'Ver el menú' : 'Ordenar ahora'}
                 <ArrowRight className="h-4 w-4" />
               </button>
               <a
                 href="#horarios"
-                className={`inline-flex h-12 items-center rounded-xl border px-7 text-base font-bold transition ${palette.secondaryButton}`}
+                className={`inline-flex h-12 items-center rounded-sf border px-7 text-base font-bold transition ${palette.secondaryButton}`}
               >
                 Horarios y ubicación
               </a>
@@ -247,7 +247,7 @@ export function PremiumMenuLayout({
                   href={whatsappLink(whatsappNumber, `¡Hola ${restaurant.name}! Tengo una consulta.`)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex h-12 items-center gap-2 rounded-xl bg-[#25D366] px-6 text-base font-bold text-white shadow-lg shadow-[#25D366]/25 transition hover:brightness-95 active:scale-[0.98]"
+                  className="inline-flex h-12 items-center gap-2 rounded-sf bg-[#25D366] px-6 text-base font-bold text-white shadow-lg shadow-[#25D366]/25 transition hover:brightness-95 active:scale-[0.98]"
                 >
                   <WhatsAppGlyph />
                   Chatear por WhatsApp
@@ -272,7 +272,7 @@ export function PremiumMenuLayout({
 
         {isClosed && (
           <div className="mx-auto max-w-7xl px-4 md:px-6">
-            <div role="status" className={`flex items-start gap-3 rounded-2xl border p-4 ${palette.closedBanner}`}>
+            <div role="status" className={`flex items-start gap-3 rounded-sf-lg border p-4 ${palette.closedBanner}`}>
               <span className="text-xl" aria-hidden>
                 🔒
               </span>
@@ -306,14 +306,14 @@ export function PremiumMenuLayout({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Buscar platos..."
                 aria-label="Buscar platos"
-                className={`h-11 w-full rounded-xl border pl-9 pr-3 text-sm outline-none transition ${palette.input}`}
+                className={`h-11 w-full rounded-sf border pl-9 pr-3 text-sm outline-none transition ${palette.input}`}
               />
             </label>
 
             {categories.length > 0 && (
               <nav
                 aria-label="Categorías"
-                className={`flex gap-1 overflow-x-auto rounded-2xl border p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${palette.softSurface}`}
+                className={`flex gap-1 overflow-x-auto rounded-sf-lg border p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${palette.softSurface}`}
               >
                 <CategoryTab
                   label="Todo"
@@ -344,7 +344,7 @@ export function PremiumMenuLayout({
                 palette={palette}
                 title={`No encontramos platos para "${query.trim()}"`}
                 action={
-                  <button type="button" onClick={() => setQuery('')} className="text-sm font-bold text-red-600 hover:underline">
+                  <button type="button" onClick={() => setQuery('')} className="text-sm font-bold text-sf-primary hover:underline">
                     Limpiar búsqueda
                   </button>
                 }
@@ -370,7 +370,7 @@ export function PremiumMenuLayout({
         {/* ───────── Cómo pedir ───────── */}
         <section id="como-pedir" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-14 md:px-6">
           <h2 className={`font-display text-3xl font-black uppercase tracking-tight md:text-4xl ${palette.heading}`}>
-            Pedir es <span className="text-red-600">así de fácil.</span>
+            Pedir es <span className="text-sf-primary">así de fácil.</span>
           </h2>
           <p className={`mt-1 ${palette.muted}`}>Sin registros ni aplicaciones. Solo tu WhatsApp.</p>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -384,9 +384,9 @@ export function PremiumMenuLayout({
                 text: 'Te avisamos por WhatsApp cuando esté en preparación y en camino.',
               },
             ].map(({ n, icon: Icon, title, text }) => (
-              <div key={n} className={`rounded-2xl border p-6 ${palette.surface}`}>
+              <div key={n} className={`rounded-sf-lg border p-6 ${palette.surface}`}>
                 <div className="flex items-center gap-4">
-                  <span className="font-display text-4xl font-black text-red-600">{n}</span>
+                  <span className="font-display text-4xl font-black text-sf-primary">{n}</span>
                   <Icon className={`h-8 w-8 ${palette.heading}`} strokeWidth={1.5} />
                 </div>
                 <h3 className={`mt-8 text-lg font-bold ${palette.heading}`}>{title}</h3>
@@ -399,9 +399,9 @@ export function PremiumMenuLayout({
         {/* ───────── Horarios y contacto ───────── */}
         <section id="horarios" className="mx-auto max-w-7xl scroll-mt-20 px-4 pb-16 md:px-6">
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className={`rounded-3xl border p-6 md:p-8 ${palette.surface}`}>
+            <div className={`rounded-sf-lg border p-6 md:p-8 ${palette.surface}`}>
               <h2 className={`font-display text-3xl font-black uppercase tracking-tight ${palette.heading}`}>
-                Visítanos <span className="text-red-600">o escríbenos.</span>
+                Visítanos <span className="text-sf-primary">o escríbenos.</span>
               </h2>
               <ul className="mt-6 space-y-5">
                 {restaurant.address && (
@@ -411,7 +411,7 @@ export function PremiumMenuLayout({
                       href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${restaurant.address} ${restaurant.name}`)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-1 inline-flex items-center gap-1 text-sm font-bold text-red-600 hover:underline"
+                      className="mt-1 inline-flex items-center gap-1 text-sm font-bold text-sf-primary hover:underline"
                     >
                       Cómo llegar <ArrowRight className="h-3.5 w-3.5" />
                     </a>
@@ -435,7 +435,7 @@ export function PremiumMenuLayout({
               </ul>
             </div>
 
-            <div className={`rounded-3xl border p-6 md:p-8 ${palette.surface}`}>
+            <div className={`rounded-sf-lg border p-6 md:p-8 ${palette.surface}`}>
               <h3 className={`text-sm font-bold uppercase tracking-widest ${palette.muted}`}>Horario de atención</h3>
               {restaurant.businessHours ? (
                 <ul className="mt-4 space-y-1">
@@ -445,14 +445,14 @@ export function PremiumMenuLayout({
                     return (
                       <li
                         key={day}
-                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm ${
+                        className={`flex items-center justify-between rounded-sf px-3 py-2.5 text-sm ${
                           isToday ? `font-bold ${palette.todayRow}` : palette.body
                         }`}
                       >
                         <span className="flex items-center gap-2">
                           {DAY_NAMES[day]}
                           {isToday && (
-                            <span className="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-black uppercase text-white">
+                            <span className="rounded-full bg-sf-primary px-2 py-0.5 text-[10px] font-black uppercase text-sf-on-primary">
                               Hoy
                             </span>
                           )}
@@ -533,7 +533,7 @@ function HeroFeature({
 }) {
   return (
     <li className="flex items-start gap-3">
-      <Icon className="mt-0.5 h-6 w-6 shrink-0 text-red-600" strokeWidth={1.75} />
+      <Icon className="mt-0.5 h-6 w-6 shrink-0 text-sf-primary" strokeWidth={1.75} />
       <div>
         <p className={`text-sm font-bold ${palette.heading}`}>{title}</p>
         <p className={`text-xs ${palette.muted}`}>{text}</p>
@@ -549,8 +549,8 @@ function HeroVisual({ restaurant, palette, initial }: { restaurant: MenuTemplate
   return (
     <div className="relative order-1 h-56 sm:h-80 lg:order-2 lg:h-[30rem]">
       {/* Franja roja detrás del borde rasgado */}
-      {torn && <div className="absolute inset-0 -translate-x-2 bg-red-600" style={clip} aria-hidden />}
-      <div className={`absolute inset-0 overflow-hidden ${torn ? '' : 'rounded-3xl'}`} style={clip}>
+      {torn && <div className="absolute inset-0 -translate-x-2 bg-sf-primary" style={clip} aria-hidden />}
+      <div className={`absolute inset-0 overflow-hidden ${torn ? '' : 'rounded-sf-lg'}`} style={clip}>
         {restaurant.bannerUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- banner en dominio arbitrario del restaurante
           <img src={restaurant.bannerUrl} alt={restaurant.name} className="h-full w-full object-cover" />
@@ -559,10 +559,10 @@ function HeroVisual({ restaurant, palette, initial }: { restaurant: MenuTemplate
             <span className="absolute left-[12%] top-5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-zinc-900 shadow-xl sm:top-8">
               🔥 Recién hecho
             </span>
-            <span className="absolute bottom-5 right-5 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-xl sm:bottom-8 sm:right-8">
+            <span className="absolute bottom-5 right-5 rounded-full bg-sf-primary px-3 py-1.5 text-xs font-bold text-sf-on-primary shadow-xl sm:bottom-8 sm:right-8">
               ⚡ Pide por WhatsApp
             </span>
-            <div className="relative flex h-36 w-36 items-center justify-center rounded-full border border-white/10 bg-white/5 shadow-[0_0_120px_rgba(220,38,38,0.35)] sm:h-56 sm:w-56">
+            <div className="relative flex h-36 w-36 items-center justify-center rounded-full border border-white/10 bg-white/5 shadow-[0_0_120px_color-mix(in_srgb,var(--storefront-primary)_35%,transparent)] sm:h-56 sm:w-56">
               {restaurant.logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element -- logo en dominio arbitrario del restaurante
                 <img src={restaurant.logoUrl} alt="" className="h-3/4 w-3/4 rounded-full object-cover" />
@@ -596,11 +596,11 @@ function CategoryTab({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className="group relative flex min-w-[5.5rem] shrink-0 flex-col items-center gap-1.5 rounded-xl px-3 pb-2.5 pt-2 transition"
+      className="group relative flex min-w-[5.5rem] shrink-0 flex-col items-center gap-1.5 rounded-sf px-3 pb-2.5 pt-2 transition"
     >
       <span
         className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
-          active ? 'border-red-600 bg-red-600 text-white shadow-lg shadow-red-600/30' : palette.iconCircle
+          active ? 'border-sf-primary bg-sf-primary text-sf-on-primary shadow-lg shadow-sf-primary/30' : palette.iconCircle
         }`}
       >
         <Icon className="h-5 w-5" strokeWidth={1.75} />
@@ -611,7 +611,7 @@ function CategoryTab({
         {label}
       </span>
       <span
-        className={`absolute bottom-0 left-1/2 h-0.5 w-10 -translate-x-1/2 rounded-full bg-red-600 transition-opacity ${
+        className={`absolute bottom-0 left-1/2 h-0.5 w-10 -translate-x-1/2 rounded-full bg-sf-primary transition-opacity ${
           active ? 'opacity-100' : 'opacity-0'
         }`}
         aria-hidden
@@ -655,7 +655,7 @@ function CategorySection({
           <button
             type="button"
             onClick={onViewOnly}
-            className="inline-flex shrink-0 items-center gap-1 text-sm font-bold text-red-600 hover:underline"
+            className="inline-flex shrink-0 items-center gap-1 text-sm font-bold text-sf-primary hover:underline"
           >
             Ver solo esta <ArrowRight className="h-4 w-4" />
           </button>
@@ -706,7 +706,7 @@ function ProductCard({
 
   return (
     <article
-      className={`group flex flex-row overflow-hidden rounded-2xl border sm:flex-col transition-all duration-300 ${palette.surface} ${
+      className={`group flex flex-row overflow-hidden rounded-sf-lg border sm:flex-col transition-all duration-300 ${palette.surface} ${
         isSoldOut ? '' : `${palette.surfaceHover} hover:-translate-y-0.5`
       }`}
     >
@@ -735,7 +735,7 @@ function ProductCard({
           </div>
         )}
         {quantity > 0 && (
-          <span className="absolute right-2 top-2 rounded-full bg-red-600 px-2 py-0.5 text-[10px] sm:right-3 sm:top-3 sm:px-2.5 sm:py-1 sm:text-[11px] font-bold text-white shadow-lg">
+          <span className="absolute right-2 top-2 rounded-full bg-sf-primary px-2 py-0.5 text-[10px] sm:right-3 sm:top-3 sm:px-2.5 sm:py-1 sm:text-[11px] font-bold text-sf-on-primary shadow-lg">
             {quantity} en tu pedido
           </span>
         )}
@@ -756,12 +756,12 @@ function ProductCard({
             onClick={onAdd}
             disabled={disabled}
             aria-label={isSoldOut ? `${item.name} agotado` : `Agregar ${item.name}`}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold transition sm:gap-1.5 sm:px-3.5 sm:py-2 sm:text-sm ${
+            className={`inline-flex shrink-0 items-center gap-1 rounded-sf px-3 py-1.5 text-xs font-bold transition sm:gap-1.5 sm:px-3.5 sm:py-2 sm:text-sm ${
               disabled
                 ? 'cursor-not-allowed bg-zinc-500/15 text-zinc-500'
                 : justAdded
                   ? 'scale-105 bg-emerald-500 text-white'
-                  : 'bg-red-600 text-white shadow-md shadow-red-600/25 hover:bg-red-700 active:scale-95'
+                  : 'bg-sf-primary text-sf-on-primary shadow-md shadow-sf-primary/25 hover:bg-sf-primary-hover active:scale-95'
             }`}
           >
             {!disabled && !justAdded && <Plus className="h-4 w-4" />}
@@ -786,7 +786,7 @@ function InfoRow({
 }) {
   return (
     <li className="flex items-start gap-4">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-600 text-white">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sf-primary text-sf-on-primary">
         <Icon className="h-5 w-5" />
       </span>
       <div className={`flex min-w-0 flex-col text-sm ${palette.body}`}>
@@ -799,7 +799,7 @@ function InfoRow({
 
 function EmptyState({ title, action, palette }: { title: string; action?: React.ReactNode; palette: MenuPalette }) {
   return (
-    <div className={`flex flex-col items-center gap-3 rounded-3xl border px-6 py-16 text-center ${palette.softSurface}`}>
+    <div className={`flex flex-col items-center gap-3 rounded-sf-lg border px-6 py-16 text-center ${palette.softSurface}`}>
       <ChefHat className={`h-10 w-10 ${palette.placeholderIcon}`} strokeWidth={1.5} />
       <p className={`text-sm font-semibold ${palette.heading}`}>{title}</p>
       {action}

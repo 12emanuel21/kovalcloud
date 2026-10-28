@@ -1,35 +1,33 @@
 'use client';
 
 import React from 'react';
-import { DEFAULT_MENU_THEME, isMenuTheme, type MenuTheme } from '@/lib/menu-themes';
-import { DarkPremiumTemplate } from './templates/DarkPremiumTemplate';
-import { CleanLightTemplate } from './templates/CleanLightTemplate';
-import type { MenuTemplateProps, RestaurantData } from './templates/types';
+import { isLightMenuTheme, resolveMenuTheme } from '@/lib/menu-themes';
+import { PremiumMenuLayout } from './templates/PremiumMenuLayout';
+import { STOREFRONT_LIGHT_PALETTE, STOREFRONT_PALETTE } from './templates/palettes';
+import type { RestaurantData } from './templates/types';
 
 export type { Category, MenuItem, RestaurantData } from './templates/types';
 
-const TEMPLATES: Record<MenuTheme, React.FC<MenuTemplateProps>> = {
-  'dark-premium': DarkPremiumTemplate,
-  'clean-light': CleanLightTemplate,
-};
-
 /**
- * Enrutador de temas de la carta pública: elige la plantilla según restaurant.theme.
- * Un tema desconocido o ausente usa el predeterminado (dark-premium).
+ * Carta pública con el tema visual del restaurante: data-theme activa sus variables --storefront-*
+ * (globals.css). Un tema desconocido o ausente usa el predeterminado (street-burger).
  */
 export const MenuView: React.FC<{ restaurant: RestaurantData; tableNumber?: string; returnedOrderId?: string }> = ({
   restaurant,
   tableNumber,
   returnedOrderId,
 }) => {
-  const theme = isMenuTheme(restaurant.theme) ? restaurant.theme : DEFAULT_MENU_THEME;
-  const Template = TEMPLATES[theme];
+  const theme = resolveMenuTheme(restaurant.theme);
   return (
-    <Template
-      restaurant={restaurant}
-      categories={restaurant.categories}
-      tableNumber={tableNumber}
-      returnedOrderId={returnedOrderId}
-    />
+    <div data-theme={theme}>
+      <PremiumMenuLayout
+        restaurant={restaurant}
+        categories={restaurant.categories}
+        tableNumber={tableNumber}
+        returnedOrderId={returnedOrderId}
+        palette={isLightMenuTheme(theme) ? STOREFRONT_LIGHT_PALETTE : STOREFRONT_PALETTE}
+        theme={theme}
+      />
+    </div>
   );
 };

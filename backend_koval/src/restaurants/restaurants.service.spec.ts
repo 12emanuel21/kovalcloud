@@ -71,8 +71,8 @@ describe('RestaurantsService · kill switch del cierre de emergencia', () => {
 
   it('guarda el tema de la carta y el DTO rechaza temas desconocidos', async () => {
     const { prisma, service } = build(restaurantRow());
-    await service.updateConfig('rest-1', { theme: 'clean-light' }, sudo);
-    expect(prisma.restaurant.update.mock.calls[0][0].data).toMatchObject({ theme: 'clean-light' });
+    await service.updateConfig('rest-1', { theme: 'cafe-bakery' }, sudo);
+    expect(prisma.restaurant.update.mock.calls[0][0].data).toMatchObject({ theme: 'cafe-bakery' });
 
     const errors = await validate(plainToInstance(UpdateRestaurantConfigDto, { theme: 'neon' }));
     expect(errors.map((e) => e.property)).toEqual(['theme']);
@@ -180,7 +180,7 @@ describe('RestaurantsService · Sudo Mode solo para campos sensibles', () => {
     await service.updateConfig(
       'rest-1',
       {
-        theme: 'clean-light',
+        theme: 'cafe-bakery',
         isTemporarilyClosed: true,
         closedMessage: 'Volvemos pronto',
         // El formulario reenvía la llave pública guardada y deja vacíos los secretos

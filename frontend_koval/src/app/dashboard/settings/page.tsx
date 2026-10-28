@@ -8,6 +8,8 @@ import { ArrowRight, ExternalLink, MessageCircle } from 'lucide-react';
 import { TwoFactorSection } from '@/components/security/TwoFactorSection';
 import { TeamSection } from './TeamSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
+import { MenuThemePicker } from './MenuThemePicker';
+import { DEFAULT_MENU_THEME, resolveMenuTheme, type MenuTheme } from '@/lib/menu-themes';
 import {
   SettingsCardFooter,
   SettingsCardHeader,
@@ -44,6 +46,7 @@ interface RestaurantData {
   logoUrl?: string | null;
   bannerUrl?: string | null;
   currency?: string | null;
+  theme?: string | null;
   owner?: {
     id: string;
     email: string;
@@ -74,6 +77,8 @@ export default function SettingsPage() {
   const [currency, setCurrency] = useState<string>('COP');
   const [description, setDescription] = useState<string>('');
   const [logoUrl, setLogoUrl] = useState<string>('');
+  // Tema visual de la carta pública (se guarda con "Guardar identidad")
+  const [theme, setTheme] = useState<MenuTheme>(DEFAULT_MENU_THEME);
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [ownerEmail, setOwnerEmail] = useState<string>('');
   const [planName, setPlanName] = useState<string>('Plan Pro');
@@ -104,6 +109,7 @@ export default function SettingsPage() {
       setDescription(data.description || '');
       setLogoUrl(data.logoUrl || '');
       setBannerUrl(data.bannerUrl || '');
+      setTheme(resolveMenuTheme(data.theme));
       const email = data.owner?.email || 'admin@kovalcloud.com';
       setOwnerEmail(email);
       if (data.plan?.name) setPlanName(data.plan.name);
@@ -158,6 +164,7 @@ export default function SettingsPage() {
         description: description.trim() || undefined,
         logoUrl: logoUrl.trim() || undefined,
         bannerUrl: bannerUrl.trim() || undefined,
+        theme,
       };
 
       const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}`, {
@@ -372,6 +379,21 @@ export default function SettingsPage() {
             placeholder="https://ejemplo.com/banner.jpg"
             className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-xs text-white outline-none transition"
           />
+        </div>
+
+        <div className="md:col-span-2">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <span className="block text-xs font-semibold text-slate-300">Tema Visual de la Carta Digital</span>
+            {slug && (
+              <Link href={`/menu/${slug}`} target="_blank" className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:underline">
+                Ver mi carta <ExternalLink className="h-3 w-3" />
+              </Link>
+            )}
+          </div>
+          <MenuThemePicker value={theme} onChange={setTheme} disabled={saving} />
+          <p className="text-[11px] text-slate-500 mt-1.5">
+            Colores, bordes y botones que ven tus clientes al abrir la carta o escanear el QR. Se aplica al guardar.
+          </p>
         </div>
       </div>
             </div>

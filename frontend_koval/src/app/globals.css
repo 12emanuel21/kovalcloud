@@ -179,6 +179,20 @@ html:not(.dark) .koval-dashboard .text-slate-900 {
   /* Titulares de la carta pública (Montserrat se carga en app/menu/[slug]) */
   --font-display: var(--font-display-family), var(--font-geist-sans), ui-sans-serif, sans-serif;
 
+  /* Carta pública: utilidades que leen el tema activo ([data-theme]), ej. bg-sf-primary,
+     text-sf-on-primary, border-sf-border, shadow-sf-primary/25, rounded-sf */
+  --color-sf-bg: var(--storefront-bg);
+  --color-sf-card: var(--storefront-card);
+  --color-sf-border: var(--storefront-border);
+  --color-sf-text: var(--storefront-text);
+  --color-sf-body: var(--storefront-body);
+  --color-sf-muted: var(--storefront-muted);
+  --color-sf-primary: var(--storefront-primary);
+  --color-sf-primary-hover: var(--storefront-primary-hover);
+  --color-sf-on-primary: var(--storefront-primary-text);
+  --radius-sf: var(--storefront-radius);
+  --radius-sf-lg: calc(var(--storefront-radius) * 1.5);
+
   /* Carrito de la carta pública: drawer lateral derecho (animate-cart-drawer-in / animate-cart-backdrop-in) */
   --animate-cart-drawer-in: cart-drawer-in 320ms cubic-bezier(0.32, 0.72, 0, 1);
   --animate-cart-backdrop-in: cart-backdrop-in 200ms ease-out;
@@ -205,4 +219,69 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ── Temas de la carta pública (/menu/[slug]) ──
+   El contenedor de la carta (y el drawer del carrito) llevan data-theme="<tema del restaurante>".
+   Deben coincidir con src/lib/menu-themes.ts y backend_koval/src/restaurants/menu-themes.ts */
+
+/* 1. Street & Burger (Alto impacto, urbano, rojo/fuego) */
+[data-theme="street-burger"] {
+  --storefront-bg: #09090b;
+  --storefront-card: #18181b;
+  --storefront-border: #27272a;
+  --storefront-text: #ffffff;
+  --storefront-muted: #a1a1aa;
+  --storefront-primary: #dc2626; /* Rojo intenso */
+  --storefront-primary-hover: #b91c1c;
+  --storefront-primary-text: #ffffff;
+  --storefront-radius: 0.5rem;
+  color-scheme: dark;
+}
+
+/* 2. Café & Bakery (Cálido, tonos crema, café/avellana) */
+[data-theme="cafe-bakery"] {
+  --storefront-bg: #fcfbf9;
+  --storefront-card: #ffffff;
+  --storefront-border: #e7e5e4;
+  --storefront-text: #292524;
+  --storefront-muted: #78716c;
+  --storefront-primary: #854d0e; /* Tono café / caramelo */
+  --storefront-primary-hover: #713f12;
+  --storefront-primary-text: #ffffff;
+  --storefront-radius: 1rem;
+  color-scheme: light;
+}
+
+/* 3. Sushi & Asian Dark (Minimalismo premium, carbón y verde jade) */
+[data-theme="sushi-dark"] {
+  --storefront-bg: #030712;
+  --storefront-card: #111827;
+  --storefront-border: #1f2937;
+  --storefront-text: #f9fafb;
+  --storefront-muted: #9ca3af;
+  --storefront-primary: #059669; /* Verde esmeralda profundo */
+  --storefront-primary-hover: #047857;
+  --storefront-primary-text: #ffffff;
+  --storefront-radius: 0.25rem;
+  color-scheme: dark;
+}
+
+/* 4. Bistró & Parrilla (Elegante clásico, carbón cálido y ámbar dorado) */
+[data-theme="bistro-grill"] {
+  --storefront-bg: #1c1917;
+  --storefront-card: #292524;
+  --storefront-border: #44403c;
+  --storefront-text: #fafaf9;
+  --storefront-muted: #a8a29e;
+  --storefront-primary: #d97706; /* Ámbar dorado */
+  --storefront-primary-hover: #b45309;
+  --storefront-primary-text: #ffffff;
+  --storefront-radius: 0.75rem;
+  color-scheme: dark;
+}
+
+/* Derivados comunes: texto de párrafos entre el titular y el texto atenuado */
+[data-theme] {
+  --storefront-body: color-mix(in srgb, var(--storefront-text) 80%, var(--storefront-bg));
 }

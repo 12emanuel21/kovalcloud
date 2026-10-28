@@ -1,6 +1,7 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRestaurantDto } from './create-restaurant.dto';
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
+import { MENU_THEMES, type MenuTheme } from '../menu-themes';
 
 export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsOptional()
@@ -47,4 +48,10 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsOptional()
   @IsString()
   metaAppSecret?: string;
+
+  // Tema visual de la carta pública (Ajustes > Perfil > "Tema Visual de la Carta Digital")
+  @IsOptional()
+  @IsString()
+  @IsIn(MENU_THEMES, { message: `El tema debe ser uno de: ${MENU_THEMES.join(', ')}` })
+  theme?: MenuTheme;
 }
