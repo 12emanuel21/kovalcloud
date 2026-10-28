@@ -13,7 +13,7 @@ import { parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 import { isOnlinePaymentEnabled, isWompiReady } from '../payments/wompi-checkout.service';
 import { publicWhatsAppNumber } from './whatsapp-bot-number';
-import { resolveMenuTheme } from './menu-themes';
+import { resolveMenuColorMode, resolveMenuTheme } from './menu-themes';
 import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
@@ -126,6 +126,8 @@ export class RestaurantsService {
       whatsappNumber: publicWhatsAppNumber(restaurant),
       // Tema visual de la carta (data-theme): siempre uno válido, street-burger si falta
       theme: resolveMenuTheme(restaurant.theme),
+      // Modo con el que abre la carta (después manda la elección del cliente)
+      menuColorMode: resolveMenuColorMode(restaurant.menuColorMode, restaurant.theme),
     };
   }
 
@@ -243,6 +245,7 @@ export class RestaurantsService {
         currency: updateRestaurantDto.currency,
         botpressBotId: updateRestaurantDto.botpressBotId,
         theme: updateRestaurantDto.theme,
+        menuColorMode: updateRestaurantDto.menuColorMode,
         ...meta,
       },
       include: {

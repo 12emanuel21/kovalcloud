@@ -9,7 +9,14 @@ import { TwoFactorSection } from '@/components/security/TwoFactorSection';
 import { TeamSection } from './TeamSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
-import { DEFAULT_MENU_THEME, resolveMenuTheme, type MenuTheme } from '@/lib/menu-themes';
+import {
+  DEFAULT_MENU_THEME,
+  MENU_COLOR_MODES,
+  resolveMenuColorMode,
+  resolveMenuTheme,
+  type MenuColorMode,
+  type MenuTheme,
+} from '@/lib/menu-themes';
 import {
   SettingsCardFooter,
   SettingsCardHeader,
@@ -47,6 +54,7 @@ interface RestaurantData {
   bannerUrl?: string | null;
   currency?: string | null;
   theme?: string | null;
+  menuColorMode?: string | null;
   owner?: {
     id: string;
     email: string;
@@ -79,6 +87,8 @@ export default function SettingsPage() {
   const [logoUrl, setLogoUrl] = useState<string>('');
   // Tema visual de la carta pública (se guarda con "Guardar identidad")
   const [theme, setTheme] = useState<MenuTheme>(DEFAULT_MENU_THEME);
+  // Modo con el que abre la carta (el cliente luego lo cambia con ☀️/🌙)
+  const [menuColorMode, setMenuColorMode] = useState<MenuColorMode>('dark');
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [ownerEmail, setOwnerEmail] = useState<string>('');
   const [planName, setPlanName] = useState<string>('Plan Pro');
@@ -110,6 +120,7 @@ export default function SettingsPage() {
       setLogoUrl(data.logoUrl || '');
       setBannerUrl(data.bannerUrl || '');
       setTheme(resolveMenuTheme(data.theme));
+      setMenuColorMode(resolveMenuColorMode(data.menuColorMode, data.theme));
       const email = data.owner?.email || 'admin@kovalcloud.com';
       setOwnerEmail(email);
       if (data.plan?.name) setPlanName(data.plan.name);
@@ -165,6 +176,7 @@ export default function SettingsPage() {
         logoUrl: logoUrl.trim() || undefined,
         bannerUrl: bannerUrl.trim() || undefined,
         theme,
+        menuColorMode,
       };
 
       const res = await sudoFetch(`${API_URL}/restaurants/${restaurantId}`, {
@@ -390,9 +402,42 @@ export default function SettingsPage() {
               </Link>
             )}
           </div>
-          <MenuThemePicker value={theme} onChange={setTheme} disabled={saving} />
+          <MenuThemePicker value={theme} onChange={setTheme} mode={menuColorMode} disabled={saving} />
           <p className="text-[11px] text-slate-500 mt-1.5">
             Colores, bordes y botones que ven tus clientes al abrir la carta o escanear el QR. Se aplica al guardar.
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <span id="menu-color-mode-label" className="text-xs font-semibold text-slate-300">
+              Modo al abrir la carta
+            </span>
+            <div
+              role="radiogroup"
+              aria-labelledby="menu-color-mode-label"
+              className="inline-flex gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1"
+            >
+              {MENU_COLOR_MODES.map((option) => {
+                const selected = option.value === menuColorMode;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={saving}
+                    onClick={() => setMenuColorMode(option.value)}
+                    className={`rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:opacity-60 ${
+                      selected ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {option.icon} {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1.5">
+            Así se ve la carta al abrirla. Cada cliente puede cambiarlo con el botón ☀️/🌙 y su elección se recuerda en su teléfono.
           </p>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRestaurantDto } from './create-restaurant.dto';
 import { IsIn, IsOptional, IsString } from 'class-validator';
-import { MENU_THEMES, type MenuTheme } from '../menu-themes';
+import { MENU_COLOR_MODES, MENU_THEMES, type MenuColorMode, type MenuTheme } from '../menu-themes';
 
 export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsOptional()
@@ -54,4 +54,9 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsString()
   @IsIn(MENU_THEMES, { message: `El tema debe ser uno de: ${MENU_THEMES.join(', ')}` })
   theme?: MenuTheme;
+
+  // Modo claro / oscuro con el que abre la carta (el cliente puede cambiarlo con el botón ☀️/🌙)
+  @IsOptional()
+  @IsIn(MENU_COLOR_MODES, { message: 'El modo de la carta debe ser light o dark' })
+  menuColorMode?: MenuColorMode;
 }

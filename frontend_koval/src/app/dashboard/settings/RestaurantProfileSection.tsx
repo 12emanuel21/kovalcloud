@@ -90,8 +90,8 @@ const inputClass =
 /** Textos de la tarjeta según la pestaña de Ajustes */
 const VIEW_COPY: Record<Exclude<SettingsTab, 'seguridad'>, { title: string; description: string; saveLabel: string; hint: string }> = {
   perfil: {
-    title: 'Ubicación y apariencia',
-    description: 'Dirección del local y el diseño de tu carta digital.',
+    title: 'Ubicación',
+    description: 'Dirección del local que ven tus clientes en la carta.',
     saveLabel: 'Guardar cambios',
     hint: 'Se reflejan en la carta pública al instante.',
   },

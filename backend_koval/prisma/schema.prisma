@@ -75,6 +75,8 @@ model Restaurant {
   extendedUntil       DateTime?
   // Tema visual de la carta pública: street-burger | cafe-bakery | sushi-dark | bistro-grill (src/restaurants/menu-themes.ts)
   theme               String    @default("street-burger")
+  // Modo con el que abre la carta (light | dark); luego el cliente lo cambia con el botón ☀️/🌙
+  menuColorMode       String    @default("dark")
 
   // Integración Meta WhatsApp Cloud API (Multi-Tenant)
   whatsappToken       String?

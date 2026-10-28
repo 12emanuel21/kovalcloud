@@ -2,7 +2,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { RestaurantsService } from './restaurants.service';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
-import { MENU_THEMES, resolveMenuTheme } from './menu-themes';
+import { MENU_THEMES, resolveMenuColorMode, resolveMenuTheme } from './menu-themes';
 import type { AiService } from '../ai/ai.service';
 import type { SudoCredentials } from '../auth/two-factor-auth.service';
 
@@ -49,5 +49,40 @@ describe('Temas visuales de la carta pública', () => {
       prisma.restaurant.findUnique.mockResolvedValue({ id: 'rest-1', slug: 'demo', theme: stored, categories: [] });
       await expect(service.findBySlug('demo')).resolves.toMatchObject({ theme: expected });
     }
+  });
+});
+
+describe('Modo claro / oscuro con el que abre la carta', () => {
+  it('PATCH /restaurants/:id acepta light y dark y rechaza otros valores', async () => {
+    for (const menuColorMode of ['light', 'dark']) {
+      expect(await validate(plainToInstance(UpdateRestaurantDto, { menuColorMode }))).toHaveLength(0);
+    }
+    const errors = await validate(plainToInstance(UpdateRestaurantDto, { menuColorMode: 'system' }));
+    expect(errors.map((e) => e.property)).toEqual(['menuColorMode']);
+  });
+
+  it('se guarda con "Guardar identidad"', async () => {
+    const prisma: any = {
+      restaurant: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'rest-1' }),
+        update: jest.fn().mockImplementation(({ data }) => ({ id: 'rest-1', users: [], ...data })),
+      },
+    };
+    const service = new RestaurantsService(prisma, {} as AiService, { assertSudo: jest.fn() } as any);
+    await service.update('rest-1', { theme: 'street-burger', menuColorMode: 'light' }, {} as SudoCredentials);
+    expect(prisma.restaurant.update.mock.calls[0][0].data).toMatchObject({ menuColorMode: 'light' });
+  });
+
+  it('la carta pública recibe el modo del dueño o, si falta, el natural del tema', async () => {
+    expect(resolveMenuColorMode('light', 'street-burger')).toBe('light');
+    expect(resolveMenuColorMode(null, 'cafe-bakery')).toBe('light');
+    expect(resolveMenuColorMode(undefined, 'sushi-dark')).toBe('dark');
+    expect(resolveMenuColorMode('raro', 'clean-light')).toBe('light');
+
+    const prisma: any = {
+      restaurant: { findUnique: jest.fn().mockResolvedValue({ id: 'r', slug: 'demo', theme: 'bistro-grill', menuColorMode: 'light', categories: [] }) },
+    };
+    const service = new RestaurantsService(prisma, {} as AiService, {} as any);
+    await expect(service.findBySlug('demo')).resolves.toMatchObject({ theme: 'bistro-grill', menuColorMode: 'light' });
   });
 });
