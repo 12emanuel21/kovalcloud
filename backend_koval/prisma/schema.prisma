@@ -116,6 +116,7 @@ model Restaurant {
 
   // Relaciones del Módulo de Pedidos
   orders         Order[]
+  drivers        DeliveryDriver[]
   autoReplies    AutoReply[]
   supportTickets SupportTicket[]
   chatHistories  ChatHistory[]
@@ -191,8 +192,36 @@ model Order {
 
   items OrderItem[]
 
+  // Despacho a domicilio (POST /orders/:id/dispatch). Se guarda copia de los datos del repartidor:
+  // el historial no cambia si luego se edita o se borra (o si se despachó con datos sueltos).
+  driverId      String?
+  driver        DeliveryDriver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  driverName    String?
+  driverPhone   String?
+  driverVehicle String?
+  dispatchedAt  DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Domiciliarios del restaurante (Ajustes > Repartidores). El KDS los elige al despachar.
+model DeliveryDriver {
+  id           String     @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  name        String
+  phone       String // Dígitos con indicativo (573001234567), listo para wa.me
+  vehicleInfo String? // Ej: "Moto AKT · ABC12D"
+  isActive    Boolean @default(true)
+
+  orders Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([restaurantId])
 }
 
 model OrderItem {

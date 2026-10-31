@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, use, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/context/AuthContext';
 import PrepareActions from '@/components/orders/PrepareActions';
+import DispatchModal from '@/components/orders/DispatchModal';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import {
   ChefHat,
@@ -40,6 +41,7 @@ interface Order {
   customerName: string;
   orderType?: OrderType;
   tableNumber?: string;
+  deliveryAddress?: string | null;
   channel?: string;
   status: OrderStatus;
   notes?: string;
@@ -145,6 +147,9 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
   const [orders, setOrders] = useState<Order[]>([]);
   const [isConnectedWs, setIsConnectedWs] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  // Domicilio listo: modal para elegir repartidor (despacho + WhatsApp al cliente y al repartidor)
+  const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState('');
   const socketRef = useRef<Socket | null>(null);
 
@@ -268,6 +273,13 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
     }
   };
 
+  const handleDispatched = (order: Order, driverName: string) => {
+    setOrders((prev) => prev.filter((o) => o.id !== order.id));
+    setDispatchOrder(null);
+    setToast(`🛵 #${order.id.slice(0, 5).toUpperCase()} va en camino con ${driverName}. Avisamos al cliente y al repartidor por WhatsApp.`);
+    window.setTimeout(() => setToast(null), 5000);
+  };
+
   // Copia ordenada para renderizar: el estado `orders` nunca se muta
   const sortedOrders = useMemo(() => sortOldestFirst(orders), [orders]);
 
@@ -389,6 +401,15 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
                           onPrepare={(minutes) => updateStatus(order.id, 'PREPARING', minutes)}
                           onReject={() => updateStatus(order.id, 'CANCELLED')}
                         />
+                      ) : order.orderType === 'DELIVERY' ? (
+                        <button
+                          disabled={updatingOrderId === order.id}
+                          onClick={() => setDispatchOrder(order)}
+                          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg py-2.5 font-medium transition-colors"
+                        >
+                          <Motorbike className="h-4 w-4" />
+                          Avanzar a En Camino
+                        </button>
                       ) : (
                         <button
                           disabled={updatingOrderId === order.id}
@@ -406,6 +427,23 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
           </div>
         )}
       </main>
+
+      {dispatchOrder && (
+        <DispatchModal
+          order={dispatchOrder}
+          onClose={() => setDispatchOrder(null)}
+          onDispatched={(driverName) => handleDispatched(dispatchOrder, driverName)}
+        />
+      )}
+
+      {toast && (
+        <div
+          role="status"
+          className="fixed bottom-6 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-emerald-500/30 bg-slate-900 px-4 py-3 text-sm font-medium text-emerald-300 shadow-2xl"
+        >
+          {toast}
+        </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar {

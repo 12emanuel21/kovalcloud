@@ -1,15 +1,16 @@
 'use client';
 
 import React from 'react';
-import { Clock, CreditCard, ShieldCheck, Store, type LucideIcon } from 'lucide-react';
+import { Bike, Clock, CreditCard, ShieldCheck, Store, type LucideIcon } from 'lucide-react';
 
 /** Pestañas de Ajustes */
-export type SettingsTab = 'perfil' | 'horarios' | 'pagos' | 'seguridad';
+export type SettingsTab = 'perfil' | 'horarios' | 'pagos' | 'repartidores' | 'seguridad';
 
 export const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: LucideIcon }> = [
   { id: 'perfil', label: 'Perfil', icon: Store },
   { id: 'horarios', label: 'Horarios', icon: Clock },
   { id: 'pagos', label: 'Pagos', icon: CreditCard },
+  { id: 'repartidores', label: 'Repartidores', icon: Bike },
   { id: 'seguridad', label: 'Seguridad', icon: ShieldCheck },
 ];
 

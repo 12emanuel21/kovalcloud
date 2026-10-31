@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { ArrowRight, ExternalLink, MessageCircle } from 'lucide-react';
 import { TwoFactorSection } from '@/components/security/TwoFactorSection';
 import { TeamSection } from './TeamSection';
+import { DriversSection } from './DriversSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
 import { MenuLayoutPicker } from './MenuLayoutPicker';
@@ -499,6 +500,9 @@ export default function SettingsPage() {
 
         {/* Perfil (ubicación y tema), Horarios y Pagos: un solo formulario que queda montado entre pestañas */}
         <RestaurantProfileSection view={activeTab} />
+
+        {/* REPARTIDORES: domiciliarios que ofrece el KDS al despachar */}
+        {activeTab === 'repartidores' && <DriversSection />}
 
         {/* SEGURIDAD: 2FA, equipo de cocina e información de la cuenta */}
         {activeTab === 'seguridad' && (

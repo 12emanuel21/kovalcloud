@@ -11,13 +11,16 @@ import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, OrderType } from '@prisma/client';
 import { OrdersGateway } from './orders.gateway';
 import { buildClosedNotice, isRestaurantClosed } from '../restaurants/business-hours';
 import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/tenant-access';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 import { isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
 import { normalizeColombianPhone } from './phone';
+import { DispatchOrderDto } from './dto/dispatch-order.dto';
+import { buildCustomerDispatchMessage, buildDriverDispatchMessage } from './dispatch-messages';
+import { normalizeDriverPhone } from '../drivers/drivers.service';
 import { buildOrdersWorkbook, exportFilename, resolveExportRange } from './orders-export';
 
 /**
@@ -40,6 +43,12 @@ export function buildPaymentLinkMessage(
     'Apenas se confirme el pago te avisamos por este chat.'
   );
 }
+
+/** Datos del pedido que deciden por qué canal de WhatsApp sale un mensaje */
+type RestaurantChannelOrder = {
+  restaurantId?: string | null;
+  restaurant?: { whatsappPhoneId?: string | null; whatsappToken?: string | null } | null;
+};
 
 @Injectable()
 export class OrdersService {
@@ -397,17 +406,17 @@ export class OrdersService {
    * credenciales oficiales; si no, la sesión de WhatsApp Web (Baileys). Nunca lanza.
    * Público para otros módulos (ej. confirmación de pago de PaymentsService).
    */
-  async notifyCustomer(
-    order: {
-      customerPhone?: string | null;
-      restaurantId?: string | null;
-      restaurant?: { whatsappPhoneId?: string | null; whatsappToken?: string | null } | null;
-    },
-    text: string,
-  ): Promise<void> {
+  async notifyCustomer(order: RestaurantChannelOrder & { customerPhone?: string | null }, text: string): Promise<void> {
     if (!order.customerPhone) return;
     // También cubre pedidos guardados antes de normalizar el teléfono (ej. "3001234567")
-    const customerPhone = normalizeColombianPhone(order.customerPhone);
+    await this.sendViaRestaurantChannel(order, normalizeColombianPhone(order.customerPhone), text, 'cliente');
+  }
+
+  /**
+   * Envía un WhatsApp por el canal del restaurante del pedido: Meta Cloud API si tiene credenciales
+   * oficiales; si no, su sesión de WhatsApp Web (Baileys). Nunca lanza.
+   */
+  private async sendViaRestaurantChannel(order: RestaurantChannelOrder, to: string, text: string, who: string) {
     const phoneId = order.restaurant?.whatsappPhoneId || process.env.META_PHONE_NUMBER_ID || '';
     const token = order.restaurant?.whatsappToken || process.env.META_ACCESS_TOKEN || '';
     const viaMeta = Boolean(phoneId && token);
@@ -416,18 +425,74 @@ export class OrdersService {
 
     try {
       // Baileys: la sesión de WhatsApp Web se identifica por el restaurantId
-      await this.metaWhatsAppService.sendTextMessage(
-        viaMeta ? phoneId : order.restaurantId!,
-        token,
-        customerPhone,
-        text,
-        !viaMeta,
-      );
-      this.logger.log(
-        `Notificación de WhatsApp (${viaMeta ? 'Meta' : 'Baileys'}) enviada al cliente ${customerPhone}`,
-      );
+      await this.metaWhatsAppService.sendTextMessage(viaMeta ? phoneId : order.restaurantId!, token, to, text, !viaMeta);
+      this.logger.log(`Notificación de WhatsApp (${viaMeta ? 'Meta' : 'Baileys'}) enviada al ${who} ${to}`);
     } catch (error) {
-      this.logger.error('Error enviando notificación al cliente:', error);
+      this.logger.error(`Error enviando notificación al ${who}:`, error);
     }
+  }
+
+  /**
+   * Despacho a domicilio desde el KDS: asigna el repartidor (registrado o con datos sueltos), deja el
+   * pedido como entregado a reparto (DELIVERED, igual que "Entregar") y avisa por WhatsApp al cliente
+   * (datos del repartidor + wa.me para escribirle) y al repartidor (dirección, platos y cobro).
+   */
+  async dispatch(orderId: string, dto: DispatchOrderDto, user: TenantUser) {
+    const order = await this.findOne(orderId, user);
+    if (order.orderType !== OrderType.DELIVERY) {
+      throw new BadRequestException('Solo los pedidos a domicilio se despachan con repartidor');
+    }
+    if (order.status === OrderStatus.CANCELLED) throw new ConflictException('El pedido está cancelado');
+    if (order.dispatchedAt) throw new ConflictException('El pedido ya fue despachado');
+
+    const driver = await this.resolveDispatchDriver(order.restaurantId, dto);
+
+    const updatedOrder = await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: OrderStatus.DELIVERED,
+        driverId: driver.id,
+        driverName: driver.name,
+        driverPhone: driver.phone,
+        driverVehicle: driver.vehicle,
+        dispatchedAt: new Date(),
+      },
+      include: { restaurant: true, items: { include: { menuItem: true } } },
+    });
+
+    this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, this.toOrderResponse(updatedOrder));
+
+    // En segundo plano: el KDS no espera a WhatsApp
+    const dispatchOrder = { ...updatedOrder, customerPhone: normalizeColombianPhone(updatedOrder.customerPhone) };
+    const restaurantName = updatedOrder.restaurant.name;
+    void this.notifyCustomer(
+      updatedOrder,
+      buildCustomerDispatchMessage(dispatchOrder, driver, restaurantName, dto.estimatedMinutes),
+    );
+    void this.sendViaRestaurantChannel(
+      updatedOrder,
+      driver.phone,
+      buildDriverDispatchMessage(dispatchOrder, driver, restaurantName),
+      'repartidor',
+    );
+
+    return this.toOrderResponse(updatedOrder);
+  }
+
+  /** Repartidor activo del restaurante (driverId) o datos sueltos (nombre + celular) */
+  private async resolveDispatchDriver(restaurantId: string, dto: DispatchOrderDto) {
+    if (dto.driverId) {
+      const driver = await this.prisma.deliveryDriver.findFirst({
+        where: { id: dto.driverId, restaurantId, isActive: true },
+        select: { id: true, name: true, phone: true, vehicleInfo: true },
+      });
+      if (!driver) throw new BadRequestException('Repartidor no encontrado o inactivo');
+      return { id: driver.id, name: driver.name, phone: driver.phone, vehicle: driver.vehicleInfo };
+    }
+    const name = dto.driverName?.trim();
+    if (!name || !dto.driverPhone?.trim()) {
+      throw new BadRequestException('Elige un repartidor o indica su nombre y celular');
+    }
+    return { id: null, name, phone: normalizeDriverPhone(dto.driverPhone), vehicle: dto.vehicleInfo?.trim() || null };
   }
 }

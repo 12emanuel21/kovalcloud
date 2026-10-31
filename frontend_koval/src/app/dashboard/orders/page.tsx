@@ -6,6 +6,7 @@ import { ExportOrdersButton } from '@/components/orders/ExportOrdersButton';
 import { ShiftExtensionPanel } from '@/components/orders/ShiftExtensionPanel';
 import { io, Socket } from 'socket.io-client';
 import PrepareActions from '@/components/orders/PrepareActions';
+import DispatchModal from '@/components/orders/DispatchModal';
 
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'DELIVERED' | 'CANCELLED';
 
@@ -36,6 +37,8 @@ interface Order {
   customerName: string;
   customerPhone: string;
   deliveryAddress?: string;
+  /** Repartidor que lo lleva (despacho a domicilio) */
+  driverName?: string | null;
   total: number | null;
   status: OrderStatus;
   notes?: string;
@@ -104,6 +107,8 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  // Domicilio listo: el mismo modal del KDS para elegir repartidor
+  const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isConnectedWs, setIsConnectedWs] = useState<boolean>(false);
   const [newOrderToast, setNewOrderToast] = useState<{ id: string; customer: string; total: number | null } | null>(null);
@@ -427,7 +432,9 @@ export default function OrdersPage() {
             <button
               type="button"
               disabled={isUpdating}
-              onClick={() => handleUpdateStatus(order.id, 'DELIVERED')}
+              onClick={() =>
+                order.orderType === 'DELIVERY' ? setDispatchOrder(order) : handleUpdateStatus(order.id, 'DELIVERED')
+              }
               className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition shadow-md shadow-emerald-900/40 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
             >
               {isUpdating ? (
@@ -448,7 +455,7 @@ export default function OrdersPage() {
 
           {(order.status === 'DELIVERED' || (order.status as string) === 'READY') && (
             <div className="w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold py-2 px-3 rounded-lg text-xs text-center flex items-center justify-center gap-1.5">
-              <span>✓ Pedido Despachado</span>
+              <span>{order.driverName ? `✓ En camino con ${order.driverName}` : '✓ Pedido Despachado'}</span>
             </div>
           )}
         </div>
@@ -643,6 +650,18 @@ export default function OrdersPage() {
             </div>
           </div>
         </div>
+      )}
+      {dispatchOrder && (
+        <DispatchModal
+          order={dispatchOrder}
+          onClose={() => setDispatchOrder(null)}
+          onDispatched={(driverName) => {
+            setOrders((prev) =>
+              prev.map((o) => (o.id === dispatchOrder.id ? { ...o, status: 'DELIVERED', driverName } : o)),
+            );
+            setDispatchOrder(null);
+          }}
+        />
       )}
     </div>
   );

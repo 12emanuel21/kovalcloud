@@ -17,10 +17,13 @@ import {
   Param,
   Delete,
   Query,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { DispatchOrderDto } from './dto/dispatch-order.dto';
 import { orderViewFor } from './order-visibility';
 
 @Controller('orders')
@@ -93,6 +96,15 @@ export class OrdersController {
     @Body('estimatedMinutes') estimatedMinutes?: number,
   ) {
     return orderViewFor(user.role, await this.ordersService.updateOrderStatus(id, status, user, estimatedMinutes));
+  }
+
+  // Despacho a domicilio desde el KDS: asigna repartidor y avisa por WhatsApp al cliente y al repartidor
+  @KitchenAccess()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/dispatch')
+  @HttpCode(HttpStatus.OK)
+  async dispatch(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: DispatchOrderDto) {
+    return orderViewFor(user.role, await this.ordersService.dispatch(id, dto, user));
   }
 
   @UseGuards(JwtAuthGuard)

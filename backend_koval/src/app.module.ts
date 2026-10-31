@@ -14,6 +14,7 @@ import { WhatsappGatewayModule } from './whatsapp-gateway/whatsapp-gateway.modul
 import { AdminModule } from './admin/admin.module';
 import { UsersModule } from './users/users.module';
 import { ChatsModule } from './chats/chats.module';
+import { DriversModule } from './drivers/drivers.module';
 import { SupportModule } from './support/support.module';
 import { PaymentsModule } from './payments/payments.module';
 
@@ -41,6 +42,7 @@ import { PaymentsModule } from './payments/payments.module';
     AdminModule,
     UsersModule,
     ChatsModule,
+    DriversModule,
     SupportModule,
     PaymentsModule,
   ],
