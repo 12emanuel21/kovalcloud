@@ -32,7 +32,7 @@ export function isValidTotp(code: unknown, secret: string): boolean {
  * incluidas las credenciales de Meta de su restaurante si viene incluido.
  */
 export function sanitizeUser<T extends User & { restaurant?: Restaurant | null }>(user: T) {
-  const { password, twoFactorSecret, restaurant, ...safeUser } = user;
+  const { password, twoFactorSecret, passwordChangedAt, restaurant, ...safeUser } = user;
   return {
     ...safeUser,
     restaurant: restaurant ? sanitizeRestaurant(restaurant) : restaurant,

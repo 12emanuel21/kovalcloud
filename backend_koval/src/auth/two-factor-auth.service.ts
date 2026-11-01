@@ -10,7 +10,7 @@ export function sudoRequired(reason: SudoRequiredReason): ForbiddenException {
 
 /** Quién pide un cambio sensible y el x-sudo-token que envió (si envió uno) */
 export interface SudoCredentials {
-  user: AuthenticatedUser;
+  user: Pick<AuthenticatedUser, 'id' | 'isTwoFactorEnabled'>;
   sudoToken?: string | string[];
 }
 

@@ -15,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy';
 import type { TenantUser } from '../auth/tenant-access';
 import { redactOrderFinancials } from './order-visibility';
+import { isTokenRevoked } from '../auth/token-revocation';
 
 type SocketUser = TenantUser & { id: string };
 
@@ -59,9 +60,9 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        select: { id: true, role: true, restaurantId: true, isActive: true },
+        select: { id: true, role: true, restaurantId: true, isActive: true, passwordChangedAt: true },
       });
-      if (!user?.isActive) return null;
+      if (!user?.isActive || isTokenRevoked(payload.iat, user.passwordChangedAt)) return null;
       return { id: user.id, role: user.role, restaurantId: user.restaurantId };
     } catch {
       return null;
@@ -113,11 +114,11 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /** Cierra en el acto los WebSockets de un usuario (p. ej. al desactivar su acceso) */
-  disconnectUser(userId: string) {
+  disconnectUser(userId: string, reason = 'Tu acceso al sistema fue desactivado') {
     if (!this.server) return;
     for (const client of this.server.sockets.sockets.values()) {
       if ((client.data.user as SocketUser | undefined)?.id === userId) {
-        this.reject(client, 'Tu acceso al sistema fue desactivado');
+        this.reject(client, reason);
       }
     }
   }

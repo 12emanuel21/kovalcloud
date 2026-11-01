@@ -1,13 +1,15 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards, ValidationPipe } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
+import { SUDO_HEADER } from '../auth/sudo';
 import { UsersService } from './users.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+import { UpdateEmployeePasswordDto } from './dto/update-employee-password.dto';
 
 /** Gestión del equipo del restaurante: solo OWNER y SUPERADMIN (KITCHEN queda fuera) */
 @Controller('users')
@@ -37,5 +39,16 @@ export class UsersController {
     @Body() dto: UpdateUserStatusDto,
   ) {
     return this.usersService.updateStatus(user, id, dto.isActive);
+  }
+
+  // Sudo Mode si el gestor tiene 2FA activo (el servicio lo valida con x-sudo-token)
+  @Patch(':id/password')
+  resetPassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateEmployeePasswordDto,
+    @Headers(SUDO_HEADER) sudoToken?: string,
+  ) {
+    return this.usersService.resetEmployeePassword(user, id, dto.password, sudoToken);
   }
 }

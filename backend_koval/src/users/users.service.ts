@@ -10,9 +10,10 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { resolveTenantFilter, type TenantUser } from '../auth/tenant-access';
+import { TwoFactorAuthService } from '../auth/two-factor-auth.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 
-type Manager = TenantUser & { id: string };
+type Manager = TenantUser & { id: string; isTwoFactorEnabled?: boolean };
 
 /** Campos que se devuelven de un empleado (nunca la contraseña ni el secreto 2FA) */
 const employeeSelect = {
@@ -35,6 +36,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ordersGateway: OrdersGateway,
+    private readonly twoFactorAuth: TwoFactorAuthService,
   ) {}
 
   private assertManager(user: Manager) {
@@ -115,6 +117,38 @@ export class UsersService {
     // consulta isActive); los WebSockets abiertos (KDS) se cierran ahora mismo.
     if (!isActive) this.ordersGateway.disconnectUser(targetId);
 
+    return updated;
+  }
+
+  /**
+   * Nueva contraseña para una cuenta KITCHEN. OWNER: solo de su restaurante (otro -> 404);
+   * SUPERADMIN: de cualquiera. Con 2FA activo en la cuenta del gestor exige Sudo Mode.
+   * Cierra las sesiones abiertas del empleado (JWT anteriores y WebSockets del KDS).
+   */
+  async resetEmployeePassword(user: Manager, targetId: string, password: string, sudoToken?: string | string[]) {
+    this.assertManager(user);
+    if (user.isTwoFactorEnabled) {
+      await this.twoFactorAuth.assertSudo({ user: { id: user.id, isTwoFactorEnabled: true }, sudoToken });
+    }
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetId },
+      select: { id: true, role: true, restaurantId: true },
+    });
+    // Usuarios de otro restaurante: 404 para no revelar que existen
+    if (!target || (user.role === Role.OWNER && target.restaurantId !== user.restaurantId)) {
+      throw new NotFoundException('Empleado no encontrado');
+    }
+    if (target.role !== Role.KITCHEN) {
+      throw new ForbiddenException('Solo puedes cambiar la contraseña del personal de cocina');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: targetId },
+      data: { password: await bcrypt.hash(password, 10), passwordChangedAt: new Date() },
+      select: employeeSelect,
+    });
+    this.ordersGateway.disconnectUser(targetId, 'Tu contraseña cambió: inicia sesión de nuevo');
     return updated;
   }
 }
