@@ -23,6 +23,16 @@ const ACCENT = {
 
 type PaymentMethod = 'WOMPI' | 'CASH';
 
+/** Disponibilidad de un plato según la carta (o la consulta fresca al abrir el carrito) */
+interface MenuAvailability {
+  id: string;
+  isAvailable: boolean;
+}
+
+/** "A", "A y B", "A, B y C" */
+const joinNames = (names: string[]) =>
+  names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} y ${names[names.length - 1]}`;
+
 const Spinner = () => (
   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden>
     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -54,6 +64,8 @@ const WhatsAppIcon = () => (
 
 interface CartDrawerProps {
   restaurantId: string;
+  /** Platos de la carta: marca en el carrito los que ya no están disponibles */
+  menuItems?: MenuAvailability[];
   restaurantName?: string;
   /** Teléfono del local tal como se guardó (respaldo si el backend no envía whatsappNumber) */
   restaurantPhone?: string;
@@ -74,6 +86,7 @@ interface CartDrawerProps {
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
   restaurantId,
+  menuItems,
   restaurantName,
   restaurantPhone = '',
   whatsappNumber,
@@ -88,7 +101,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   // "Pagar en línea" solo con el interruptor del dueño encendido Y las llaves completas
   const canPayOnline = isWompiEnabled && onlinePaymentsEnabled;
   const accent = ACCENT;
-  const { items, totalCount, totalAmount, updateQuantity, removeItem, clearCart } = useCart();
+  const { items, totalCount, totalAmount, updateQuantity, removeItem, removeItems, clearCart } = useCart();
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
   const setIsOpen = (value: boolean) => (onOpenChange ? onOpenChange(value) : setInternalOpen(value));
@@ -96,6 +109,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   // Método con el que se está enviando (spinner en el botón correcto)
   const [submittingMethod, setSubmittingMethod] = useState<PaymentMethod | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Aviso tras quitar platos agotados al confirmar (el cliente revisa y reconfirma)
+  const [removedNotice, setRemovedNotice] = useState<string | null>(null);
+  // Disponibilidad consultada al abrir el carrito (la carta pudo cambiar desde que se cargó)
+  const [freshMenu, setFreshMenu] = useState<MenuAvailability[] | null>(null);
   // Pedido recién creado (efectivo): se confirma dentro del drawer
   const [confirmation, setConfirmation] = useState<{ orderId: string; whatsappUrl: string | null } | null>(null);
   // El chat SIEMPRE va al WhatsApp del local, nunca al teléfono que escribe el cliente
@@ -106,6 +123,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const closeDrawer = () => {
     setIsOpen(false);
     setConfirmation(null);
+    setRemovedNotice(null);
   };
 
   // Drawer abierto: Escape lo cierra y la página de fondo no hace scroll
@@ -124,6 +142,37 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     // closeDrawer cambia en cada render; solo importa si el drawer está abierto
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+
+  // Al abrir: se vuelve a consultar la carta para detectar platos agotados o retirados
+  useEffect(() => {
+    if (!isOpen || !restaurantId) return;
+    let cancelled = false;
+    fetch(`${API_URL}/menu-items?restaurantId=${encodeURIComponent(restaurantId)}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? (res.json() as Promise<MenuAvailability[]>) : null))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setFreshMenu(data);
+      })
+      .catch(() => {
+        // Sin red se usa la disponibilidad de la carta cargada; el backend valida igual al confirmar
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, restaurantId]);
+
+  // Platos del carrito que ya no se pueden pedir (agotados o retirados de la carta)
+  const availabilitySource = freshMenu ?? menuItems;
+  const unavailableIds = new Set<string>();
+  if (availabilitySource?.length) {
+    const availability = new Map(availabilitySource.map((m) => [m.id, m.isAvailable]));
+    for (const item of items) if (availability.get(item.id) !== true) unavailableIds.add(item.id);
+  }
+  const unavailableNames = items.filter((item) => unavailableIds.has(item.id)).map((item) => item.name);
+
+  const removeUnavailable = () => {
+    removeItems([...unavailableIds]);
+    setErrorMsg(null);
+  };
 
   // Campos del formulario
   const [customerName, setCustomerName] = useState('');
@@ -157,10 +206,15 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       setErrorMsg('Tu carrito está vacío.');
       return;
     }
+    if (unavailableIds.size > 0) {
+      setErrorMsg(`Quita ${joinNames(unavailableNames)} de tu pedido: ya no está disponible.`);
+      return;
+    }
 
     setIsSubmitting(true);
     setSubmittingMethod(paymentMethod);
     setErrorMsg(null);
+    setRemovedNotice(null);
 
     try {
       // 1. Enviar orden a la API de NestJS
@@ -189,7 +243,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || `Error al procesar el pedido (${res.status})`);
+        // Platos agotados desde que se agregaron: se quitan solo esos y el cliente reconfirma
+        if (errorData.code === 'ITEMS_UNAVAILABLE' && Array.isArray(errorData.unavailableItemIds)) {
+          const ids: string[] = errorData.unavailableItemIds;
+          const names = items.filter((item) => ids.includes(item.id)).map((item) => item.name);
+          const remaining = items.filter((item) => !ids.includes(item.id)).length;
+          removeItems(ids);
+          setRemovedNotice(
+            `${names.length ? joinNames(names) : 'Algunos productos'} se ${names.length > 1 ? 'agotaron' : 'agotó'} y lo quitamos de tu pedido. ` +
+              (remaining > 0 ? 'Revisa el total y vuelve a confirmar.' : 'Agrega otros platos de la carta para continuar.'),
+          );
+          return;
+        }
+        const message = Array.isArray(errorData.message) ? errorData.message.join('. ') : errorData.message;
+        throw new Error(message || `Error al procesar el pedido (${res.status})`);
       }
 
       const createdOrder: { id: string; wompiCheckoutUrl?: string | null } = await res.json();
@@ -207,7 +274,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       if (paymentMethod === 'WOMPI' && createdOrder.wompiCheckoutUrl) {
         resetForm();
         setIsOpen(false);
-        window.location.href = createdOrder.wompiCheckoutUrl;
+        window.location.assign(createdOrder.wompiCheckoutUrl);
         return;
       }
 
@@ -236,7 +303,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       // en ese caso se navega en la misma pestaña (el pedido ya está guardado).
       if (whatsappUrl) {
         const popup = window.open(whatsappUrl, '_blank');
-        if (!popup) window.location.href = whatsappUrl;
+        if (!popup) window.location.assign(whatsappUrl);
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error inesperado al crear el pedido';
@@ -392,26 +459,56 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   Resumen de Productos
                 </h3>
 
+                {removedNotice && (
+                  <div role="alert" className="rounded-sf border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-medium text-sf-text">
+                    {removedNotice}
+                  </div>
+                )}
+
+                {unavailableIds.size > 0 && (
+                  <div role="alert" className="flex items-center justify-between gap-3 rounded-sf border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-medium text-sf-text">
+                    <span>
+                      {joinNames(unavailableNames)} ya no {unavailableIds.size > 1 ? 'están disponibles' : 'está disponible'}.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={removeUnavailable}
+                      className="shrink-0 rounded-sf border border-amber-500/40 px-2.5 py-1 font-bold transition hover:bg-amber-500/15"
+                    >
+                      {unavailableIds.size > 1 ? 'Quitar agotados' : 'Quitar'}
+                    </button>
+                  </div>
+                )}
+
                 {items.length === 0 ? (
                   <div className="text-center py-8 text-sf-muted space-y-2">
                     <p className="text-sm">No hay productos en el carrito.</p>
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {items.map((item) => (
+                    {items.map((item) => {
+                      const soldOut = unavailableIds.has(item.id);
+                      return (
                       <div
                         key={item.id}
-                        className="bg-sf-bg/70 border border-sf-border rounded-sf p-3 flex items-center justify-between gap-3"
+                        className={`bg-sf-bg/70 border rounded-sf p-3 flex items-center justify-between gap-3 ${
+                          soldOut ? 'border-amber-500/40' : 'border-sf-border'
+                        }`}
                       >
-                        <div className="min-w-0 flex-1">
+                        <div className={`min-w-0 flex-1 ${soldOut ? 'opacity-60' : ''}`}>
                           <p className="text-sm font-semibold text-sf-text truncate">{item.name}</p>
-                          <p className={`text-xs ${accent.text} font-medium`}>
-                            {formatCOP(item.price * item.quantity)}
-                          </p>
+                          {soldOut ? (
+                            <p className="text-xs font-bold uppercase tracking-wider text-sf-text">Agotado</p>
+                          ) : (
+                            <p className={`text-xs ${accent.text} font-medium`}>
+                              {formatCOP(item.price * item.quantity)}
+                            </p>
+                          )}
                         </div>
 
-                        {/* Controles de Cantidad */}
+                        {/* Controles de Cantidad (un agotado solo se puede quitar) */}
                         <div className="flex items-center gap-2">
+                          {!soldOut && (
                           <div className="flex items-center bg-sf-card border border-sf-border rounded-sf p-0.5">
                             <button
                               type="button"
@@ -431,6 +528,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                               +
                             </button>
                           </div>
+                          )}
 
                           <button
                             type="button"
@@ -455,7 +553,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

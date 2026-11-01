@@ -61,7 +61,7 @@ export default async function MenuPage({
   }
 
   return (
-    <CartProvider>
+    <CartProvider restaurantId={restaurant.id}>
       <div className={storefrontFontVariables}>
         <MenuView restaurant={restaurant} tableNumber={table} returnedOrderId={returnedOrderId} />
       </div>

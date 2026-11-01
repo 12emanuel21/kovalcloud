@@ -121,10 +121,21 @@ export class OrdersService {
       },
     });
 
-    if (menuItems.length !== new Set(menuItemIds).size) {
-      throw new NotFoundException(
-        'Uno o más productos no pertenecen al restaurante, no existen o no están disponibles',
-      );
+    // Agotados, borrados o ajenos al restaurante: se devuelven sus IDs para que el carrito
+    // los quite y el cliente reconfirme (un carrito guardado puede quedar desactualizado)
+    const foundIds = new Set(menuItems.map((m) => m.id));
+    const unavailableItemIds = [...new Set(menuItemIds)].filter((id) => !foundIds.has(id));
+    if (unavailableItemIds.length > 0) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        code: 'ITEMS_UNAVAILABLE',
+        message:
+          unavailableItemIds.length === 1
+            ? 'Uno de los productos de tu pedido ya no está disponible'
+            : 'Algunos productos de tu pedido ya no están disponibles',
+        unavailableItemIds,
+      });
     }
 
     let calculatedTotal = 0;

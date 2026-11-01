@@ -14,6 +14,8 @@ interface CartContextType {
   items: CartItem[];
   addItem: (item: Omit<CartItem, 'quantity'>, quantity?: number) => void;
   removeItem: (id: string) => void;
+  /** Quita varios platos de una vez (ej. los que el backend reporta agotados) */
+  removeItems: (ids: string[]) => void;
   updateQuantity: (id: string, quantity: number) => void;
   clearCart: () => void;
   totalCount: number;
@@ -22,33 +24,43 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
-export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [items, setItems] = useState<CartItem[]>([]);
-  const [isHydrated, setIsHydrated] = useState(false);
+/** Clave anterior, compartida por todos los locales (mezclaba carritos): se descarta */
+const LEGACY_CART_KEY = 'koval_cart';
 
-  // Cargar carrito desde localStorage al montar
+/**
+ * Un carrito por restaurante: cada carta guarda el suyo en koval_cart_<restaurantId>,
+ * así los platos de un local nunca llegan al pedido de otro.
+ */
+export const CartProvider: React.FC<{ restaurantId: string; children: React.ReactNode }> = ({ restaurantId, children }) => {
+  const storageKey = `koval_cart_${restaurantId}`;
+  const [items, setItems] = useState<CartItem[]>([]);
+  // Clave cuyo contenido ya se cargó: hasta entonces no se escribe (evita pisar el carrito
+  // del local nuevo con el del anterior al navegar entre cartas)
+  const [hydratedKey, setHydratedKey] = useState<string | null>(null);
+
+  // Cargar el carrito de este restaurante desde localStorage
   useEffect(() => {
+    let saved: CartItem[] = [];
     try {
-      const savedCart = localStorage.getItem('koval_cart');
-      if (savedCart) {
-        setItems(JSON.parse(savedCart));
-      }
+      localStorage.removeItem(LEGACY_CART_KEY);
+      const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      if (Array.isArray(parsed)) saved = parsed as CartItem[];
     } catch (e) {
       console.error('Error al leer carrito local:', e);
     }
-    setIsHydrated(true);
-  }, []);
+    setItems(saved);
+    setHydratedKey(storageKey);
+  }, [storageKey]);
 
   // Guardar en localStorage ante cambios
   useEffect(() => {
-    if (isHydrated) {
-      try {
-        localStorage.setItem('koval_cart', JSON.stringify(items));
-      } catch (e) {
-        console.error('Error al guardar carrito local:', e);
-      }
+    if (hydratedKey !== storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(items));
+    } catch (e) {
+      console.error('Error al guardar carrito local:', e);
     }
-  }, [items, isHydrated]);
+  }, [items, hydratedKey, storageKey]);
 
   const addItem = (item: Omit<CartItem, 'quantity'>, quantity: number = 1) => {
     setItems((prevItems) => {
@@ -69,6 +81,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setItems((prevItems) => prevItems.filter((item) => item.id !== id));
   };
 
+  const removeItems = (ids: string[]) => {
+    const remove = new Set(ids);
+    setItems((prevItems) => prevItems.filter((item) => !remove.has(item.id)));
+  };
+
   const updateQuantity = (id: string, quantity: number) => {
     if (quantity <= 0) {
       removeItem(id);
@@ -82,7 +99,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearCart = () => {
     setItems([]);
     try {
-      localStorage.removeItem('koval_cart');
+      localStorage.removeItem(storageKey);
     } catch (e) {
       console.error(e);
     }
@@ -97,6 +114,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         items,
         addItem,
         removeItem,
+        removeItems,
         updateQuantity,
         clearCart,
         totalCount,

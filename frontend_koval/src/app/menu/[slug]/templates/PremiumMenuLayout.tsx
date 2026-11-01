@@ -64,6 +64,8 @@ export function PremiumMenuLayout({
   const [query, setQuery] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
   const [showPaymentReturn, setShowPaymentReturn] = useState(Boolean(returnedOrderId));
+  // Disponibilidad de la carta: el carrito marca los platos que se agotaron desde que se agregaron
+  const menuItems = useMemo(() => categories.flatMap((category) => category.items), [categories]);
 
   const statusLabel = useMemo(() => {
     if (isClosed) return 'Cerrado ahora';
@@ -417,6 +419,7 @@ export function PremiumMenuLayout({
         open={cartOpen}
         onOpenChange={setCartOpen}
         restaurantId={restaurant.id}
+        menuItems={menuItems}
         restaurantName={restaurant.name}
         restaurantPhone={restaurant.phone || ''}
         whatsappNumber={whatsappNumber}
