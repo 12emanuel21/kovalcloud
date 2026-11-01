@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
+import { ToggleAvailabilityDto } from './dto/toggle-availability.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertTenantAccess, TenantUser } from '../auth/tenant-access';
 import {
@@ -128,6 +129,16 @@ export class MenuItemsService {
     // Si se reemplazó o quitó una foto subida aquí, se borra el archivo
     if (imageUrl !== undefined && imageUrl !== item.imageUrl) await this.deleteLocalImage(item.imageUrl);
     return updated;
+  }
+
+  /** Marca el plato disponible/agotado sin tocar el resto de campos */
+  async toggleAvailability(id: string, dto: ToggleAvailabilityDto, user: TenantUser) {
+    const item = await this.findOne(id);
+    assertTenantAccess(user, item.restaurantId);
+    return await this.prisma.menuItem.update({
+      where: { id },
+      data: { isAvailable: dto.isAvailable ?? !item.isAvailable },
+    });
   }
 
   /**

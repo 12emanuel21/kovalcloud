@@ -298,7 +298,7 @@ export default function MenuManagementPage() {
 
     try {
       const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
-      const res = await fetch(`${API_URL}/menu-items/${item.id}`, {
+      const res = await fetch(`${API_URL}/menu-items/${item.id}/toggle-availability`, {
         method: 'PATCH',
         headers: {
           'Authorization': 'Bearer ' + currentToken,
