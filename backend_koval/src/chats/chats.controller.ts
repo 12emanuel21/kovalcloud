@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Res, StreamableFile, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -22,6 +23,26 @@ export class ChatsController {
   @Get()
   listConversations(@Param('id') restaurantId: string) {
     return this.chatsService.listConversations(restaurantId);
+  }
+
+  /**
+   * Adjunto de un chat (foto, comprobante, nota de voz, PDF) o la carta en PDF ("menu.pdf").
+   * Con sesión: los comprobantes no se publican por nginx. Va antes de ":phone" para no confundirse.
+   */
+  @Get('media/:file')
+  async getMedia(
+    @Param('id') restaurantId: string,
+    @Param('file') file: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const media = await this.chatsService.openMedia(restaurantId, file);
+    res.set({
+      'Content-Type': media.mime,
+      'Content-Disposition': `inline; filename="${media.downloadName}"`,
+      'Cache-Control': 'private, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    return new StreamableFile(media.stream);
   }
 
   @Get(':phone')

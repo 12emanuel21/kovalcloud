@@ -1,6 +1,9 @@
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
+  normalizeMessageContent,
   useMultiFileAuthState,
+  WAMessage,
   WASocket,
 } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode-terminal';
@@ -8,7 +11,7 @@ import pino from 'pino';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import { notifySessionNumber, sendToNestjs } from './nestjsBridge';
+import { IncomingMedia, notifySessionNumber, sendToNestjs, uploadMediaToNestjs } from './nestjsBridge';
 
 dotenv.config();
 
@@ -34,6 +37,53 @@ interface Session {
 }
 
 const sessions = new Map<string, Session>();
+
+/** Mismo tope que el backend (MAX_CHAT_MEDIA_BYTES): más grande no se descarga */
+const MAX_MEDIA_BYTES = 16 * 1024 * 1024;
+const mediaLogger = pino({ level: 'silent' });
+
+/**
+ * Adjunto de un mensaje entrante (foto, comprobante, PDF, nota de voz). Las fotos, documentos y
+ * audios se descargan y se suben al backend, que los guarda para el Inbox; video y stickers solo
+ * se anuncian (el backend los anota como no soportados).
+ */
+async function extractIncomingMedia(sock: WASocket, restaurantId: string, msg: WAMessage): Promise<IncomingMedia | null> {
+  const content = normalizeMessageContent(msg.message);
+  const document = content?.documentMessage ?? content?.documentWithCaptionMessage?.message?.documentMessage;
+  const source = content?.imageMessage
+    ? { type: 'image' as const, media: content.imageMessage }
+    : document
+      ? { type: 'document' as const, media: document }
+      : content?.audioMessage
+        ? { type: 'audio' as const, media: content.audioMessage }
+        : content?.videoMessage
+          ? { type: 'video' as const, media: content.videoMessage }
+          : content?.stickerMessage
+            ? { type: 'sticker' as const, media: content.stickerMessage }
+            : null;
+  if (!source) return null;
+
+  const mimetype = source.media.mimetype || undefined;
+  const filename = 'fileName' in source.media ? source.media.fileName || undefined : undefined;
+  const size = Number(source.media.fileLength ?? 0);
+  if (source.type === 'video' || source.type === 'sticker' || size > MAX_MEDIA_BYTES) {
+    return { type: source.type, mimetype, filename };
+  }
+
+  try {
+    const buffer = await downloadMediaMessage(
+      msg,
+      'buffer',
+      {},
+      { logger: mediaLogger, reuploadRequest: sock.updateMediaMessage },
+    );
+    const id = await uploadMediaToNestjs(restaurantId, buffer, mimetype, filename);
+    return { type: source.type, id: id ?? undefined, mimetype, filename };
+  } catch (err: any) {
+    console.error(`[${restaurantId}] No se pudo descargar el adjunto (${source.type}): ${err?.message || err}`);
+    return { type: source.type, mimetype, filename };
+  }
+}
 
 // El restaurantId se usa como nombre de carpeta: solo caracteres seguros (UUID, slug)
 const RESTAURANT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -170,13 +220,26 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
         continue;
       }
 
+      const content = normalizeMessageContent(msg.message);
       const messageText =
-        msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        msg.message.imageMessage?.caption ||
+        content?.conversation ||
+        content?.extendedTextMessage?.text ||
+        content?.imageMessage?.caption ||
+        content?.videoMessage?.caption ||
+        content?.documentMessage?.caption ||
+        content?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
         '';
+      const hasMedia = Boolean(
+        content?.imageMessage ||
+          content?.documentMessage ||
+          content?.documentWithCaptionMessage ||
+          content?.audioMessage ||
+          content?.videoMessage ||
+          content?.stickerMessage,
+      );
 
-      if (!messageText.trim()) continue;
+      // Antes se descartaba todo lo que no traía texto (fotos sin texto, comprobantes, notas de voz)
+      if (!messageText.trim() && !hasMedia) continue;
 
       const senderNumber = remoteJid.split('@')[0];
       session.knownJids.set(senderNumber, remoteJid);
@@ -188,8 +251,9 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
         await sock.sendPresenceUpdate('composing', remoteJid);
 
         const messageId = msg.key.id || `baileys_${Date.now()}`;
+        const media = hasMedia ? await extractIncomingMedia(sock, restaurantId, msg) : null;
         // Reenvío al adaptador de NestJS emulando Meta Cloud API
-        await sendToNestjs(restaurantId, remoteJid, messageText, messageId, pushName);
+        await sendToNestjs(restaurantId, remoteJid, messageText, messageId, pushName, media);
 
         await sock.sendPresenceUpdate('paused', remoteJid);
       } catch (err) {

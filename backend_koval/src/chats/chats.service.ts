@@ -1,7 +1,9 @@
 import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
+import { createReadStream, promises as fs } from 'fs';
 import { CHAT_ROLE_AGENT, CHAT_ROLE_SYSTEM, CHAT_ROLE_USER } from './chat-history';
+import { MENU_PDF_MEDIA, chatMediaMime, chatMediaPath } from './chat-media';
 import {
   BOT_PAUSED_MARKER,
   BOT_RESUMED_MARKER,
@@ -10,6 +12,18 @@ import {
   resolveHandover,
   type HandoverState,
 } from './handover';
+
+/** Campos de un mensaje en la vista del chat (con su adjunto, si tiene) */
+const chatMessageSelect = {
+  id: true,
+  role: true,
+  message: true,
+  mediaType: true,
+  mediaUrl: true,
+  mediaName: true,
+  mediaMime: true,
+  createdAt: true,
+} as const;
 
 /** Largo máximo del snippet del último mensaje en la bandeja */
 const SNIPPET_LENGTH = 160;
@@ -113,8 +127,18 @@ export class ChatsService {
     return this.prisma.chatHistory.findMany({
       where: { restaurantId, customerPhone },
       orderBy: { createdAt: 'asc' },
-      select: { id: true, role: true, message: true, createdAt: true },
+      select: chatMessageSelect,
     });
+  }
+
+  /** Abre un adjunto del restaurante para servirlo (404 si el nombre no es válido o no existe) */
+  async openMedia(restaurantId: string, file: string) {
+    const filePath = chatMediaPath(restaurantId, file);
+    if (!filePath || !(await fs.stat(filePath).then((s) => s.isFile()).catch(() => false))) {
+      throw new NotFoundException('Archivo no encontrado');
+    }
+    const mime = file === MENU_PDF_MEDIA ? 'application/pdf' : chatMediaMime(file);
+    return { stream: createReadStream(filePath), mime, downloadName: file === MENU_PDF_MEDIA ? 'Menu.pdf' : file };
   }
 
   /** Canal de envío: Meta si el local tiene credenciales; si no, su sesión de WhatsApp Web (Baileys) */
@@ -208,7 +232,7 @@ export class ChatsService {
     }
     const saved = await this.prisma.chatHistory.create({
       data: { restaurantId, customerPhone, role: CHAT_ROLE_AGENT, message },
-      select: { id: true, role: true, message: true, createdAt: true },
+      select: chatMessageSelect,
     });
     return { message: saved, status: await this.getStatus(restaurantId, customerPhone) };
   }

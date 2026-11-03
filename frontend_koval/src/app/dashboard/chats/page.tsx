@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Bot, Headset, Loader2, MessagesSquare, RefreshCw, Send, User } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { RESTAURANT_TIMEZONE } from '@/lib/business-hours';
+import { ChatMediaAttachment, stripMediaLabel, type ChatMediaType } from '@/components/chats/ChatMedia';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -43,6 +44,10 @@ interface ChatMessage {
   id: string;
   role: string;
   message: string;
+  /** Adjunto: foto / comprobante, nota de voz o PDF (la carta enviada por el bot incluida) */
+  mediaType?: ChatMediaType | null;
+  mediaUrl?: string | null;
+  mediaName?: string | null;
   createdAt: string;
 }
 
@@ -458,7 +463,27 @@ export default function ChatsPage() {
                             {fromAgent ? <Headset className="h-3 w-3" /> : fromBot ? <Bot className="h-3 w-3" /> : <User className="h-3 w-3" />}
                             {fromAgent ? 'Equipo' : fromBot ? 'Bot' : 'Cliente'}
                           </p>
-                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.message}</p>
+                          {msg.mediaType && msg.mediaUrl && (
+                            <ChatMediaAttachment
+                              restaurantId={restaurantId}
+                              type={msg.mediaType}
+                              mediaUrl={msg.mediaUrl}
+                              name={msg.mediaName}
+                              tone={fromLocal ? 'color' : 'dark'}
+                            />
+                          )}
+                          {(() => {
+                            const text = stripMediaLabel(msg.message, msg.mediaUrl ? msg.mediaType : null);
+                            if (!text) return null;
+                            // Nota de voz: el texto es la transcripción que leyó el bot
+                            const transcript = msg.mediaType === 'audio' && msg.mediaUrl && text === msg.message;
+                            return (
+                              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                                {transcript && <span className="mr-1 text-[11px] font-semibold opacity-70">Transcripción:</span>}
+                                {text}
+                              </p>
+                            );
+                          })()}
                           <p
                             className={`mt-1 text-right text-[10px] ${
                               fromAgent ? 'text-blue-100/70' : fromBot ? 'text-emerald-100/70' : 'text-slate-500'
