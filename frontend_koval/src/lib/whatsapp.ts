@@ -1,3 +1,5 @@
+import { orderNumberLabel } from './order-number';
+
 /**
  * WhatsApp del local en la carta pública (wa.me/<número>).
  * wa.me exige el número internacional solo con dígitos: sin indicativo ("3001234567") o vacío
@@ -16,13 +18,13 @@ export function whatsappLink(number: string, text?: string): string {
   return `https://wa.me/${number}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
 }
 
-/** "f2796cc8-fa48-…" -> "F2796CC8" (la misma referencia corta que usa el bot y el Kanban) */
-export const shortOrderId = (id: string) => id.slice(0, 8).toUpperCase();
 
 const formatCOP = (value: number) => `$${value.toLocaleString('es-CO')}`;
 
 export interface OrderWhatsAppDetails {
   orderId: string;
+  /** Turno del día (#07), la misma referencia que ven el Kanban y el repartidor */
+  dailyNumber?: number | null;
   restaurantName?: string;
   customerName: string;
   items: Array<{ name: string; quantity: number; price: number }>;
@@ -36,7 +38,7 @@ export interface OrderWhatsAppDetails {
 export function buildOrderWhatsAppMessage(order: OrderWhatsAppDetails): string {
   const lines = [
     `¡Hola${order.restaurantName ? ` ${order.restaurantName}` : ''}! Soy ${order.customerName} 👋`,
-    `Acabo de hacer el pedido *#${shortOrderId(order.orderId)}*:`,
+    `Acabo de hacer el pedido *${orderNumberLabel({ id: order.orderId, dailyNumber: order.dailyNumber })}*:`,
     '',
     ...order.items.map((item) => `• ${item.quantity}x ${item.name} — ${formatCOP(item.price * item.quantity)}`),
     '',

@@ -53,9 +53,14 @@ describe('MetaWhatsAppService', () => {
             order: {
               create: jest.fn().mockResolvedValue({
                 id: 'order-123',
+                restaurantId: 'rest-1',
                 total: 25000,
                 status: 'PENDING',
+                createdAt: new Date(),
               }),
+              // 2 pedidos antes en la jornada -> turno #03
+              count: jest.fn().mockResolvedValue(2),
+              findFirst: jest.fn().mockResolvedValue(null),
             },
             autoReply: {
               findMany: jest.fn().mockResolvedValue([]),

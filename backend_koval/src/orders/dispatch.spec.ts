@@ -22,6 +22,7 @@ const order = {
   orderType: 'DELIVERY',
   status: 'PREPARING',
   dispatchedAt: null,
+  createdAt: new Date('2026-11-03T15:00:00Z'),
   items: [
     { quantity: 2, menuItem: { name: 'Clásica BQ' } },
     { quantity: 1, menuItem: { name: 'Limonada' } },
@@ -31,21 +32,23 @@ const driver = { id: 'drv-1', name: 'Juan Pérez', phone: '573109998877', vehicl
 
 describe('Mensajes del despacho', () => {
   const d = { name: driver.name, phone: driver.phone, vehicle: driver.vehicleInfo };
-  const o = { ...order, customerPhone: '573001234567' };
+  const o = { ...order, dailyNumber: 7, customerPhone: '573001234567' };
 
   it('al cliente: repartidor, vehículo, tiempo y wa.me con texto precargado del pedido', () => {
     const text = buildCustomerDispatchMessage(o, d, 'Burger BQ', 25);
-    expect(text).toContain('#0F8FAD5B');
+    expect(text).toContain('¡Tu pedido *#07* de Burger BQ va en camino!');
+    expect(text).not.toContain('0F8FAD5B');
     expect(text).toContain('Repartidor: *Juan Pérez*');
     expect(text).toContain('Vehículo: Moto AKT · ABC12D');
     expect(text).toContain('aprox. 25 minutos');
     const link = text.match(/https:\/\/wa\.me\/573109998877\?text=(\S+)/);
-    expect(decodeURIComponent(link![1])).toBe('Hola Juan, soy Carlos. Te escribo por mi pedido #0F8FAD5B de Burger BQ.');
+    expect(decodeURIComponent(link![1])).toBe('Hola Juan, soy Carlos. Te escribo por mi pedido #07 de Burger BQ.');
     expect(buildCustomerDispatchMessage(o, { ...d, vehicle: null }, 'Burger BQ')).toContain('aprox. 15-20 minutos');
   });
 
   it('al repartidor: dirección con mapa, platos, cobro y wa.me al cliente', () => {
     const text = buildDriverDispatchMessage(o, d, 'Burger BQ');
+    expect(text).toContain('Domicilio · Burger BQ · Turno #07');
     expect(text).toContain('Dirección: Cra 45 # 26-85, Barrio Centro');
     expect(text).toContain('https://www.google.com/maps/search/?api=1&query=');
     expect(text).toContain('• 2x Clásica BQ');
@@ -61,6 +64,8 @@ describe('OrdersService.dispatch', () => {
     const prisma: any = {
       order: {
         findUnique: jest.fn().mockResolvedValue({ ...order, ...stored }),
+        // 6 pedidos antes en la jornada -> turno #07
+        count: jest.fn().mockResolvedValue(6),
         update: jest.fn().mockImplementation(({ data }) =>
           Promise.resolve({ ...order, ...stored, ...data, restaurant: { name: 'Burger BQ', whatsappPhoneId: null, whatsappToken: null } }),
         ),

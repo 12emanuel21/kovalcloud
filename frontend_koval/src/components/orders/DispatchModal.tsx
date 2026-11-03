@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Bike, ChevronDown, Loader2, MapPin, X } from 'lucide-react';
+import { orderNumberLabel } from '@/lib/order-number';
 
 const API_URL = '/api';
 
@@ -14,6 +15,7 @@ interface Driver {
 
 export interface DispatchTarget {
   id: string;
+  dailyNumber?: number | null;
   restaurantId: string;
   customerName: string;
   deliveryAddress?: string | null;
@@ -127,7 +129,7 @@ export default function DispatchModal({
       <div className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-slate-800 bg-slate-900 shadow-2xl sm:rounded-2xl">
         <header className="flex items-start justify-between gap-3 border-b border-slate-800 p-5">
           <div className="min-w-0">
-            <p className="font-mono text-xs text-slate-500">#{order.id.slice(0, 8).toUpperCase()} · {order.customerName}</p>
+            <p className="font-mono text-xs text-slate-500">Turno {orderNumberLabel(order)} · {order.customerName}</p>
             <h2 id="dispatch-title" className="mt-0.5 text-xl font-bold text-slate-100">
               ¿Quién lleva este domicilio?
             </h2>

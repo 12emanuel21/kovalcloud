@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { ExportOrdersButton } from '@/components/orders/ExportOrdersButton';
+import { orderNumberLabel } from '@/lib/order-number';
 import {
   computeMetrics,
   latestOrders,
@@ -320,7 +321,7 @@ export default function CommandCenterPage() {
                     return (
                       <tr key={order.id} className="transition-colors hover:bg-slate-900/60">
                         <td className="px-5 py-3.5 font-mono text-xs text-slate-400">
-                          #{order.id.slice(0, 8).toUpperCase()}
+                          {orderNumberLabel(order)}
                         </td>
                         <td className="px-5 py-3.5">
                           <p className="font-medium text-slate-200">{order.customerName}</p>

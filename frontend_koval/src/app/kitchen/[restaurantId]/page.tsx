@@ -5,6 +5,7 @@ import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/context/AuthContext';
 import PrepareActions from '@/components/orders/PrepareActions';
 import DispatchModal from '@/components/orders/DispatchModal';
+import { orderNumberLabel } from '@/lib/order-number';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import {
   ChefHat,
@@ -38,6 +39,8 @@ interface OrderItem {
 interface Order {
   id: string;
   restaurantId: string;
+  /** Turno del día (#07) */
+  dailyNumber?: number;
   customerName: string;
   orderType?: OrderType;
   tableNumber?: string;
@@ -276,7 +279,7 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
   const handleDispatched = (order: Order, driverName: string) => {
     setOrders((prev) => prev.filter((o) => o.id !== order.id));
     setDispatchOrder(null);
-    setToast(`🛵 #${order.id.slice(0, 5).toUpperCase()} va en camino con ${driverName}. Avisamos al cliente y al repartidor por WhatsApp.`);
+    setToast(`🛵 Turno ${orderNumberLabel(order)} va en camino con ${driverName}. Avisamos al cliente y al repartidor por WhatsApp.`);
     window.setTimeout(() => setToast(null), 5000);
   };
 
@@ -344,7 +347,7 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
                     {/* Cabecera de la tarjeta */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="font-mono text-xs text-slate-500">#{order.id.slice(0, 5).toUpperCase()}</p>
+                        <p className="font-mono text-sm font-black text-amber-300" title={`Pedido ${order.id}`}>Turno {orderNumberLabel(order)}</p>
                         <p className="mt-1 flex items-center gap-2.5 text-3xl font-bold tracking-tight text-slate-100">
                           <TypeIcon className={`h-7 w-7 shrink-0 ${typeDisplay.iconClass}`} />
                           <span className="truncate">{typeDisplay.label(order)}</span>

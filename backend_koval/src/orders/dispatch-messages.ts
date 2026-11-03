@@ -1,3 +1,5 @@
+import { formatDailyNumber } from './daily-number';
+
 /**
  * Mensajes de WhatsApp del despacho a domicilio (POST /orders/:id/dispatch): al cliente con los
  * datos del repartidor y un wa.me para escribirle, y al repartidor con lo que necesita para entregar.
@@ -10,6 +12,8 @@ export interface DispatchDriver {
 
 export interface DispatchOrder {
   id: string;
+  /** Turno del día (#07): la referencia que usan el cliente, la cocina y el repartidor */
+  dailyNumber: number;
   customerName: string;
   customerPhone: string; // dígitos con indicativo
   deliveryAddress: string | null;
@@ -22,7 +26,6 @@ export interface DispatchOrder {
 /** Sin minutos: la franja típica de un domicilio */
 export const DEFAULT_ETA = '15-20';
 
-export const shortOrderId = (id: string) => id.slice(0, 8).toUpperCase();
 const firstName = (name: string) => name.trim().split(/\s+/)[0] || name.trim();
 const waLink = (phone: string, text: string) => `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 const formatCOP = (value: number) => `$${value.toLocaleString('es-CO')}`;
@@ -33,10 +36,10 @@ export function buildCustomerDispatchMessage(
   restaurantName: string,
   estimatedMinutes?: number,
 ): string {
-  const ref = shortOrderId(order.id);
-  const greeting = `Hola ${firstName(driver.name)}, soy ${firstName(order.customerName)}. Te escribo por mi pedido #${ref} de ${restaurantName}.`;
+  const ref = formatDailyNumber(order.dailyNumber);
+  const greeting = `Hola ${firstName(driver.name)}, soy ${firstName(order.customerName)}. Te escribo por mi pedido ${ref} de ${restaurantName}.`;
   return [
-    `🛵 ¡Tu pedido *#${ref}* de ${restaurantName} va en camino!`,
+    `🛵 ¡Tu pedido *${ref}* de ${restaurantName} va en camino!`,
     '',
     `👤 Repartidor: *${driver.name}*`,
     ...(driver.vehicle ? [`🏍️ Vehículo: ${driver.vehicle}`] : []),
@@ -48,12 +51,12 @@ export function buildCustomerDispatchMessage(
 }
 
 export function buildDriverDispatchMessage(order: DispatchOrder, driver: DispatchDriver, restaurantName: string): string {
-  const ref = shortOrderId(order.id);
+  const ref = formatDailyNumber(order.dailyNumber);
   const address = order.deliveryAddress?.trim();
-  const toCustomer = `Hola ${firstName(order.customerName)}, soy ${firstName(driver.name)}, el repartidor de ${restaurantName}. Voy en camino con tu pedido #${ref}.`;
+  const toCustomer = `Hola ${firstName(order.customerName)}, soy ${firstName(driver.name)}, el repartidor de ${restaurantName}. Voy en camino con tu pedido ${ref}.`;
   const paid = order.paymentStatus === 'PAID';
   return [
-    `📦 *Domicilio · ${restaurantName} · Pedido #${ref}*`,
+    `📦 *Domicilio · ${restaurantName} · Turno ${ref}*`,
     '',
     `👤 Cliente: ${order.customerName}`,
     `💬 Escríbele: ${waLink(order.customerPhone, toCustomer)}`,

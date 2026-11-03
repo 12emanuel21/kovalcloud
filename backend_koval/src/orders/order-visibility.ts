@@ -22,6 +22,8 @@ export function redactOrderFinancials<T extends WithMoney>(order: T): T {
   return {
     ...order,
     total: null,
+    // El comprobante de pago también es información financiera
+    ...('paymentProofUrl' in order ? { paymentProofUrl: null } : {}),
     ...(Array.isArray(order.items) ? { items: order.items.map(redactItem) } : {}),
   };
 }

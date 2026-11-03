@@ -3,6 +3,8 @@ export type OrderType = 'DINE_IN' | 'DELIVERY' | 'TAKEAWAY';
 
 export interface DashboardOrder {
   id: string;
+  /** Turno del día (#07) */
+  dailyNumber?: number;
   customerName: string;
   customerPhone: string;
   total: number;

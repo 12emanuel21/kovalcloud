@@ -18,6 +18,18 @@ import {
 } from '../chats/chat-history';
 import { getHandoverState } from '../chats/handover';
 import {
+  BAILEYS_MEDIA_PREFIX,
+  MENU_PDF_MEDIA,
+  chatMediaMime,
+  chatMediaPath,
+  describeChatMedia,
+  readChatMedia,
+  storeChatMedia,
+  type ChatMediaKind,
+  type StoredChatMedia,
+} from '../chats/chat-media';
+import { dailyNumberOf, formatDailyNumber } from '../orders/daily-number';
+import {
   buildConfirmationMessage,
   buildOrderLines,
   buildOrderNotes,
@@ -54,6 +66,38 @@ function extractPlainText(msg: any): string {
 /** Ventana para evitar pedidos duplicados si el cliente confirma dos veces */
 const DUPLICATE_ORDER_WINDOW_MS = 10 * 60 * 1000;
 
+/** Una imagen o PDF llegada hasta 12 h después de un pedido sin pagar se toma como su comprobante */
+const PAYMENT_PROOF_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+/** Tipos de mensaje de WhatsApp que traen archivo (Meta Cloud API y el puente de Baileys) */
+const MEDIA_MESSAGE_TYPES = ['image', 'document', 'audio', 'video', 'sticker'] as const;
+
+
+/** Adjunto de un mensaje entrante: guardado (o no soportado) y, si se descargó, su contenido */
+interface IncomingMedia {
+  kind: ChatMediaKind | 'unsupported';
+  stored: StoredChatMedia | null;
+  buffer: Buffer | null;
+}
+
+type ChatEntry = {
+  role: string;
+  message: string;
+  mediaType?: string | null;
+  mediaUrl?: string | null;
+  mediaName?: string | null;
+  mediaMime?: string | null;
+};
+
+/** Campos de adjunto de ChatHistory para un archivo guardado */
+const mediaFields = (stored: StoredChatMedia | null | undefined) =>
+  stored ? { mediaType: stored.kind, mediaUrl: stored.file, mediaName: stored.name, mediaMime: stored.mime } : {};
+
+export const PAYMENT_PROOF_ACK = (dailyNumber: number) =>
+  `🧾 ¡Recibimos tu comprobante del pedido ${formatDailyNumber(dailyNumber)}! Ya lo estamos validando 🙌`;
+export const IMAGE_RECEIVED_REPLY =
+  '📷 ¡Recibimos tu archivo! Si es el comprobante de pago, envíalo después de confirmar tu pedido. ¿En qué más te ayudamos?';
+
 export interface BotpressConverseResponse {
   responses: Array<{
     type: string;
@@ -77,15 +121,11 @@ export class MetaWhatsAppService {
    * Auditoría del Inbox: guarda en orden los mensajes de un intercambio que no pasó por la IA.
    * Nunca lanza: un fallo al registrar no debe afectar a la respuesta ya enviada.
    */
-  private async recordChat(
-    restaurantId: string,
-    customerPhone: string,
-    entries: Array<{ role: string; message: string }>,
-  ): Promise<void> {
+  private async recordChat(restaurantId: string, customerPhone: string, entries: ChatEntry[]): Promise<void> {
     try {
       // Inserciones secuenciales: createdAt creciente preserva el orden en el Inbox
-      for (const { role, message } of entries) {
-        await this.prisma.chatHistory.create({ data: { restaurantId, customerPhone, role, message } });
+      for (const entry of entries) {
+        await this.prisma.chatHistory.create({ data: { restaurantId, customerPhone, ...entry } });
       }
     } catch (error: any) {
       this.logger.error(`❌ No se pudo registrar el chat de ${customerPhone} en ChatHistory: ${error?.message || error}`);
@@ -331,6 +371,75 @@ export class MetaWhatsAppService {
     }
   }
 
+  /**
+   * Adjunto de un mensaje entrante: con Meta se descarga por su id; Baileys ya lo subió y manda la
+   * referencia. Se guarda en uploads/chat/<restaurantId>/ para el Inbox. Nunca lanza.
+   */
+  private async captureIncomingMedia(
+    restaurantId: string,
+    msg: any,
+    token: string,
+    isBaileys: boolean,
+  ): Promise<IncomingMedia | null> {
+    const type = MEDIA_MESSAGE_TYPES.find((t) => msg?.[t]);
+    if (!type) return null;
+    const media = msg[type];
+    const name: string | null = media?.filename ?? null;
+    if (type === 'video' || type === 'sticker') return { kind: 'unsupported', stored: null, buffer: null };
+
+    try {
+      if (isBaileys) {
+        const ref = typeof media?.id === 'string' && media.id.startsWith(BAILEYS_MEDIA_PREFIX) ? media.id.slice(BAILEYS_MEDIA_PREFIX.length) : null;
+        const filePath = ref ? chatMediaPath(restaurantId, ref) : null;
+        const exists = filePath ? await fs.promises.stat(filePath).then((s) => s.isFile()).catch(() => false) : false;
+        if (!ref || !exists || ref === MENU_PDF_MEDIA) {
+          return { kind: 'unsupported', stored: null, buffer: null };
+        }
+        const mime = chatMediaMime(ref);
+        const kind: ChatMediaKind = mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : 'document';
+        return { kind, stored: { kind, file: ref, mime, name }, buffer: null };
+      }
+
+      if (!media?.id || !token) return { kind: 'unsupported', stored: null, buffer: null };
+      const buffer = await this.downloadMedia(media.id, token);
+      const stored = await storeChatMedia(restaurantId, buffer, media.mime_type, name);
+      return stored ? { kind: stored.kind, stored, buffer } : { kind: 'unsupported', stored: null, buffer };
+    } catch (error: any) {
+      this.logger.error(`❌ No se pudo guardar el adjunto (${type}) de un mensaje entrante: ${error?.message || error}`);
+      return { kind: 'unsupported', stored: null, buffer: null };
+    }
+  }
+
+  /**
+   * Comprobante de pago: una imagen o PDF que llega poco después de un pedido sin pagar del mismo
+   * cliente queda adjunta al pedido; el Kanban la muestra para que el local valide y marque el pago.
+   */
+  private async attachPaymentProof(restaurantId: string, customerPhone: string, stored: StoredChatMedia) {
+    if (stored.kind === 'audio') return null;
+    const order = await this.prisma.order.findFirst({
+      where: {
+        restaurantId,
+        customerPhone,
+        status: { not: OrderStatus.CANCELLED },
+        paymentStatus: { not: 'PAID' },
+        createdAt: { gte: new Date(Date.now() - PAYMENT_PROOF_WINDOW_MS) },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!order) return null;
+
+    const updated = await this.prisma.order.update({
+      where: { id: order.id },
+      data: { paymentProofUrl: stored.file, paymentProofAt: new Date() },
+      include: { items: { include: { menuItem: true } } },
+    });
+    const dailyNumber = await dailyNumberOf(this.prisma, updated);
+    this.ordersGateway.emitOrderUpdated(restaurantId, { ...updated, dailyNumber });
+    this.logger.log(`🧾 Comprobante adjuntado al pedido ${updated.id} (turno ${formatDailyNumber(dailyNumber)})`);
+    return { ...updated, dailyNumber };
+  }
+
   async downloadMedia(mediaId: string, token: string): Promise<Buffer> {
     // 1. Obtener URL de descarga del nodo de media
     const res = await fetch(`https://graph.facebook.com/v22.0/${mediaId}`, {
@@ -475,12 +584,27 @@ export class MetaWhatsAppService {
         return;
       }
 
+      // 2.3. Adjuntos (fotos, comprobantes, PDFs, notas de voz): se guardan para verlos en el Inbox
+      const media = await this.captureIncomingMedia(restaurant.id, incomingMsg, targetToken, isBaileys);
+      const caption = extractPlainText(incomingMsg);
+      const incomingLabel = media ? describeChatMedia(media.kind, caption, media.stored?.name) : caption;
+      const userEntry = (message: string): ChatEntry => ({ role: CHAT_ROLE_USER, message, ...mediaFields(media?.stored) });
+      // Imagen o PDF tras un pedido sin pagar: es su comprobante (queda adjunto al pedido en el Kanban)
+      const proofOrder = media?.stored ? await this.attachPaymentProof(restaurant.id, senderNumber, media.stored) : null;
+
       // 2.4. Handover humano: el equipo atiende esta conversación desde el Inbox. Se registra el
       //      mensaje del cliente (sin transcribir audio ni llamar a la IA) y no se responde nada.
       if ((await getHandoverState(this.prisma, restaurant.id, senderNumber)).botPaused) {
         this.logger.log(`👤 [${restaurant.name}] Bot pausado para [${senderNumber}]: lo atiende un humano`);
-        const incomingText = extractPlainText(incomingMsg) || (incomingMsg.audio?.id ? '🎙️ [Nota de voz]' : '');
-        if (incomingText) await this.recordChat(restaurant.id, senderNumber, [{ role: CHAT_ROLE_USER, message: incomingText }]);
+        if (incomingLabel) await this.recordChat(restaurant.id, senderNumber, [userEntry(incomingLabel)]);
+        return;
+      }
+
+      // 2.45. Comprobante recibido: acuse inmediato, sin IA (también con el local ya cerrado)
+      if (proofOrder) {
+        const ack = PAYMENT_PROOF_ACK(proofOrder.dailyNumber);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, ack, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [userEntry(incomingLabel), { role: CHAT_ROLE_MODEL, message: ack }]);
         return;
       }
 
@@ -491,31 +615,38 @@ export class MetaWhatsAppService {
         const closedMessage = buildClosedMessage(restaurant);
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, closedMessage, isBaileys);
         // Auditoría del Inbox: el audio no se transcribe con el local cerrado
-        const incomingText = extractPlainText(incomingMsg) || (incomingMsg.audio?.id ? '🎙️ [Nota de voz]' : '');
         await this.recordChat(restaurant.id, senderNumber, [
-          ...(incomingText ? [{ role: CHAT_ROLE_USER, message: incomingText }] : []),
+          ...(incomingLabel ? [userEntry(incomingLabel)] : []),
           { role: CHAT_ROLE_MODEL, message: closedMessage },
         ]);
         return;
       }
 
       // 3. Extraer el texto del mensaje según su tipo
-      let messageText = extractPlainText(incomingMsg);
-      if (!messageText && incomingMsg.audio?.id) {
-        this.logger.log(`🎙️ Mensaje de voz recibido (Media ID: ${incomingMsg.audio.id}). Descargando y transcribiendo...`);
+      let messageText = caption;
+      if (!messageText && media?.kind === 'audio' && media.stored) {
+        this.logger.log(`🎙️ Nota de voz recibida (${media.stored.file}). Transcribiendo...`);
         try {
-          const audioBuffer = await this.downloadMedia(incomingMsg.audio.id, targetToken);
-          messageText = await this.aiService.transcribeAudio(
-            audioBuffer,
-            incomingMsg.audio.mime_type || 'audio/ogg',
-          );
-          this.logger.log(`🎙️ Audio transcrito con éxito: "${messageText}"`);
+          const audioBuffer = media.buffer ?? (await readChatMedia(restaurant.id, media.stored.file));
+          if (audioBuffer) {
+            messageText = await this.aiService.transcribeAudio(audioBuffer, media.stored.mime);
+            this.logger.log(`🎙️ Audio transcrito con éxito: "${messageText}"`);
+          }
         } catch (audioErr: any) {
           this.logger.error(`❌ Error al procesar audio: ${audioErr?.message || audioErr}`);
         }
       }
 
+      // Foto o documento sin texto (y que no es comprobante): la IA no ve imágenes; se acusa recibo
+      if (!messageText?.trim() && media && media.kind !== 'audio') {
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, IMAGE_RECEIVED_REPLY, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [userEntry(incomingLabel), { role: CHAT_ROLE_MODEL, message: IMAGE_RECEIVED_REPLY }]);
+        return;
+      }
+
       if (!messageText || !messageText.trim()) {
+        // Nota de voz que no se pudo transcribir: al menos queda en el Inbox
+        if (media) await this.recordChat(restaurant.id, senderNumber, [userEntry(incomingLabel)]);
         this.logger.debug(`Mensaje recibido de ${senderNumber} sin contenido de texto o caption soportado`);
         return;
       }
@@ -539,7 +670,7 @@ export class MetaWhatsAppService {
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, resetReply, isBaileys);
         // Sin borrado físico: el marcador va al final para que la IA arranque limpia tras él
         await this.recordChat(restaurant.id, senderNumber, [
-          { role: CHAT_ROLE_USER, message: messageText.trim() },
+          userEntry(messageText.trim()),
           { role: CHAT_ROLE_MODEL, message: resetReply },
           { role: CHAT_ROLE_SYSTEM, message: RESET_CONTEXT_MARKER },
         ]);
@@ -573,18 +704,25 @@ export class MetaWhatsAppService {
           const pdfUrl =
             matchedReply.responseBody ||
             'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
-          const caption = '📄 Aquí tienes nuestro menú. ¡Dime qué te gustaría ordenar!';
-          await this.sendDocumentMessage(targetPhoneId, targetToken, senderNumber, pdfUrl, "Menu.pdf", caption, isBaileys);
+          const pdfCaption = '📄 Aquí tienes nuestro menú. ¡Dime qué te gustaría ordenar!';
+          await this.sendDocumentMessage(targetPhoneId, targetToken, senderNumber, pdfUrl, "Menu.pdf", pdfCaption, isBaileys);
           await this.recordChat(restaurant.id, senderNumber, [
-            { role: CHAT_ROLE_USER, message: messageText.trim() },
-            { role: CHAT_ROLE_MODEL, message: `${caption}\n📎 ${pdfUrl}` },
+            userEntry(messageText.trim()),
+            {
+              role: CHAT_ROLE_MODEL,
+              message: pdfCaption,
+              mediaType: 'document',
+              mediaUrl: /^https?:\/\//i.test(pdfUrl) ? pdfUrl : null,
+              mediaName: 'Menu.pdf',
+              mediaMime: 'application/pdf',
+            },
           ]);
           return; // Detiene la ejecución de IA
         }
 
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, finalResponse, isBaileys);
         await this.recordChat(restaurant.id, senderNumber, [
-          { role: CHAT_ROLE_USER, message: messageText.trim() },
+          userEntry(messageText.trim()),
           { role: CHAT_ROLE_MODEL, message: finalResponse },
         ]);
         return; // Detiene la ejecución aquí (Costo IA: $0)
@@ -620,13 +758,14 @@ export class MetaWhatsAppService {
       });
       const chatHistory = rawHistory.reverse();
 
-      // Guardar el mensaje del usuario en el historial
+      // Guardar el mensaje del usuario en el historial (con su adjunto: foto con texto, nota de voz)
       await this.prisma.chatHistory.create({
         data: {
           restaurantId: restaurant.id,
           customerPhone: senderNumber,
           role: 'user',
           message: messageText.trim(),
+          ...mediaFields(media?.stored),
         },
       });
 
@@ -665,7 +804,8 @@ export class MetaWhatsAppService {
 
           if (duplicate) {
             this.logger.warn(`⚠️ Confirmación duplicada de ${incomingMsg.from}: pedido ${duplicate.id} ya existe`);
-            finalResponse = `✅ Tu pedido #${duplicate.id.slice(0, 8).toUpperCase()} ya está registrado. ¡No te preocupes, no lo duplicamos!`;
+            const duplicateNumber = await dailyNumberOf(this.prisma, duplicate);
+            finalResponse = `✅ Tu pedido ${formatDailyNumber(duplicateNumber)} ya está registrado. ¡No te preocupes, no lo duplicamos!`;
           } else {
             const newOrder = await this.prisma.order.create({
               data: {
@@ -692,10 +832,13 @@ export class MetaWhatsAppService {
 
             this.logger.log(`✅ Orden confirmada y guardada en BD: ${newOrder.id} (${newOrder.orderType}, $${total})`);
 
-            // Emitir el evento por WebSocket al KDS (Kitchen Display System)
-            this.ordersGateway.emitNewOrder(restaurant.id, newOrder);
+            // Turno del día (#07): la referencia que ven el cliente, el Kanban y el repartidor
+            const dailyNumber = await dailyNumberOf(this.prisma, newOrder);
 
-            finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, newOrder.id)}`.trim();
+            // Emitir el evento por WebSocket al KDS (Kitchen Display System)
+            this.ordersGateway.emitNewOrder(restaurant.id, { ...newOrder, dailyNumber });
+
+            finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber)}`.trim();
 
             // Cobro: datos de pago del local (Nequi, etc.) para que el cliente sepa a dónde transferir
             if (!isReservation(aiResult) && restaurant.paymentDetails?.trim()) {
@@ -740,13 +883,16 @@ export class MetaWhatsAppService {
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, finalResponse, isBaileys);
       }
 
-      // Guardar la respuesta del modelo en el historial de chat
+      // Guardar la respuesta del modelo en el historial de chat (con la carta en PDF si se envió)
       await this.prisma.chatHistory.create({
         data: {
           restaurantId: restaurant.id,
           customerPhone: senderNumber,
           role: 'model',
           message: finalResponse,
+          ...(pdfSent
+            ? { mediaType: 'document', mediaUrl: MENU_PDF_MEDIA, mediaName: 'Menu.pdf', mediaMime: 'application/pdf' }
+            : {}),
         },
       });
     } catch (error: any) {

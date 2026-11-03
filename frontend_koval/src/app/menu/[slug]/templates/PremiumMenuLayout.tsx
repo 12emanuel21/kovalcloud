@@ -169,7 +169,7 @@ export function PremiumMenuLayout({
               </span>
               <div className="min-w-0 flex-1">
                 <p className={`text-sm font-bold ${palette.heading}`}>
-                  Recibimos tu pedido #{returnedOrderId.slice(0, 8).toUpperCase()}
+                  Recibimos tu pedido
                 </p>
                 <p className={`text-sm leading-relaxed ${palette.body}`}>
                   Si completaste el pago, te lo confirmamos por WhatsApp en unos segundos. Si no alcanzaste a pagar,

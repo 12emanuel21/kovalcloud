@@ -7,6 +7,8 @@ import { ShiftExtensionPanel } from '@/components/orders/ShiftExtensionPanel';
 import { io, Socket } from 'socket.io-client';
 import PrepareActions from '@/components/orders/PrepareActions';
 import DispatchModal from '@/components/orders/DispatchModal';
+import PaymentProofModal from '@/components/orders/PaymentProofModal';
+import { orderNumberLabel } from '@/lib/order-number';
 
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'DELIVERED' | 'CANCELLED';
 
@@ -31,6 +33,8 @@ interface OrderItem {
 interface Order {
   id: string;
   restaurantId: string;
+  /** Turno del día (#07): referencia corta para la cocina, el domiciliario y el cliente */
+  dailyNumber?: number;
   orderType?: OrderType;
   tableNumber?: string;
   channel?: string;
@@ -46,6 +50,9 @@ interface Order {
   paymentStatus?: string;
   paymentReference?: string | null;
   paymentMethod?: string | null;
+  /** Comprobante enviado por WhatsApp (archivo del chat) y cuándo llegó */
+  paymentProofUrl?: string | null;
+  paymentProofAt?: string | null;
   items: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -107,6 +114,8 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  // Pedido cuyo comprobante se está revisando
+  const [proofOrderId, setProofOrderId] = useState<string | null>(null);
   // Domicilio listo: el mismo modal del KDS para elegir repartidor
   const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -177,7 +186,7 @@ export default function OrdersPage() {
 
         // Mostrar notificación flotante
         setNewOrderToast({
-          id: newOrder.id.slice(0, 8).toUpperCase(),
+          id: orderNumberLabel(newOrder),
           customer: newOrder.customerName,
           total: newOrder.total,
         });
@@ -246,8 +255,11 @@ export default function OrdersPage() {
   const filterBySearch = (list: Order[]) => {
     if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase().trim();
+    // "7", "#7" o "#07": busca por turno del día
+    const turn = /^#?\d{1,3}$/.test(q) ? Number(q.replace('#', '')) : null;
     return list.filter(
       (o) =>
+        (turn !== null && o.dailyNumber === turn) ||
         o.customerName?.toLowerCase().includes(q) ||
         o.customerPhone?.includes(q) ||
         o.id?.toLowerCase().includes(q)
@@ -307,7 +319,7 @@ export default function OrdersPage() {
   // Render de tarjeta de orden
   const renderOrderCard = (order: Order) => {
     const isUpdating = updatingOrderId === order.id;
-    const shortId = order.id.slice(0, 8).toUpperCase();
+    const turn = orderNumberLabel(order);
     const cleanPhone = order.customerPhone?.replace(/\D/g, '');
     const isWhatsApp = order.channel === 'WHATSAPP';
 
@@ -334,12 +346,31 @@ export default function OrdersPage() {
               )}
               <span className="text-[11px] text-slate-400">{formatOrderTime(order.createdAt)}</span>
             </div>
-            <div className="mt-1.5">{renderPaymentBadge(order)}</div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {renderPaymentBadge(order)}
+              {order.paymentProofUrl && (
+                <button
+                  type="button"
+                  onClick={() => setProofOrderId(order.id)}
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-black tracking-wide transition ${
+                    order.paymentStatus === 'PAID'
+                      ? 'border border-slate-600 text-slate-300 hover:border-slate-500'
+                      : 'animate-pulse bg-amber-400 text-slate-950 hover:bg-amber-300'
+                  }`}
+                  title="Ver el comprobante que envió el cliente por WhatsApp"
+                >
+                  🧾 {order.paymentStatus === 'PAID' ? 'COMPROBANTE' : 'VER COMPROBANTE'}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="shrink-0 text-right">
-            <span className="block font-mono text-[9px] text-slate-500 tracking-wider" title={`Pedido ${order.id}`}>
-              #{shortId}
+            <span
+              className="block rounded-md bg-slate-900/80 px-2 py-0.5 font-mono text-sm font-black text-amber-300"
+              title={`Pedido ${order.id}`}
+            >
+              Turno {turn}
             </span>
             {order.total != null && (
               <span className="font-mono text-base font-black text-emerald-400">
@@ -470,7 +501,7 @@ export default function OrdersPage() {
         <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 font-bold px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-400 animate-in slide-in-from-bottom duration-300">
           <span className="text-xl">🔔</span>
           <div>
-            <p className="text-sm font-black">¡Nuevo Pedido #{newOrderToast.id}!</p>
+            <p className="text-sm font-black">¡Nuevo Pedido {newOrderToast.id}!</p>
             <p className="text-xs font-semibold opacity-90">
               {newOrderToast.customer}
               {newOrderToast.total != null && ` • $${newOrderToast.total.toLocaleString('es-CO')}`}
@@ -515,7 +546,7 @@ export default function OrdersPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar por cliente o #ID..."
+              placeholder="Buscar por cliente o #turno..."
               className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 outline-none w-56 md:w-64 transition"
             />
             {searchQuery && (
@@ -651,6 +682,20 @@ export default function OrdersPage() {
           </div>
         </div>
       )}
+      {(() => {
+        const proofOrder = proofOrderId ? orders.find((o) => o.id === proofOrderId) : null;
+        return proofOrder?.paymentProofUrl ? (
+          <PaymentProofModal
+            order={proofOrder}
+            onClose={() => setProofOrderId(null)}
+            onConfirmed={(updated) => {
+              setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
+              setProofOrderId(null);
+            }}
+          />
+        ) : null;
+      })()}
+
       {dispatchOrder && (
         <DispatchModal
           order={dispatchOrder}

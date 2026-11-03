@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useCart } from '@/context/CartContext';
-import { buildOrderWhatsAppMessage, shortOrderId, toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
+import { buildOrderWhatsAppMessage, toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
+import { orderNumberLabel } from '@/lib/order-number';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -114,7 +115,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   // Disponibilidad consultada al abrir el carrito (la carta pudo cambiar desde que se cargó)
   const [freshMenu, setFreshMenu] = useState<MenuAvailability[] | null>(null);
   // Pedido recién creado (efectivo): se confirma dentro del drawer
-  const [confirmation, setConfirmation] = useState<{ orderId: string; whatsappUrl: string | null } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ orderId: string; dailyNumber?: number; whatsappUrl: string | null } | null>(null);
   // El chat SIEMPRE va al WhatsApp del local, nunca al teléfono que escribe el cliente
   const localWhatsApp = whatsappNumber ?? toWhatsAppNumber(restaurantPhone);
   // Solo mientras el carrito siga vacío: si agregan platos de nuevo, vuelve el formulario
@@ -259,7 +260,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         throw new Error(message || `Error al procesar el pedido (${res.status})`);
       }
 
-      const createdOrder: { id: string; wompiCheckoutUrl?: string | null } = await res.json();
+      const createdOrder: { id: string; dailyNumber?: number; wompiCheckoutUrl?: string | null } = await res.json();
 
       const resetForm = () => {
         clearCart();
@@ -285,6 +286,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             localWhatsApp,
             buildOrderWhatsAppMessage({
               orderId: createdOrder.id,
+              dailyNumber: createdOrder.dailyNumber,
               restaurantName,
               customerName: payload.customerName,
               items: items.map(({ name, quantity, price }) => ({ name, quantity, price })),
@@ -297,7 +299,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         : null;
 
       resetForm();
-      setConfirmation({ orderId: createdOrder.id, whatsappUrl });
+      setConfirmation({ orderId: createdOrder.id, dailyNumber: createdOrder.dailyNumber, whatsappUrl });
 
       // Abrir WhatsApp en nueva pestaña. Tras un await, Safari/iOS suelen bloquear el popup:
       // en ese caso se navega en la misma pestaña (el pedido ya está guardado).
@@ -431,7 +433,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     ✅
                   </div>
                   <div className="space-y-1">
-                    <h3 className="text-lg font-bold text-sf-text">¡Pedido #{shortOrderId(shownConfirmation.orderId)} recibido!</h3>
+                    <h3 className="text-lg font-bold text-sf-text">¡Pedido {orderNumberLabel({ id: shownConfirmation.orderId, dailyNumber: shownConfirmation.dailyNumber })} recibido!</h3>
                     <p className="text-sm text-sf-muted">
                       {shownConfirmation.whatsappUrl
                         ? 'Envía el mensaje que abrimos en WhatsApp para confirmarlo con el local.'

@@ -18,6 +18,7 @@ import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/ten
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 import { isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
 import { normalizeColombianPhone } from './phone';
+import { dailyNumberOf, formatDailyNumber, withDailyNumbers } from './daily-number';
 import { DispatchOrderDto } from './dto/dispatch-order.dto';
 import { buildCustomerDispatchMessage, buildDriverDispatchMessage } from './dispatch-messages';
 import { normalizeDriverPhone } from '../drivers/drivers.service';
@@ -29,12 +30,12 @@ import { buildOrdersWorkbook, exportFilename, resolveExportRange } from './order
  */
 export function buildPaymentLinkMessage(
   restaurantName: string,
-  orderId: string,
+  dailyNumber: number,
   total: number,
   paymentUrl: string | null,
 ): string {
   const received =
-    `🧾 ¡Recibimos tu pedido #${orderId.slice(0, 8).toUpperCase()} en ${restaurantName}! ` +
+    `🧾 ¡Recibimos tu pedido ${formatDailyNumber(dailyNumber)} en ${restaurantName}! ` +
     `Total: $${total.toLocaleString('es-CO')} COP.`;
   if (!paymentUrl) return `${received}\n\nEl local te confirmará el pedido por este chat.`;
   return (
@@ -206,8 +207,11 @@ export class OrdersService {
       }
     }
 
+    // Turno del día (#01, #02...): lo ven el cliente, el Kanban y el KDS
+    const dailyNumber = await dailyNumberOf(this.prisma, order);
+
     // 5. Emitir evento WebSocket en tiempo real
-    this.ordersGateway.emitNewOrder(restaurantId, order);
+    this.ordersGateway.emitNewOrder(restaurantId, { ...order, dailyNumber });
 
     // 6. Plan B por WhatsApp: si el cliente cierra el navegador, conserva el link de pago.
     // El link solo va con la pasarela encendida; si no se pudo generar, solo se confirma la recepción.
@@ -216,19 +220,20 @@ export class OrdersService {
         { customerPhone: order.customerPhone, restaurantId, restaurant },
         buildPaymentLinkMessage(
           restaurant.name,
-          order.id,
+          dailyNumber,
           order.total,
           restaurant.isWompiEnabled ? wompiCheckoutUrl : null,
         ),
       );
     }
 
-    return { ...order, wompiCheckoutUrl };
+    return { ...order, dailyNumber, wompiCheckoutUrl };
   }
 
+  /** Todos los pedidos del local (o de todos, para el SUPERADMIN), con su turno del día */
   async findAll(user: TenantUser, requestedRestaurantId?: string) {
     const restaurantId = resolveTenantFilter(user, requestedRestaurantId);
-    return await this.prisma.order.findMany({
+    const orders = await this.prisma.order.findMany({
       where: restaurantId ? { restaurantId } : {},
       include: {
         items: {
@@ -239,6 +244,8 @@ export class OrdersService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    // La lista trae todos los pedidos de cada jornada: se numeran en memoria
+    return withDailyNumbers(orders);
   }
 
   /**
@@ -299,7 +306,7 @@ export class OrdersService {
     }
     assertTenantAccess(user, order.restaurantId);
 
-    return order;
+    return { ...order, dailyNumber: await dailyNumberOf(this.prisma, order) };
   }
 
   async updateOrderStatus(orderId: string, status: string, user: TenantUser, estimatedMinutes?: unknown) {
@@ -332,7 +339,8 @@ export class OrdersService {
     });
 
     // 2. Emitir evento WebSocket para que la tarjeta se mueva en el Kanban del frontend
-    this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, this.toOrderResponse(updatedOrder));
+    const response = await this.toOrderResponse(updatedOrder);
+    this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, response);
 
     // 3. Notificar al cliente por WhatsApp según el nuevo estado (en segundo plano: no frena al KDS)
     const mensajeCliente = this.buildStatusMessage(status as OrderStatus, minutes);
@@ -340,7 +348,7 @@ export class OrdersService {
       void this.notifyCustomer(updatedOrder, mensajeCliente);
     }
 
-    return this.toOrderResponse(updatedOrder);
+    return response;
   }
 
   async update(id: string, updateOrderDto: UpdateOrderDto, user: TenantUser) {
@@ -371,7 +379,7 @@ export class OrdersService {
     });
 
     // 1. Emitir evento WebSocket de orden actualizada
-    this.ordersGateway.emitOrderStatusUpdated(existingOrder.restaurantId, this.toOrderResponse(updatedOrder));
+    this.ordersGateway.emitOrderStatusUpdated(existingOrder.restaurantId, await this.toOrderResponse(updatedOrder));
 
     // 2. Notificar al cliente vía WhatsApp si el estado cambió
     if (updateOrderDto.status && updateOrderDto.status !== existingOrder.status) {
@@ -381,7 +389,7 @@ export class OrdersService {
       }
     }
 
-    return this.toOrderResponse(updatedOrder);
+    return await this.toOrderResponse(updatedOrder);
   }
 
   async remove(id: string, user: TenantUser) {
@@ -391,9 +399,13 @@ export class OrdersService {
     });
   }
 
-  /** Quita las credenciales de Meta del restaurante incluido antes de responder/emitir */
-  private toOrderResponse<T extends { restaurant: object }>(order: T) {
-    return { ...order, restaurant: sanitizeRestaurant(order.restaurant) };
+  /** Quita las credenciales de Meta del restaurante incluido y agrega el turno del día */
+  private async toOrderResponse<T extends { id: string; restaurantId: string; createdAt: Date; restaurant: object }>(order: T) {
+    return {
+      ...order,
+      restaurant: sanitizeRestaurant(order.restaurant),
+      dailyNumber: await dailyNumberOf(this.prisma, order),
+    };
   }
 
   /** Mensaje de WhatsApp para el cliente según el nuevo estado (vacío = no se notifica) */
@@ -471,10 +483,15 @@ export class OrdersService {
       include: { restaurant: true, items: { include: { menuItem: true } } },
     });
 
-    this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, this.toOrderResponse(updatedOrder));
+    const response = await this.toOrderResponse(updatedOrder);
+    this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, response);
 
     // En segundo plano: el KDS no espera a WhatsApp
-    const dispatchOrder = { ...updatedOrder, customerPhone: normalizeColombianPhone(updatedOrder.customerPhone) };
+    const dispatchOrder = {
+      ...updatedOrder,
+      dailyNumber: response.dailyNumber,
+      customerPhone: normalizeColombianPhone(updatedOrder.customerPhone),
+    };
     const restaurantName = updatedOrder.restaurant.name;
     void this.notifyCustomer(
       updatedOrder,
@@ -487,7 +504,34 @@ export class OrdersService {
       'repartidor',
     );
 
-    return this.toOrderResponse(updatedOrder);
+    return response;
+  }
+
+  /**
+   * El local valida un pago manual (comprobante de Nequi o transferencia recibido por WhatsApp):
+   * marca el pedido como PAGADO, lo emite al Kanban y le confirma al cliente por WhatsApp.
+   */
+  async confirmManualPayment(orderId: string, user: TenantUser) {
+    const order = await this.findOne(orderId, user);
+    if (order.paymentStatus === 'PAID') throw new ConflictException('El pedido ya está marcado como pagado');
+    if (order.status === OrderStatus.CANCELLED) throw new ConflictException('El pedido está cancelado');
+
+    const updatedOrder = await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        paymentStatus: 'PAID',
+        // Contra entrega o sin método: el pago llegó por transferencia (comprobante)
+        ...(!order.paymentMethod || order.paymentMethod === 'CASH' ? { paymentMethod: 'TRANSFERENCIA' } : {}),
+      },
+      include: { restaurant: true, items: { include: { menuItem: true } } },
+    });
+    const response = await this.toOrderResponse(updatedOrder);
+    this.ordersGateway.emitOrderUpdated(updatedOrder.restaurantId, response);
+    void this.notifyCustomer(
+      updatedOrder,
+      `✅ ¡Confirmamos tu pago del pedido ${formatDailyNumber(response.dailyNumber)}! Gracias 🙌`,
+    );
+    return response;
   }
 
   /** Repartidor activo del restaurante (driverId) o datos sueltos (nombre + celular) */

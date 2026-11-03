@@ -24,12 +24,19 @@ describe('OrdersService.create · pago en línea', () => {
     const prisma: any = {
       restaurant: { findUnique: jest.fn().mockResolvedValue(restaurant) },
       menuItem: { findMany: jest.fn().mockResolvedValue([{ id: 'item-1', price: 12500 }]) },
-      order: { update: jest.fn().mockResolvedValue({}) },
+      // Primer pedido de la jornada -> turno #01
+      order: { update: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
       $transaction: jest.fn().mockImplementation((fn) =>
         fn({
           order: {
             create: jest.fn().mockImplementation(({ data }) =>
-              Promise.resolve({ id: '0f8fad5b-d9cb-469f-a165-70867728950e', paymentReference: null, paymentStatus: 'PENDING', ...data }),
+              Promise.resolve({
+                id: '0f8fad5b-d9cb-469f-a165-70867728950e',
+                paymentReference: null,
+                paymentStatus: 'PENDING',
+                createdAt: new Date(),
+                ...data,
+              }),
             ),
           },
         }),
@@ -70,7 +77,7 @@ describe('OrdersService.create · pago en línea', () => {
     expect(gateway.emitNewOrder.mock.calls[0][1].paymentReference).toBe(order.paymentReference);
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({ customerPhone: '573001112233', restaurantId: 'rest-1' }),
-      buildPaymentLinkMessage('Burger BQ', order.id, 25000, order.wompiCheckoutUrl!),
+      buildPaymentLinkMessage('Burger BQ', 1, 25000, order.wompiCheckoutUrl!),
     );
   });
 
@@ -128,15 +135,15 @@ describe('OrdersService.create · pago en línea', () => {
   });
 
   it('sin link, el mensaje solo confirma la recepción del pedido', () => {
-    expect(buildPaymentLinkMessage('Burger BQ', 'abcd1234-xyz', 25000, null)).toBe(
-      '🧾 ¡Recibimos tu pedido #ABCD1234 en Burger BQ! Total: $25.000 COP.\n\n' +
+    expect(buildPaymentLinkMessage('Burger BQ', 3, 25000, null)).toBe(
+      '🧾 ¡Recibimos tu pedido #03 en Burger BQ! Total: $25.000 COP.\n\n' +
         'El local te confirmará el pedido por este chat.',
     );
   });
 
   it('el mensaje de WhatsApp incluye pedido, total y link', () => {
-    expect(buildPaymentLinkMessage('Burger BQ', 'abcd1234-xyz', 25000, 'https://checkout.wompi.co/p/?x=1')).toBe(
-      '🧾 ¡Recibimos tu pedido #ABCD1234 en Burger BQ! Total: $25.000 COP.\n\n' +
+    expect(buildPaymentLinkMessage('Burger BQ', 3, 25000, 'https://checkout.wompi.co/p/?x=1')).toBe(
+      '🧾 ¡Recibimos tu pedido #03 en Burger BQ! Total: $25.000 COP.\n\n' +
         '💳 Si no alcanzaste a pagar, puedes hacerlo aquí:\nhttps://checkout.wompi.co/p/?x=1\n\n' +
         'Apenas se confirme el pago te avisamos por este chat.',
     );

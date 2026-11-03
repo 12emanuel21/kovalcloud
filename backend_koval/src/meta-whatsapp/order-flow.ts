@@ -1,3 +1,4 @@
+import { formatDailyNumber } from '../orders/daily-number';
 import { OrderType } from '@prisma/client';
 import type { OrderIntent } from '../ai/ai.service';
 
@@ -87,15 +88,18 @@ export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[]): s
   return `🛵 *Domicilio* a: ${ai.deliveryAddress}\n${itemsSummary(lines)}\n\nTu total es ${money(total)}. Se paga al recibir. ¿Confirmas?`;
 }
 
-/** Mensaje tras registrar el pedido (el "✅" le indica a la IA que ya quedó registrado) */
-export function buildRegisteredMessage(ai: OrderIntent, orderId: string): string {
-  const ref = orderId.slice(0, 8).toUpperCase();
+/**
+ * Mensaje tras registrar el pedido (el "✅" le indica a la IA que ya quedó registrado).
+ * La referencia es el turno del día (#07), no el UUID: es lo que ven la cocina y el repartidor.
+ */
+export function buildRegisteredMessage(ai: OrderIntent, dailyNumber: number): string {
+  const ref = formatDailyNumber(dailyNumber);
   if (isReservation(ai)) {
-    return `✅ ¡Reserva confirmada! Código #${ref}. Te esperamos 🙌`;
+    return `✅ ¡Reserva confirmada! Tu turno es el ${ref}. Te esperamos 🙌`;
   }
   return ai.orderType === 'TAKEAWAY'
-    ? `✅ ¡Pedido confirmado! #${ref}. Te avisamos cuando esté listo para recoger.`
-    : `✅ ¡Pedido confirmado! #${ref}. Ya lo estamos preparando 👨‍🍳`;
+    ? `✅ ¡Pedido confirmado! Tu turno es el ${ref}. Te avisamos cuando esté listo para recoger.`
+    : `✅ ¡Pedido confirmado! Tu turno es el ${ref}. Ya lo estamos preparando 👨‍🍳`;
 }
 
 /** Notas del pedido que verá la cocina (reserva + notas por producto) */

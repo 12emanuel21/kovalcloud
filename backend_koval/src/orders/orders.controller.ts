@@ -107,6 +107,15 @@ export class OrdersController {
     return orderViewFor(user.role, await this.ordersService.dispatch(id, dto, user));
   }
 
+  // Pago validado por el local (comprobante de Nequi, transferencia...): solo OWNER o SUPERADMIN
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.OWNER, Role.SUPERADMIN)
+  @Post(':id/confirm-payment')
+  @HttpCode(HttpStatus.OK)
+  confirmPayment(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.ordersService.confirmManualPayment(id, user);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
   remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
