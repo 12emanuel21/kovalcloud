@@ -3,6 +3,7 @@ import { generateObject, generateText, ModelMessage } from 'ai';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
 import { WAITER_SYSTEM_PROMPT } from '../meta-whatsapp/prompts/waiter.prompt';
+import { RESTAURANT_TIMEZONE } from '../restaurants/business-hours';
 
 
 const PdfMenuSchema = z.object({
@@ -64,6 +65,15 @@ const OrderIntentSchema = z.object({
 
 export type OrderIntent = z.infer<typeof OrderIntentSchema>;
 
+
+/** Franja del día en la hora del local, para un saludo natural sin decir la hora */
+export function dayPartOf(date: Date, timeZone = RESTAURANT_TIMEZONE): 'mañana' | 'tarde' | 'noche' {
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', hourCycle: 'h23' }).format(date));
+  if (hour >= 5 && hour < 12) return 'mañana';
+  if (hour >= 12 && hour < 19) return 'tarde';
+  return 'noche';
+}
+
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
@@ -109,15 +119,15 @@ export class AiService {
       content: item.message,
     }));
 
-    // Obtenemos la hora actual en Colombia para inyectarla al contexto
-    const currentTime = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
+    // Solo la franja del día (mañana/tarde/noche): con la hora exacta el modelo la recitaba en el saludo
+    const dayPart = dayPartOf(new Date());
 
     const { object } = await generateObject({
       model: google('gemini-2.5-flash'),
       schema: OrderIntentSchema,
       system: WAITER_SYSTEM_PROMPT
         .replace('{RESTAURANT_NAME}', restaurantName)
-        .replace('{CURRENT_TIME}', currentTime)
+        .replace('{DAY_PART}', dayPart)
         .replace('{MENU}', menuContext),
       messages: [
         ...historyMessages,
