@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { OrderType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDeliveryZoneDto, UpdateDeliveryZoneDto } from './dto/delivery-zone.dto';
-import { normalizePlace, quoteFor, type DeliveryQuote } from './delivery-coverage';
+import { normalizePlace, quoteFor, usableDefaultFee, type DeliveryQuote } from './delivery-coverage';
 
 const zoneSelect = { id: true, name: true, keywords: true, fee: true, isActive: true, createdAt: true } as const;
 
@@ -39,14 +39,18 @@ export class DeliveryZonesService {
     });
   }
 
-  /** Zonas activas para la carta: nombre y tarifa (las palabras clave son internas) */
+  /** Zonas activas y tarifa estándar para la carta: nombre y tarifa (las palabras clave son internas) */
   async publicCoverage(restaurantId: string) {
-    const zones = await this.prisma.deliveryZone.findMany({
-      where: { restaurantId, isActive: true },
-      orderBy: { name: 'asc' },
-      select: { name: true, fee: true },
-    });
-    return { coverageConfigured: zones.length > 0, zones };
+    const [zones, restaurant] = await Promise.all([
+      this.prisma.deliveryZone.findMany({
+        where: { restaurantId, isActive: true },
+        orderBy: { name: 'asc' },
+        select: { name: true, fee: true },
+      }),
+      this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { defaultDeliveryFee: true } }),
+    ]);
+    const defaultDeliveryFee = usableDefaultFee(restaurant?.defaultDeliveryFee);
+    return { coverageConfigured: zones.length > 0 || defaultDeliveryFee !== null, zones, defaultDeliveryFee };
   }
 
   create(restaurantId: string, dto: CreateDeliveryZoneDto) {
@@ -77,17 +81,20 @@ export class DeliveryZonesService {
   }
 
   /**
-   * Flete según el barrio o la dirección: busca en las palabras clave y nombres de las zonas activas.
-   * Sin coincidencia: { isCovered: false, deliveryFee: 0, fallback: 'PICKUP' }.
-   * Un local sin zonas configuradas no restringe (cubierto, flete 0, coverageConfigured: false).
+   * Flete según el barrio o la dirección: 1) zona activa que coincida; 2) tarifa estándar del local
+   * ("Tarifa general"); 3) con zonas y sin tarifa estándar: { isCovered: false, fallback: 'TAKEAWAY' }.
+   * Un local sin zonas ni tarifa estándar no restringe (cubierto, flete 0, coverageConfigured: false).
    */
   async calculateDeliveryFee(restaurantId: string, ...places: Array<string | null | undefined>): Promise<DeliveryQuote> {
-    const zones = await this.prisma.deliveryZone.findMany({
-      where: { restaurantId, isActive: true },
-      select: { id: true, name: true, keywords: true, fee: true },
-      orderBy: { createdAt: 'asc' },
-    });
-    return quoteFor(zones, ...places);
+    const [zones, restaurant] = await Promise.all([
+      this.prisma.deliveryZone.findMany({
+        where: { restaurantId, isActive: true },
+        select: { id: true, name: true, keywords: true, fee: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { defaultDeliveryFee: true } }),
+    ]);
+    return quoteFor(zones, restaurant?.defaultDeliveryFee, ...places);
   }
 
   /** Flete de un pedido: solo los domicilios pagan envío (recoger y mesa: 0) */

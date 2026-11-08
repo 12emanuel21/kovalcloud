@@ -8,12 +8,17 @@ const QUOTE_DEBOUNCE_MS = 500;
 /** Respuesta de GET /restaurants/:id/delivery-coverage/quote (misma forma que calculateDeliveryFee) */
 export type DeliveryQuote =
   | { isCovered: true; zoneId: string | null; zoneName: string | null; deliveryFee: number; coverageConfigured: boolean }
-  | { isCovered: false; deliveryFee: 0; fallback: 'PICKUP'; coverageConfigured: true };
+  | { isCovered: false; deliveryFee: 0; fallback: 'TAKEAWAY'; coverageConfigured: true };
 
 export interface DeliveryCoverage {
   coverageConfigured: boolean;
   zones: Array<{ name: string; fee: number }>;
+  /** Tarifa estándar del local para barrios fuera de las zonas (null = no tiene) */
+  defaultDeliveryFee?: number | null;
 }
+
+/** Mismo nombre que usa el backend para la tarifa estándar */
+const DEFAULT_FEE_ZONE_NAME = 'Tarifa general';
 
 /**
  * Cobertura y flete del domicilio en la carta: carga las zonas del local al abrir el carrito y
@@ -25,7 +30,10 @@ export function useDeliveryQuote(restaurantId: string, enabled: boolean, neighbo
   const [quoted, setQuoted] = useState<{ key: string; quote: DeliveryQuote } | null>(null);
   const place = neighborhood.trim();
   const key = `${place}|${address.trim()}`;
-  const shouldQuote = enabled && Boolean(coverage?.coverageConfigured) && Boolean(place || address.trim());
+  const hasZones = Boolean(coverage?.zones.length);
+  const defaultFee = coverage?.defaultDeliveryFee && coverage.defaultDeliveryFee > 0 ? coverage.defaultDeliveryFee : null;
+  // Con zonas se cotiza el barrio en el backend; solo con tarifa estándar no hace falta preguntar
+  const shouldQuote = enabled && hasZones && Boolean(place || address.trim());
 
   useEffect(() => {
     if (!enabled || !restaurantId) return;
@@ -61,9 +69,15 @@ export function useDeliveryQuote(restaurantId: string, enabled: boolean, neighbo
     };
   }, [shouldQuote, restaurantId, place, address, key]);
 
-  const quote = shouldQuote && quoted?.key === key ? quoted.quote : null;
+  const flatQuote: DeliveryQuote | null =
+    enabled && !hasZones && defaultFee !== null
+      ? { isCovered: true, zoneId: null, zoneName: DEFAULT_FEE_ZONE_NAME, deliveryFee: defaultFee, coverageConfigured: true }
+      : null;
+  const quote = flatQuote ?? (shouldQuote && quoted?.key === key ? quoted.quote : null);
   return {
     coverage,
+    /** El local tiene zonas: el barrio define la tarifa (y es obligatorio) */
+    hasZones,
     quote,
     /** Cotizando el texto actual (todavía no hay respuesta para lo que escribió) */
     quoting: shouldQuote && quoted?.key !== key,

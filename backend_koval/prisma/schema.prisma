@@ -71,6 +71,8 @@ model Restaurant {
   // Configuración operativa del local
   address             String?
   paymentDetails      String?
+  // Tarifa plana de domicilio en COP (ej. 15000): se cobra cuando el barrio no está en ninguna zona
+  defaultDeliveryFee  Float?
   businessHours       Json?
   isTemporarilyClosed Boolean   @default(false)
   closedMessage       String?

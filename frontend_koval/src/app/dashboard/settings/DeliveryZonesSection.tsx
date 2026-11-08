@@ -50,6 +50,7 @@ export function DeliveryZonesSection() {
   const [form, setForm] = useState<ZoneForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [defaultFee, setDefaultFee] = useState<number | null>(null);
 
   const base = restaurantId ? `${API_URL}/restaurants/${encodeURIComponent(restaurantId)}/delivery-zones` : null;
   const headers = useCallback(
@@ -150,149 +151,310 @@ export function DeliveryZonesSection() {
   };
 
   return (
+    <div className="space-y-6">
+      <DefaultDeliveryFeeCard onChange={setDefaultFee} />
+      <section className={settingsCardClass}>
+        <SettingsCardHeader
+          title="Zonas de domicilio"
+          description="Define los barrios que cubres y cuánto cobras por llevar el pedido. La carta y el bot de WhatsApp calculan el domicilio con el barrio del cliente; si no está en ninguna zona, se cobra la tarifa estándar o, si no tienes, se le ofrece recoger en el local."
+          action={
+            editing !== 'new' && (
+              <button type="button" onClick={() => openForm()} className={primaryButtonClass}>
+                <Plus className="h-4 w-4" /> Agregar zona
+              </button>
+            )
+          }
+        />
+
+        <div className="space-y-4 p-6">
+          <SettingsFeedback feedback={feedback} />
+
+          {editing && (
+            <form onSubmit={handleSave} className="space-y-3 rounded-xl border border-emerald-500/30 bg-slate-950/60 p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                {editing === 'new' ? 'Nueva zona' : 'Editar zona'}
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_2fr_140px]">
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-400">Nombre de la zona</span>
+                  <input
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="Ej. Norte / Riomar"
+                    required
+                    maxLength={80}
+                    className={inputClass}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-400">Barrios (separados por coma)</span>
+                  <input
+                    value={form.keywords}
+                    onChange={(e) => setForm({ ...form, keywords: e.target.value })}
+                    placeholder="Ej. Riomar, Alto Prado, Villa Santos"
+                    className={inputClass}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-400">Tarifa (COP)</span>
+                  <input
+                    inputMode="numeric"
+                    value={form.fee}
+                    onChange={(e) => setForm({ ...form, fee: e.target.value })}
+                    placeholder="Ej. 6000"
+                    required
+                    className={inputClass}
+                  />
+                </label>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                El nombre de la zona también cuenta como barrio. No importan las tildes ni las mayúsculas.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditing(null)}
+                  className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+                <button type="submit" disabled={saving} className={primaryButtonClass}>
+                  {saving ? 'Guardando...' : 'Guardar'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {loading ? (
+            <p className="text-xs text-slate-500">Cargando zonas...</p>
+          ) : zones.length === 0 ? (
+            !editing && (
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-700 px-6 py-10 text-center">
+                <MapPin className="h-8 w-8 text-slate-600" />
+                <p className="text-sm font-semibold text-slate-300">Aún no tienes zonas de domicilio</p>
+                <p className="max-w-sm text-xs text-slate-500">
+                  {defaultFee
+                    ? `Mientras no crees ninguna, todos los domicilios pagan la tarifa estándar (${formatCOP(defaultFee)}).`
+                    : 'Mientras no crees ninguna, los domicilios se aceptan en cualquier dirección y sin valor de envío.'}
+                </p>
+              </div>
+            )
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead className="bg-slate-950/60 text-[11px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2 font-semibold">Zona</th>
+                    <th className="px-4 py-2 font-semibold">Barrios</th>
+                    <th className="px-4 py-2 text-right font-semibold">Tarifa</th>
+                    <th className="px-4 py-2 font-semibold">
+                      <span className="sr-only">Acciones</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {zones.map((zone) => (
+                    <tr key={zone.id} className={zone.isActive ? '' : 'opacity-60'}>
+                      <td className="px-4 py-3 font-semibold text-white">{zone.name}</td>
+                      <td className="px-4 py-3 text-xs text-slate-400">{zone.keywords.join(', ') || '—'}</td>
+                      <td className="px-4 py-3 text-right font-mono text-emerald-300">{formatCOP(zone.fee)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={zone.isActive}
+                            aria-label={`${zone.name}: ${zone.isActive ? 'activa' : 'inactiva'}`}
+                            disabled={busyId === zone.id}
+                            onClick={() => toggleActive(zone)}
+                            className={`rounded-full border px-3 py-1 text-[11px] font-bold transition disabled:opacity-60 ${
+                              zone.isActive
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                                : 'border-slate-700 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            {zone.isActive ? 'Activa' : 'Inactiva'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openForm(zone)}
+                            aria-label={`Editar la zona ${zone.name}`}
+                            className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(zone)}
+                            disabled={busyId === zone.id}
+                            aria-label={`Eliminar la zona ${zone.name}`}
+                            className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-60"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/**
+ * Tarifa estándar de domicilio (Restaurant.defaultDeliveryFee): se cobra a los barrios que no están en
+ * ninguna zona en vez de rechazar el pedido. Se guarda con PATCH /restaurants/:id; null la quita.
+ */
+function DefaultDeliveryFeeCard({ onChange }: { onChange: (fee: number | null) => void }) {
+  const { token, restaurantId } = useAuth();
+  const [saved, setSaved] = useState<number | null>(null);
+  const [value, setValue] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const url = restaurantId ? `${API_URL}/restaurants/${encodeURIComponent(restaurantId)}` : null;
+
+  useEffect(() => {
+    if (!url || !token) return;
+    let cancelled = false;
+    fetch(url, { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo cargar la tarifa estándar'));
+        return res.json() as Promise<{ defaultDeliveryFee?: number | null }>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const fee = data.defaultDeliveryFee ?? null;
+        setSaved(fee);
+        onChange(fee);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Error al cargar' });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url, token, onChange]);
+
+  const save = async (fee: number | null) => {
+    if (!url) return;
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultDeliveryFee: fee }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo guardar la tarifa estándar'));
+      const data: { defaultDeliveryFee?: number | null } = await res.json();
+      const stored = data.defaultDeliveryFee ?? null;
+      setSaved(stored);
+      onChange(stored);
+      setEditing(false);
+      setValue('');
+      setFeedback({
+        type: 'success',
+        text: stored ? `Tarifa estándar guardada: ${formatCOP(stored)} COP.` : 'Tarifa estándar eliminada.',
+      });
+    } catch (err) {
+      setFeedback({ type: 'error', text: err instanceof Error ? err.message : 'No se pudo guardar la tarifa estándar' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const fee = Number(value.replace(/[^\d]/g, ''));
+    if (!value.trim() || !Number.isFinite(fee) || fee <= 0) {
+      setFeedback({ type: 'error', text: 'Escribe la tarifa en pesos (ej. 15000).' });
+      return;
+    }
+    void save(fee);
+  };
+
+  const showForm = editing || (!loading && saved === null);
+
+  return (
     <section className={settingsCardClass}>
       <SettingsCardHeader
-        title="Zonas de domicilio"
-        description="Define los barrios que cubres y cuánto cobras por llevar el pedido. La carta y el bot de WhatsApp calculan el domicilio con el barrio del cliente; si no está en ninguna zona, le ofrecen recoger en el local."
-        action={
-          editing !== 'new' && (
-            <button type="button" onClick={() => openForm()} className={primaryButtonClass}>
-              <Plus className="h-4 w-4" /> Agregar zona
-            </button>
-          )
-        }
+        title="Tarifa estándar por defecto (Opcional)"
+        description="Si cobras lo mismo a toda la ciudad o si un cliente pide a un barrio que no está en la lista de abajo, se cobrará automáticamente este valor en lugar de rechazar el pedido."
       />
-
-      <div className="space-y-4 p-6">
+      <div className="space-y-3 p-6">
         <SettingsFeedback feedback={feedback} />
-
-        {editing && (
-          <form onSubmit={handleSave} className="space-y-3 rounded-xl border border-emerald-500/30 bg-slate-950/60 p-4">
-            <p className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-              {editing === 'new' ? 'Nueva zona' : 'Editar zona'}
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_2fr_140px]">
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-400">Nombre de la zona</span>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Ej. Norte / Riomar"
-                  required
-                  maxLength={80}
-                  className={inputClass}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-400">Barrios (separados por coma)</span>
-                <input
-                  value={form.keywords}
-                  onChange={(e) => setForm({ ...form, keywords: e.target.value })}
-                  placeholder="Ej. Riomar, Alto Prado, Villa Santos"
-                  className={inputClass}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-400">Tarifa (COP)</span>
-                <input
-                  inputMode="numeric"
-                  value={form.fee}
-                  onChange={(e) => setForm({ ...form, fee: e.target.value })}
-                  placeholder="Ej. 6000"
-                  required
-                  className={inputClass}
-                />
-              </label>
-            </div>
-            <p className="text-[11px] text-slate-500">
-              El nombre de la zona también cuenta como barrio. No importan las tildes ni las mayúsculas.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setEditing(null)}
-                className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-slate-800"
-              >
-                Cancelar
-              </button>
+        {loading ? (
+          <p className="text-xs text-slate-500">Cargando tarifa...</p>
+        ) : showForm ? (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="relative block sm:w-56">
+              <span className="sr-only">Tarifa estándar en pesos</span>
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">$</span>
+              <input
+                inputMode="numeric"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="Ej. 15000"
+                className={`${inputClass} pl-7`}
+              />
+            </label>
+            <div className="flex gap-2">
               <button type="submit" disabled={saving} className={primaryButtonClass}>
-                {saving ? 'Guardando...' : 'Guardar'}
+                {saving ? 'Guardando...' : 'Guardar Tarifa Estándar'}
               </button>
+              {editing && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(false);
+                    setValue('');
+                  }}
+                  className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+              )}
             </div>
           </form>
-        )}
-
-        {loading ? (
-          <p className="text-xs text-slate-500">Cargando zonas...</p>
-        ) : zones.length === 0 ? (
-          !editing && (
-            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-700 px-6 py-10 text-center">
-              <MapPin className="h-8 w-8 text-slate-600" />
-              <p className="text-sm font-semibold text-slate-300">Aún no tienes zonas de domicilio</p>
-              <p className="max-w-sm text-xs text-slate-500">
-                Mientras no crees ninguna, los domicilios se aceptan en cualquier dirección y sin valor de envío.
-              </p>
-            </div>
-          )
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
-            <table className="w-full min-w-[560px] text-left text-sm">
-              <thead className="bg-slate-950/60 text-[11px] uppercase tracking-wider text-slate-500">
-                <tr>
-                  <th className="px-4 py-2 font-semibold">Zona</th>
-                  <th className="px-4 py-2 font-semibold">Barrios</th>
-                  <th className="px-4 py-2 text-right font-semibold">Tarifa</th>
-                  <th className="px-4 py-2 font-semibold">
-                    <span className="sr-only">Acciones</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {zones.map((zone) => (
-                  <tr key={zone.id} className={zone.isActive ? '' : 'opacity-60'}>
-                    <td className="px-4 py-3 font-semibold text-white">{zone.name}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{zone.keywords.join(', ') || '—'}</td>
-                    <td className="px-4 py-3 text-right font-mono text-emerald-300">{formatCOP(zone.fee)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={zone.isActive}
-                          aria-label={`${zone.name}: ${zone.isActive ? 'activa' : 'inactiva'}`}
-                          disabled={busyId === zone.id}
-                          onClick={() => toggleActive(zone)}
-                          className={`rounded-full border px-3 py-1 text-[11px] font-bold transition disabled:opacity-60 ${
-                            zone.isActive
-                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                              : 'border-slate-700 text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          {zone.isActive ? 'Activa' : 'Inactiva'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openForm(zone)}
-                          aria-label={`Editar la zona ${zone.name}`}
-                          className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(zone)}
-                          disabled={busyId === zone.id}
-                          aria-label={`Eliminar la zona ${zone.name}`}
-                          className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-60"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Tarifa estándar</p>
+              <p className="font-mono text-lg font-bold text-emerald-300">{formatCOP(saved ?? 0)} COP</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(true);
+                setValue(String(saved ?? ''));
+                setFeedback(null);
+              }}
+              aria-label="Editar la tarifa estándar"
+              className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                if (window.confirm('¿Eliminar la tarifa estándar? Los barrios fuera de tus zonas quedarán sin cobertura.')) void save(null);
+              }}
+              aria-label="Eliminar la tarifa estándar"
+              className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-60"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </div>
         )}
       </div>

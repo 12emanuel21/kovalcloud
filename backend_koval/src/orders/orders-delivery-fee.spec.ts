@@ -4,12 +4,12 @@ import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 
 describe('OrdersService.create · desglose subtotal + domicilio y cliente', () => {
   const restaurant = { id: 'rest-1', name: 'Betania', isTemporarilyClosed: false, businessHours: null, extendedUntil: null };
-  const build = (zones = [{ id: 'z-norte', name: 'Norte', keywords: ['riomar'], fee: 6000 }]) => {
+  const build = (zones = [{ id: 'z-norte', name: 'Norte', keywords: ['riomar'], fee: 6000 }], defaultDeliveryFee: number | null = null) => {
     const create = jest.fn().mockImplementation(({ data }) =>
       Promise.resolve({ id: 'o1', createdAt: new Date(), paymentReference: null, ...data }),
     );
     const prisma: any = {
-      restaurant: { findUnique: jest.fn().mockResolvedValue(restaurant) },
+      restaurant: { findUnique: jest.fn().mockResolvedValue({ ...restaurant, defaultDeliveryFee }) },
       menuItem: { findMany: jest.fn().mockResolvedValue([{ id: 'item-1', price: 12500 }]) },
       deliveryZone: { findMany: jest.fn().mockResolvedValue(zones) },
       order: { count: jest.fn().mockResolvedValue(0) },
@@ -48,7 +48,7 @@ describe('OrdersService.create · desglose subtotal + domicilio y cliente', () =
     const { service, create } = build();
     const error = await service.create(dto({ neighborhood: 'Soledad' })).catch((e) => e);
     expect(error).toBeInstanceOf(BadRequestException);
-    expect(error.getResponse()).toMatchObject({ code: 'OUT_OF_COVERAGE', fallback: 'PICKUP' });
+    expect(error.getResponse()).toMatchObject({ code: 'OUT_OF_COVERAGE', fallback: 'TAKEAWAY' });
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -76,5 +76,11 @@ describe('OrdersService.create · desglose subtotal + domicilio y cliente', () =
       neighborhood: 'Riomar',
       acceptTerms: true,
     });
+  });
+
+  it('tarifa estándar: barrio fuera de las zonas paga esa tarifa en vez de rechazarse', async () => {
+    const { service, create } = build(undefined, 15000);
+    await service.create(dto({ neighborhood: 'Soledad' }));
+    expect(create.mock.calls[0][0].data).toMatchObject({ subtotal: 25000, deliveryFee: 15000, total: 40000, deliveryZoneId: null });
   });
 });

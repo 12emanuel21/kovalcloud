@@ -1,6 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRestaurantDto } from './create-restaurant.dto';
-import { IsIn, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import {
   HEX_COLOR_PATTERN,
   MENU_COLOR_MODES,
@@ -40,6 +40,14 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsOptional()
   @IsString()
   currency?: string;
+
+  // Tarifa estándar de domicilio (COP) para barrios fuera de las zonas; null la quita
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber({}, { message: 'La tarifa estándar debe ser un número' })
+  @Min(0, { message: 'La tarifa estándar no puede ser negativa' })
+  @Max(1_000_000, { message: 'La tarifa estándar es demasiado alta' })
+  defaultDeliveryFee?: number | null;
 
   @IsOptional()
   @IsString()

@@ -187,8 +187,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const isDelivery = !tableNumber && fulfillment === 'DELIVERY';
   // Autorización de tratamiento de datos (Ley 1581): obligatoria para pedir
   const [acceptTerms, setAcceptTerms] = useState(false);
-  const { coverage, quote, quoting, deliveryFee } = useDeliveryQuote(restaurantId, isOpen && isDelivery, neighborhood, deliveryAddress);
-  const coverageConfigured = Boolean(coverage?.coverageConfigured);
+  // Con zonas el barrio es obligatorio (define la tarifa); solo con tarifa estándar no hace falta
+  const { coverage, hasZones, quote, quoting, deliveryFee } = useDeliveryQuote(
+    restaurantId,
+    isOpen && isDelivery,
+    neighborhood,
+    deliveryAddress,
+  );
   const outOfCoverage = isDelivery && quote?.isCovered === false;
   const grandTotal = totalAmount + (isDelivery ? deliveryFee : 0);
 
@@ -222,7 +227,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       setErrorMsg(`Quita ${joinNames(unavailableNames)} de tu pedido: ya no está disponible.`);
       return;
     }
-    if (isDelivery && coverageConfigured && !neighborhood.trim()) {
+    if (isDelivery && hasZones && !neighborhood.trim()) {
       setErrorMsg('Escribe tu barrio para calcular el domicilio.');
       return;
     }
@@ -691,39 +696,41 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <>
                       <div>
                         <label className="block text-xs font-medium text-sf-body mb-1">
-                          Dirección de Entrega {coverageConfigured ? <span className={accent.text}>*</span> : '(Opcional)'}
+                          Dirección de Entrega {hasZones ? <span className={accent.text}>*</span> : '(Opcional)'}
                         </label>
                         <input
                           type="text"
                           value={deliveryAddress}
                           onChange={(e) => setDeliveryAddress(e.target.value)}
                           placeholder="Ej. Cra 45 # 26-85 Apto 401"
-                          required={coverageConfigured}
+                          required={hasZones}
                           className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-sf-body mb-1">
-                          Barrio {coverageConfigured ? <span className={accent.text}>*</span> : '(Opcional)'}
+                          Barrio {hasZones ? <span className={accent.text}>*</span> : '(Opcional)'}
                         </label>
                         <input
                           type="text"
                           value={neighborhood}
                           onChange={(e) => setNeighborhood(e.target.value)}
                           placeholder="Ej. Riomar"
-                          required={coverageConfigured}
+                          required={hasZones}
                           autoComplete="address-level3"
                           className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                         />
-                        {coverageConfigured && (
+                        {hasZones && (
                           <p className="mt-1.5 text-[11px] text-sf-muted" aria-live="polite">
                             {quoting
                               ? 'Calculando el domicilio...'
                               : quote?.isCovered
                                 ? `Domicilio ${quote.zoneName ? `(${quote.zoneName})` : ''}: ${formatCOP(quote.deliveryFee)}`
-                                : !outOfCoverage
-                                  ? `Llegamos a: ${coverage!.zones.map((z) => z.name).join(' · ')}`
-                                  : null}
+                                : outOfCoverage
+                                  ? null
+                                  : coverage?.defaultDeliveryFee
+                                    ? 'Escribe tu barrio para calcular el domicilio.'
+                                    : `Llegamos a: ${coverage!.zones.map((z) => z.name).join(' · ')}`}
                           </p>
                         )}
                         {outOfCoverage && (
@@ -793,7 +800,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     {formatCOP(grandTotal)}
                   </span>
                 </div>
-                {isDelivery && coverageConfigured && !quote?.isCovered && !outOfCoverage && (
+                {isDelivery && hasZones && !quote?.isCovered && !outOfCoverage && (
                   <p className="text-[11px] text-sf-muted">El domicilio se calcula con tu barrio.</p>
                 )}
 

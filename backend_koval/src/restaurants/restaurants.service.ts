@@ -322,6 +322,11 @@ export class RestaurantsService {
         logoUrl: updateRestaurantDto.logoUrl,
         bannerUrl,
         currency: updateRestaurantDto.currency,
+        // undefined = no se toca; null o 0 = sin tarifa estándar (redondeada a pesos)
+        defaultDeliveryFee:
+          updateRestaurantDto.defaultDeliveryFee === undefined
+            ? undefined
+            : Math.round(updateRestaurantDto.defaultDeliveryFee ?? 0) || null,
         botpressBotId: updateRestaurantDto.botpressBotId,
         theme: updateRestaurantDto.theme,
         menuColorMode: updateRestaurantDto.menuColorMode,

@@ -11,11 +11,18 @@ export interface CoverageZone {
   fee: number;
 }
 
-/** Sin zonas configuradas el local no restringe: todo domicilio entra sin flete calculado */
+/**
+ * Cotización del domicilio:
+ * - zona encontrada: su tarifa;
+ * - sin zona pero con tarifa estándar del local: esa tarifa ("Tarifa general");
+ * - sin zona ni tarifa estándar, con zonas creadas: fuera de cobertura (se ofrece recoger, TAKEAWAY);
+ * - local sin zonas ni tarifa estándar: no restringe (cubierto, sin flete, coverageConfigured: false).
+ */
 export type DeliveryQuote =
-  | { isCovered: true; zoneId: string; zoneName: string; deliveryFee: number; coverageConfigured: true }
-  | { isCovered: true; zoneId: null; zoneName: null; deliveryFee: 0; coverageConfigured: false }
-  | { isCovered: false; deliveryFee: 0; fallback: 'PICKUP'; coverageConfigured: true };
+  | { isCovered: true; zoneId: string | null; zoneName: string | null; deliveryFee: number; coverageConfigured: boolean }
+  | { isCovered: false; deliveryFee: 0; fallback: 'TAKEAWAY'; coverageConfigured: true };
+
+export const DEFAULT_FEE_ZONE_NAME = 'Tarifa general';
 
 export const NO_COVERAGE_CONFIGURED: DeliveryQuote = {
   isCovered: true,
@@ -24,7 +31,11 @@ export const NO_COVERAGE_CONFIGURED: DeliveryQuote = {
   deliveryFee: 0,
   coverageConfigured: false,
 };
-export const NOT_COVERED: DeliveryQuote = { isCovered: false, deliveryFee: 0, fallback: 'PICKUP', coverageConfigured: true };
+export const NOT_COVERED: DeliveryQuote = { isCovered: false, deliveryFee: 0, fallback: 'TAKEAWAY', coverageConfigured: true };
+
+/** Tarifa estándar utilizable (null, 0 o inválida = no hay) */
+export const usableDefaultFee = (fee: number | null | undefined): number | null =>
+  typeof fee === 'number' && Number.isFinite(fee) && fee > 0 ? fee : null;
 
 /** "Villa Santos, Cra. 52" -> "villa santos cra 52" */
 export function normalizePlace(value: string | null | undefined): string {
@@ -58,9 +69,19 @@ export function matchDeliveryZone<T extends CoverageZone>(zones: T[], ...places:
   return best?.zone ?? null;
 }
 
-export function quoteFor<T extends CoverageZone>(zones: T[], ...places: Array<string | null | undefined>): DeliveryQuote {
-  if (zones.length === 0) return NO_COVERAGE_CONFIGURED;
+export function quoteFor<T extends CoverageZone>(
+  zones: T[],
+  defaultDeliveryFee: number | null | undefined,
+  ...places: Array<string | null | undefined>
+): DeliveryQuote {
+  // 1. Zona específica del barrio o la dirección
   const zone = matchDeliveryZone(zones, ...places);
-  if (!zone) return NOT_COVERED;
-  return { isCovered: true, zoneId: zone.id, zoneName: zone.name, deliveryFee: zone.fee, coverageConfigured: true };
+  if (zone) return { isCovered: true, zoneId: zone.id, zoneName: zone.name, deliveryFee: zone.fee, coverageConfigured: true };
+  // 2. Tarifa estándar del local: cubre cualquier barrio que no esté en las zonas
+  const defaultFee = usableDefaultFee(defaultDeliveryFee);
+  if (defaultFee !== null) {
+    return { isCovered: true, zoneId: null, zoneName: DEFAULT_FEE_ZONE_NAME, deliveryFee: defaultFee, coverageConfigured: true };
+  }
+  // 3. Con zonas pero sin tarifa estándar: fuera de cobertura; sin nada configurado: sin restricción
+  return zones.length > 0 ? NOT_COVERED : NO_COVERAGE_CONFIGURED;
 }
