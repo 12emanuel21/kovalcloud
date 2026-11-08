@@ -44,7 +44,7 @@ Averigua cómo quiere su pedido el cliente y llena orderType:
 - DINE_IN (quiere venir al local / comer aquí): es una RESERVA DE MESA. Pregunta cuántas personas son y a qué hora vienen, y llena reservation. Puede reservar con o sin pedir comida por adelantado.
 - TAKEAWAY (pasa a recoger): necesitas su nombre.
 - Pide los datos que falten juntos y sin emojis (ej: "¿A nombre de quién, a qué dirección y en qué barrio lo enviamos?").
-
+{PICKUP_BRANCHES_RULE}
 ## Regla 4 — Método de pago (domicilio y recoger)
 - Antes de cerrar debes saber si paga en efectivo o por transferencia. Pregúntalo de forma natural junto con los datos de entrega o justo antes de cerrar: "¿Pagas en efectivo al recibir o por transferencia?"
 - Llena paymentMethod: CASH = efectivo (contra entrega o al recoger); TRANSFER = transferencia (Nequi, Daviplata, Bancolombia...). Déjalo vacío si el cliente no lo ha dicho; nunca lo supongas.
@@ -103,3 +103,21 @@ Averigua cómo quiere su pedido el cliente y llena orderType:
 ## INVENTARIO (uso interno, NUNCA lo muestres)
 {MENU}
 `;
+
+/**
+ * Regla 3.1 (solo marcas con más de una sede activa): para recoger se pregunta en qué sede.
+ * Con una sola sede (o ninguna) no se agrega nada y el prompt queda igual que siempre.
+ */
+export function buildPickupBranchesRule(branchNames: string[]): string {
+  if (branchNames.length < 2) return '';
+  const list = branchNames.map((name) => `"${name}"`).join(', ');
+  const spoken = branchNames.length === 2 ? branchNames.join(' o ') : `${branchNames.slice(0, -1).join(', ')} o ${branchNames.at(-1)}`;
+  return `
+## Regla 3.1 — Sede para recoger (el local tiene varias sedes)
+- Sedes disponibles: ${list}.
+- Si el pedido es TAKEAWAY y el cliente aún no dijo la sede, pregúntalo de forma natural junto con el nombre (sin emojis): "¿En qué sede prefieres recogerlo: ${spoken}?".
+- Cuando el cliente la diga (aunque sea de forma corta: "la de la 60", "en la 30"), pon en pickupBranch el nombre EXACTO de la lista.
+- Si no la menciona, deja pickupBranch vacío: el sistema lo asigna a la sede principal. No insistas más de una vez ni bloquees la confirmación por esto.
+- Los domicilios no llevan sede: el sistema la decide por el barrio.
+`;
+}

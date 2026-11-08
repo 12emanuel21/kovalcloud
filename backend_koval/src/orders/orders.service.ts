@@ -314,6 +314,8 @@ export class OrdersService {
             menuItem: true,
           },
         },
+        // Nombre de la sede para el badge del Kanban (multisede)
+        branch: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     });

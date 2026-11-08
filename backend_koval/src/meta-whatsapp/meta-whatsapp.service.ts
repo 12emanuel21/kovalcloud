@@ -6,7 +6,7 @@ import { syncWhatsAppBotNumber } from '../restaurants/whatsapp-bot-number';
 import { AiService, type OrderIntent } from '../ai/ai.service';
 import { isLidContact, normalizeColombianPhone } from '../orders/phone';
 import { OrdersGateway } from '../orders/orders.gateway';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, OrderType } from '@prisma/client';
 import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
 import { internalApiHeaders } from '../config/secrets';
 import { buildClosedMessage, isRestaurantClosed } from '../restaurants/business-hours';
@@ -21,7 +21,7 @@ import { BOT_PAUSED_MARKER, getHandoverState } from '../chats/handover';
 import { ChatQueue } from './chat-queue';
 import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService, PRIVACY_NOTICE, withPrivacyNotice } from '../customers/customers.service';
-import { activeBranchesOf, resolveOrderBranchId } from '../branches/branch-routing';
+import { activeBranchesOf, mainBranchOf, matchBranchByName, resolveOrderBranchId } from '../branches/branch-routing';
 import { activeSessionHistory } from './chat-session';
 import { isHttpUrl, menuLinkReply, menuWebUrl, withMenuLink } from './menu-link';
 import {
@@ -947,9 +947,15 @@ export class MetaWhatsAppService {
 
       // 5. Procesar el mensaje con Inteligencia Artificial (Gemini). Si falla (incluso tras el
       //    reintento), se responde igual: el cliente nunca se queda sin respuesta
+      // Multisede: con más de una sede activa la IA pregunta en cuál recoge (TAKEAWAY)
+      const branches = await activeBranchesOf(this.prisma, restaurant.id);
+      const pickupBranchNames = branches.length > 1 ? branches.map((b) => b.name ?? '').filter(Boolean) : [];
+      const aiOptions: [] | [{ pickupBranches: string[] }] =
+        pickupBranchNames.length > 1 ? [{ pickupBranches: pickupBranchNames }] : [];
+
       let aiResult: OrderIntent;
       try {
-        aiResult = await this.aiService.parseOrderIntent(messageText.trim(), menuString, chatHistory, restaurant.name);
+        aiResult = await this.aiService.parseOrderIntent(messageText.trim(), menuString, chatHistory, restaurant.name, ...aiOptions);
       } catch (error: any) {
         this.logger.error(`❌ La IA no pudo procesar el mensaje de ${senderNumber}: ${error?.message || error}`);
         const fallbackReply = withNotice(AI_FALLBACK_REPLY);
@@ -1006,6 +1012,11 @@ export class MetaWhatsAppService {
           }
         } else if (aiResult.intent === 'ORDER' || aiResult.intent === 'RESERVATION') {
           const lines = buildOrderLines(aiResult.items, menuItems);
+          // Recoger en una marca con varias sedes: la que dijo el cliente o, si no dijo, la principal
+          const pickupBranch =
+            toPrismaOrderType(aiResult) === OrderType.TAKEAWAY && branches.length > 1
+              ? (matchBranchByName(branches, aiResult.pickupBranch) ?? mainBranchOf(branches))
+              : null;
           const complete = hasRequiredData(aiResult, lines);
           // Domicilio/recoger no se confirman sin saber si paga en efectivo o por transferencia
           const missingPaymentMethod = complete && needsPaymentMethod(aiResult) && !aiResult.paymentMethod;
@@ -1057,7 +1068,8 @@ export class MetaWhatsAppService {
               const branchId = resolveOrderBranchId({
                 orderType: toPrismaOrderType(aiResult),
                 quote,
-                branches: await activeBranchesOf(this.prisma, restaurant.id),
+                requestedBranchId: pickupBranch?.id,
+                branches,
               });
               const newOrder = await this.prisma.order.create({
                 data: {
@@ -1097,7 +1109,7 @@ export class MetaWhatsAppService {
               // Emitir el evento por WebSocket al KDS (Kitchen Display System)
               this.ordersGateway.emitNewOrder(restaurant.id, { ...newOrder, dailyNumber });
 
-              finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber)}`.trim();
+              finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber, pickupBranch?.name)}`.trim();
 
               // Cobro: efectivo sin cuentas; transferencia con los datos de pago del local y el comprobante
               const paymentInstructions = buildPaymentInstructions(aiResult, restaurant.paymentDetails);
@@ -1105,7 +1117,7 @@ export class MetaWhatsAppService {
             }
           } else if (complete && aiResult.readyToConfirm) {
             // 6.2. Datos completos: pedir confirmación con el total exacto (aún NO se crea el pedido)
-            finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines, quote)}`.trim();
+            finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines, quote, pickupBranch?.name)}`.trim();
           }
           // 6.3. Si faltan datos, la respuesta de la IA ya está pidiendo lo que falta
         }

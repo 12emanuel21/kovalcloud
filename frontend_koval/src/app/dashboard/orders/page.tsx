@@ -10,6 +10,7 @@ import DispatchModal from '@/components/orders/DispatchModal';
 import PaymentProofModal from '@/components/orders/PaymentProofModal';
 import { formatCustomerPhone, isLidContact, waPhone } from '@/lib/customer-phone';
 import { orderNumberLabel } from '@/lib/order-number';
+import { branchNameOf, useBranches } from '../settings/useBranches';
 
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'DELIVERED' | 'CANCELLED';
 
@@ -56,6 +57,9 @@ interface Order {
   paymentProofAt?: string | null;
   /** Entregado / archivado: ya no va en el tablero activo */
   archivedAt?: string | null;
+  /** Sede que lo prepara (multisede); los eventos en vivo traen solo el id */
+  branchId?: string | null;
+  branch?: { name: string } | null;
   items: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -122,6 +126,9 @@ export default function OrdersPage() {
   // Domicilio listo: el mismo modal del KDS para elegir repartidor
   const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // Multisede: filtro por sede ('' = todas). Sin sedes no se muestra nada nuevo
+  const { branches } = useBranches();
+  const [branchFilter, setBranchFilter] = useState('');
   const [isConnectedWs, setIsConnectedWs] = useState<boolean>(false);
   const [newOrderToast, setNewOrderToast] = useState<{ id: string; customer: string; total: number | null } | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -278,7 +285,8 @@ export default function OrdersPage() {
   };
 
   // Filtrado por buscador
-  const filterBySearch = (list: Order[]) => {
+  const filterBySearch = (allOrders: Order[]) => {
+    const list = branchFilter ? allOrders.filter((o) => o.branchId === branchFilter) : allOrders;
     if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase().trim();
     // "7", "#7" o "#07": busca por turno del día
@@ -348,6 +356,7 @@ export default function OrdersPage() {
     const turn = orderNumberLabel(order);
     const cleanPhone = waPhone(order.customerPhone);
     const isWhatsApp = order.channel === 'WHATSAPP';
+    const branchName = order.branchId ? order.branch?.name ?? branchNameOf(branches, order.branchId, '') : '';
 
     return (
       <div
@@ -373,6 +382,14 @@ export default function OrdersPage() {
               <span className="text-[11px] text-slate-400">{formatOrderTime(order.createdAt)}</span>
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {branchName && (
+                <span
+                  className="inline-flex max-w-full items-center truncate rounded border border-slate-600/70 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300"
+                  title={`Sede ${branchName}`}
+                >
+                  📍 {branchName}
+                </span>
+              )}
               {renderPaymentBadge(order)}
               {order.paymentProofUrl && (
                 <button
@@ -578,8 +595,24 @@ export default function OrdersPage() {
         </div>
 
         {/* Buscador, Exportar y Actualizar */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <ExportOrdersButton />
+          {branches.length > 0 && (
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              aria-label="Filtrar pedidos por sede"
+              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-blue-500 outline-none cursor-pointer"
+            >
+              <option value="">Todas las sedes</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                  {branch.isActive ? '' : ' (inactiva)'}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="relative">
             <input
               type="text"

@@ -129,7 +129,13 @@ function paymentLine(ai: OrderIntent): string {
 }
 
 /** Mensaje de confirmación con el total exacto calculado por el backend y el método de pago elegido */
-export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[], quote?: DeliveryQuote | null): string {
+export function buildConfirmationMessage(
+  ai: OrderIntent,
+  lines: OrderLine[],
+  quote?: DeliveryQuote | null,
+  /** Marcas con varias sedes: dónde recoge (la elegida o la principal) */
+  pickupBranchName?: string | null,
+): string {
   const total = orderTotal(lines);
 
   if (isReservation(ai) && ai.reservation) {
@@ -143,7 +149,8 @@ export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[], qu
   }
 
   if (ai.orderType === 'TAKEAWAY') {
-    return `🛍️ *Para recoger*\n${itemsSummary(lines)}\n\nTu total es ${money(total)}.\n${paymentLine(ai)}\n\n¿Confirmas?`;
+    const where = pickupBranchName ? ` en la sede ${pickupBranchName}` : '';
+    return `🛍️ *Para recoger*${where}\n${itemsSummary(lines)}\n\nTu total es ${money(total)}.\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
   // Domicilio: el sistema no conoce el valor del envío por zona; nunca se presenta como total final
   const address = [ai.deliveryAddress, ai.neighborhood?.trim()].filter(Boolean).join(', ');
@@ -159,13 +166,13 @@ export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[], qu
  * Mensaje tras registrar el pedido (el "✅" le indica a la IA que ya quedó registrado).
  * La referencia es el turno del día (#07), no el UUID: es lo que ven la cocina y el repartidor.
  */
-export function buildRegisteredMessage(ai: OrderIntent, dailyNumber: number): string {
+export function buildRegisteredMessage(ai: OrderIntent, dailyNumber: number, pickupBranchName?: string | null): string {
   const ref = formatDailyNumber(dailyNumber);
   if (isReservation(ai)) {
     return `✅ Reserva confirmada. Tu turno es el ${ref}. Te esperamos.`;
   }
   return ai.orderType === 'TAKEAWAY'
-    ? `✅ Pedido confirmado. Tu turno es el ${ref}. Te avisamos cuando esté listo para recoger.`
+    ? `✅ Pedido confirmado. Tu turno es el ${ref}. Te avisamos cuando esté listo para recoger${pickupBranchName ? ` en la sede ${pickupBranchName}` : ''}.`
     : `✅ Pedido confirmado. Tu turno es el ${ref}. Ya lo estamos preparando.`;
 }
 

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { generateObject, generateText, ModelMessage } from 'ai';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
-import { WAITER_SYSTEM_PROMPT } from '../meta-whatsapp/prompts/waiter.prompt';
+import { buildPickupBranchesRule, WAITER_SYSTEM_PROMPT } from '../meta-whatsapp/prompts/waiter.prompt';
 import { RESTAURANT_TIMEZONE } from '../restaurants/business-hours';
 
 
@@ -58,6 +58,10 @@ const OrderIntentSchema = z.object({
     })
     .optional()
     .describe('Solo para DINE_IN'),
+  pickupBranch: z
+    .string()
+    .optional()
+    .describe('Solo TAKEAWAY en locales con varias sedes: nombre exacto de la sede donde recoge, si el cliente la dijo'),
   paymentMethod: z
     .enum(['CASH', 'TRANSFER'])
     .optional()
@@ -132,6 +136,8 @@ export class AiService {
     menuContext: string,
     chatHistory: Array<{ role: string; message: string }> = [],
     restaurantName: string = 'nuestro restaurante',
+    /** Marcas con varias sedes: nombres de las sedes activas (para preguntar dónde recoge) */
+    options: { pickupBranches?: string[] } = {},
   ): Promise<OrderIntent> {
     this.logger.log('Parsing order intent for message: ' + userMessage);
 
@@ -150,6 +156,7 @@ export class AiService {
       system: WAITER_SYSTEM_PROMPT
         .replace('{RESTAURANT_NAME}', restaurantName)
         .replace('{DAY_PART}', dayPart)
+        .replace('{PICKUP_BRANCHES_RULE}', buildPickupBranchesRule(options.pickupBranches ?? []))
         .replace('{MENU}', menuContext),
       messages: [
         ...historyMessages,

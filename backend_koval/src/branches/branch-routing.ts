@@ -1,11 +1,13 @@
 import { Logger } from '@nestjs/common';
 import { OrderType } from '@prisma/client';
-import type { DeliveryQuote } from '../delivery-zones/delivery-coverage';
+import { normalizePlace, type DeliveryQuote } from '../delivery-zones/delivery-coverage';
 
 /** Sede activa del restaurante, lo mínimo para enrutar un pedido */
 export interface RoutableBranch {
   id: string;
   isMain: boolean;
+  /** Para emparejar la sede que dice el cliente por WhatsApp */
+  name?: string;
 }
 
 export interface BranchRoutingInput {
@@ -46,7 +48,7 @@ type BranchFinder = {
   branch: {
     findMany(args: {
       where: { restaurantId: string; isActive: true };
-      select: { id: true; isMain: true };
+      select: { id: true; isMain: true; name: true };
     }): Promise<RoutableBranch[]>;
   };
 };
@@ -59,9 +61,47 @@ const logger = new Logger('BranchRouting');
  */
 export async function activeBranchesOf(prisma: BranchFinder, restaurantId: string): Promise<RoutableBranch[]> {
   try {
-    return (await prisma.branch.findMany({ where: { restaurantId, isActive: true }, select: { id: true, isMain: true } })) ?? [];
+    return (
+      (await prisma.branch.findMany({
+        where: { restaurantId, isActive: true },
+        select: { id: true, isMain: true, name: true },
+      })) ?? []
+    );
   } catch (error: any) {
     logger.warn(`No se pudieron cargar las sedes de ${restaurantId}; el pedido queda sin sede: ${error?.message || error}`);
     return [];
   }
+}
+
+/** Palabras que no distinguen una sede de otra ("la de la 60" -> "60") */
+const BRANCH_STOPWORDS = new Set(['la', 'el', 'las', 'los', 'de', 'del', 'en', 'a', 'y', 'por', 'sede', 'local', 'favor', 'porfa', 'que', 'queda']);
+
+const significantWords = (text: string) => normalizePlace(text).split(' ').filter((word) => word && !BRANCH_STOPWORDS.has(word));
+
+/**
+ * Sede que nombró el cliente (la IA devuelve el nombre, idealmente exacto): primero la coincidencia
+ * exacta sin tildes ni mayúsculas; si no, la sede con más palabras en común con lo que dijo
+ * ("la de la 60" -> "Calle 60"). Empate, nada en común o texto vacío: null (va a la principal).
+ */
+export function matchBranchByName<T extends RoutableBranch>(branches: T[], spoken: string | null | undefined): T | null {
+  const said = normalizePlace(spoken);
+  if (!said) return null;
+  const exact = branches.find((branch) => normalizePlace(branch.name) === said);
+  if (exact) return exact;
+
+  const saidWords = new Set(significantWords(said));
+  let best: T | null = null;
+  let bestScore = 0;
+  let tie = false;
+  for (const branch of branches) {
+    const score = significantWords(branch.name ?? '').filter((word) => saidWords.has(word)).length;
+    if (score > bestScore) {
+      best = branch;
+      bestScore = score;
+      tie = false;
+    } else if (score > 0 && score === bestScore) {
+      tie = true;
+    }
+  }
+  return bestScore > 0 && !tie ? best : null;
 }
