@@ -142,4 +142,14 @@ describe('resolveHandover', () => {
     });
     expect(resolveHandover({ message: '[SYSTEM_BOT_PAUSED]', createdAt: ago(HANDOVER_TTL_MS + 1) }, null, now).botPaused).toBe(false);
   });
+
+  it('resetContext (panel): deja el marcador de reinicio sin escribirle al cliente', async () => {
+    const prisma: any = { chatHistory: { create: jest.fn().mockResolvedValue({}) } };
+    const service = new ChatsService(prisma, {} as any);
+    await expect(service.resetContext('rest-1', '573001234567')).resolves.toEqual({ reset: true });
+    expect(prisma.chatHistory.create).toHaveBeenCalledWith({
+      data: { restaurantId: 'rest-1', customerPhone: '573001234567', role: 'system', message: '[SYSTEM_RESET_CONTEXT]' },
+    });
+    await expect(service.resetContext('rest-1', '+57 300')).rejects.toBeInstanceOf(BadRequestException);
+  });
 });

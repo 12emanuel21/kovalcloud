@@ -125,12 +125,109 @@ describe('MetaWhatsAppService', () => {
   });
 
   describe('processIncomingWebhook', () => {
+    const textMessage = (body: string) => ({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '123456',
+          changes: [
+            {
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: { display_phone_number: '15550234567', phone_number_id: '9988776655' },
+                messages: [{ from: '573009876543', id: 'wamid.300', timestamp: '1700000000', type: 'text', text: { body } }],
+              },
+              field: 'messages',
+            },
+          ],
+        },
+      ],
+    });
+
+    describe('carta: enlace web en vivo por slug', () => {
+      const menuUrl = 'https://kovalcloud.com/menu/pizzeria-napoles';
+      beforeEach(() => {
+        delete process.env.FRONTEND_URL;
+      });
+
+      it('respuesta rápida WEB_LINK sin texto: enlace con el slug (no el id, que da 404)', async () => {
+        (prismaService.autoReply.findMany as jest.Mock).mockResolvedValueOnce([
+          { responseType: 'WEB_LINK', triggerWords: ['menu'], responseBody: null },
+        ]);
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+        await service.processIncomingWebhook(textMessage('Menu!'), 'napoles-verify-token');
+
+        expect(sendSpy.mock.calls[0][3]).toContain(menuUrl);
+        expect(sendSpy.mock.calls[0][3]).not.toContain('/menu/rest-1');
+        expect(aiService.parseOrderIntent).not.toHaveBeenCalled();
+      });
+
+      it('respuesta rápida PDF_DOCUMENT sin URL válida: carta web, nunca el PDF de prueba', async () => {
+        (prismaService.autoReply.findMany as jest.Mock).mockResolvedValueOnce([
+          { responseType: 'PDF_DOCUMENT', triggerWords: ['carta'], responseBody: '' },
+        ]);
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+        const docSpy = jest.spyOn(service, 'sendDocumentMessage');
+
+        await service.processIncomingWebhook(textMessage('carta'), 'napoles-verify-token');
+
+        expect(docSpy).not.toHaveBeenCalled();
+        expect(sendSpy.mock.calls[0][3]).toContain(menuUrl);
+        expect(sendSpy.mock.calls[0][3]).not.toContain('w3.org');
+      });
+
+      it('respuesta rápida PDF_DOCUMENT con URL configurada: se sigue enviando el PDF', async () => {
+        (prismaService.autoReply.findMany as jest.Mock).mockResolvedValueOnce([
+          { responseType: 'PDF_DOCUMENT', triggerWords: ['carta'], responseBody: 'https://cdn.local/carta.pdf' },
+        ]);
+        const docSpy = jest.spyOn(service, 'sendDocumentMessage').mockResolvedValueOnce({});
+
+        await service.processIncomingWebhook(textMessage('carta'), 'napoles-verify-token');
+
+        expect(docSpy.mock.calls[0][3]).toBe('https://cdn.local/carta.pdf');
+      });
+
+      it('la IA detecta que pide el menú: responde con el enlace a la carta en vivo', async () => {
+        (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({
+          intent: 'QUESTION',
+          items: [],
+          sendMenuLink: true,
+          responseToUser: 'Te comparto nuestra carta en línea, con fotos y disponibilidad en tiempo real.',
+        });
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+        const docSpy = jest.spyOn(service, 'sendDocumentMessage');
+
+        await service.processIncomingWebhook(textMessage('pásame la carta'), 'napoles-verify-token');
+
+        expect(docSpy).not.toHaveBeenCalled();
+        expect(sendSpy.mock.calls[0][3]).toBe(
+          `Te comparto nuestra carta en línea, con fotos y disponibilidad en tiempo real.\n\n📲 Carta en vivo: ${menuUrl}`,
+        );
+      });
+
+      it('pide el PDF pero el local no lo subió: enlace a la carta web', async () => {
+        (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({
+          intent: 'QUESTION',
+          items: [],
+          sendMenuPdf: true,
+          responseToUser: 'Claro.',
+        });
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+        await service.processIncomingWebhook(textMessage('mándame la carta en pdf'), 'napoles-verify-token');
+
+        expect(sendSpy.mock.calls[0][3]).toBe(`Claro.\n\n📲 Carta en vivo: ${menuUrl}`);
+      });
+    });
+
     it('should resolve restaurant from DB, store chat history and pass context to AI', async () => {
       const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
       // Simula que la consulta con orderBy desc devuelve el más reciente primero
+      const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
       (prismaService.chatHistory.findMany as jest.Mock).mockResolvedValueOnce([
-        { role: 'model', message: '¡Hola! Bienvenido' },
-        { role: 'user', message: 'hola' },
+        { role: 'model', message: '¡Hola! Bienvenido', createdAt: minutesAgo(5) },
+        { role: 'user', message: 'hola', createdAt: minutesAgo(6) },
       ]);
 
       const payload = {
@@ -201,8 +298,8 @@ describe('MetaWhatsAppService', () => {
         'Quiero una pizza',
         expect.any(String),
         [
-          { role: 'user', message: 'hola' },
-          { role: 'model', message: '¡Hola! Bienvenido' },
+          expect.objectContaining({ role: 'user', message: 'hola' }),
+          expect.objectContaining({ role: 'model', message: '¡Hola! Bienvenido' }),
         ],
         'Pizzería Nápoles',
       );
@@ -306,65 +403,29 @@ describe('MetaWhatsAppService', () => {
       );
     });
 
-    it('"reset" NO borra el historial: registra el intercambio y un marcador de sistema', async () => {
+    it('"reset" ya no es un comando público: no marca reinicio ni responde "Memoria borrada"', async () => {
       const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
 
-      const payload = {
-        object: 'whatsapp_business_account',
-        entry: [
-          {
-            id: '123456',
-            changes: [
-              {
-                value: {
-                  messaging_product: 'whatsapp',
-                  metadata: {
-                    display_phone_number: '15550234567',
-                    phone_number_id: '9988776655',
-                  },
-                  messages: [
-                    {
-                      from: '573009876543',
-                      id: 'wamid.124',
-                      timestamp: '1700000000',
-                      type: 'text',
-                      text: { body: 'reset' },
-                    },
-                  ],
-                },
-                field: 'messages',
-              },
-            ],
-          },
-        ],
-      };
+      await service.processIncomingWebhook(textMessage('reset'), 'napoles-verify-token');
 
-      await service.processIncomingWebhook(payload, 'napoles-verify-token');
-
-      // Auditoría: sin borrado físico, el marcador queda al final
-      expect(prismaService.chatHistory.deleteMany).not.toHaveBeenCalled();
       const created = (prismaService.chatHistory.create as jest.Mock).mock.calls.map(([arg]) => arg.data);
-      expect(created).toEqual([
-        { restaurantId: 'rest-1', customerPhone: '573009876543', role: 'user', message: 'reset' },
-        {
-          restaurantId: 'rest-1',
-          customerPhone: '573009876543',
-          role: 'model',
-          message: '🧠 Memoria borrada. Contexto limpio. ¿En qué puedo ayudarte de nuevo?',
-        },
-        { restaurantId: 'rest-1', customerPhone: '573009876543', role: 'system', message: '[SYSTEM_RESET_CONTEXT]' },
+      expect(created).not.toContainEqual(expect.objectContaining({ message: '[SYSTEM_RESET_CONTEXT]' }));
+      expect(sendSpy.mock.calls.map((c) => c[3])).not.toContainEqual(expect.stringContaining('Memoria borrada'));
+      // Llega a la IA como cualquier otro mensaje
+      expect(aiService.parseOrderIntent).toHaveBeenCalledWith('reset', expect.any(String), [], 'Pizzería Nápoles');
+    });
+
+    it('sesión de 3 h: tras más de 3 h sin mensajes no se arrastra el carrito ni el pedido anterior', async () => {
+      jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+      const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+      (prismaService.chatHistory.findMany as jest.Mock).mockResolvedValueOnce([
+        { role: 'model', message: 'Tu total es $35.000. ¿Confirmas?', createdAt: hoursAgo(4) },
+        { role: 'user', message: 'una pizza para domicilio', createdAt: hoursAgo(4.1) },
       ]);
 
-      expect(sendSpy).toHaveBeenCalledWith(
-        '9988776655',
-        'EAAB_TEST_TOKEN',
-        '573009876543',
-        '🧠 Memoria borrada. Contexto limpio. ¿En qué puedo ayudarte de nuevo?',
-        false,
-      );
+      await service.processIncomingWebhook(textMessage('sí'), 'napoles-verify-token');
 
-      // No debe llamar a la IA
-      expect(aiService.parseOrderIntent).not.toHaveBeenCalled();
+      expect(aiService.parseOrderIntent).toHaveBeenCalledWith('sí', expect.any(String), [], 'Pizzería Nápoles');
     });
 
     it('should abort and log warning if restaurant has no whatsappToken configured', async () => {

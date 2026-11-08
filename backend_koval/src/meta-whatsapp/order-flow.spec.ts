@@ -29,6 +29,7 @@ const ai = (overrides: Partial<OrderIntent>): OrderIntent => ({
   addToPreviousOrder: false,
   responseToUser: '',
   sendMenuPdf: false,
+  sendMenuLink: false,
   ...overrides,
 });
 

@@ -62,6 +62,13 @@ export class ChatsController {
     return this.chatsService.sendManualMessage(restaurantId, phone, dto.text);
   }
 
+  /** Reinicia el contexto de la IA para este cliente (reemplaza al comando público "reset") */
+  @Post(':phone/reset')
+  @HttpCode(HttpStatus.OK)
+  resetContext(@Param('id') restaurantId: string, @Param('phone') phone: string) {
+    return this.chatsService.resetContext(restaurantId, phone);
+  }
+
   @Patch(':phone/handover')
   @HttpCode(HttpStatus.OK)
   setHandover(@Param('id') restaurantId: string, @Param('phone') phone: string, @Body() dto: SetHandoverDto) {

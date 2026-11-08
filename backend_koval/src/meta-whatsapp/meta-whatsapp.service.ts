@@ -19,6 +19,8 @@ import {
 } from '../chats/chat-history';
 import { BOT_PAUSED_MARKER, getHandoverState } from '../chats/handover';
 import { ChatQueue } from './chat-queue';
+import { activeSessionHistory } from './chat-session';
+import { isHttpUrl, menuLinkReply, menuWebUrl, withMenuLink } from './menu-link';
 import {
   BAILEYS_MEDIA_PREFIX,
   MENU_PDF_MEDIA,
@@ -752,19 +754,9 @@ export class MetaWhatsAppService {
 
       const lowerMsg = messageText.toLowerCase().trim();
 
-      // --- 3.5 COMANDO DE SISTEMA: RESET ---
-      if (lowerMsg === 'reset') {
-        this.logger.log(`🧹 Ejecutando comando de reset para ${senderNumber}`);
-        const resetReply = '🧠 Memoria borrada. Contexto limpio. ¿En qué puedo ayudarte de nuevo?';
-        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, resetReply, isBaileys);
-        // Sin borrado físico: el marcador va al final para que la IA arranque limpia tras él
-        await this.recordChat(restaurant.id, senderNumber, [
-          userEntry(messageText.trim()),
-          { role: CHAT_ROLE_MODEL, message: resetReply },
-          { role: CHAT_ROLE_SYSTEM, message: RESET_CONTEXT_MARKER },
-        ]);
-        return; // Detener flujo
-      }
+      // Sin comando "reset" público: un cliente que escribe "reset" es un mensaje más. El reinicio
+      // de contexto es interno (ChatsService.resetContext, desde el panel) y la sesión caduca sola
+      // tras CHAT_SESSION_TTL_MS sin mensajes.
 
       // --- 4. INTERCEPTOR DE RESPUESTAS RÁPIDAS (Bypass de IA) ---
       // Limpiamos la puntuación del mensaje para comparar palabras exactas (ej. "Hola!" -> "hola")
@@ -786,13 +778,13 @@ export class MetaWhatsAppService {
         if (matchedReply.responseType === 'TEXT') {
           finalResponse = matchedReply.responseBody || 'Hola, ¿en qué podemos ayudarte?';
         } else if (matchedReply.responseType === 'WEB_LINK') {
-          finalResponse =
-            matchedReply.responseBody ||
-            `¡Hola! Conoce nuestro menú interactivo aquí: ${process.env.FRONTEND_URL || 'https://kovalcloud.com'}/menu/${restaurant.id}`;
+          finalResponse = matchedReply.responseBody?.trim() || menuLinkReply(menuWebUrl(restaurant));
+        } else if (matchedReply.responseType === 'PDF_DOCUMENT' && !isHttpUrl(matchedReply.responseBody)) {
+          // PDF sin URL válida configurada: la carta web en vivo (nunca un PDF de prueba)
+          this.logger.warn(`⚠️ Respuesta rápida PDF sin URL válida en ${restaurant.id}: se envía la carta web`);
+          finalResponse = menuLinkReply(menuWebUrl(restaurant));
         } else if (matchedReply.responseType === 'PDF_DOCUMENT') {
-          const pdfUrl =
-            matchedReply.responseBody ||
-            'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
+          const pdfUrl = matchedReply.responseBody!.trim();
           const pdfCaption = '📄 Aquí tienes nuestro menú. ¡Dime qué te gustaría ordenar!';
           await this.sendDocumentMessage(targetPhoneId, targetToken, senderNumber, pdfUrl, "Menu.pdf", pdfCaption, isBaileys);
           await this.recordChat(restaurant.id, senderNumber, [
@@ -845,7 +837,11 @@ export class MetaWhatsAppService {
         orderBy: { createdAt: 'desc' },
         take: 20,
       });
-      const chatHistory = rawHistory.reverse();
+      // Solo la sesión activa: tras 3 h sin mensajes no se arrastra el carrito ni un pedido viejo
+      const chatHistory = activeSessionHistory(rawHistory.reverse());
+      if (rawHistory.length > 0 && chatHistory.length === 0) {
+        this.logger.log(`🕒 Sesión nueva para [${senderNumber}]: más de 3 h sin mensajes, contexto anterior descartado`);
+      }
 
       // Guardar el mensaje del usuario en el historial (con su adjunto: foto con texto, nota de voz)
       await this.prisma.chatHistory.create({
@@ -995,9 +991,16 @@ export class MetaWhatsAppService {
 
       // 7. Enviar la respuesta generada por IA al cliente vía Meta Graph API v22.0
       let pdfSent = false;
+      // Carta: por defecto el enlace a la carta web en vivo. El PDF importado solo si el cliente lo
+      // pide explícitamente y el local lo subió (si no, también el enlace)
+      const menuUrl = menuWebUrl(restaurant);
+      if (aiResult.sendMenuLink && !aiResult.sendMenuPdf) {
+        finalResponse = withMenuLink(finalResponse, menuUrl);
+      }
       if (aiResult.sendMenuPdf) {
         const menuPdfPath = path.join(process.cwd(), 'uploads', 'menus', `${restaurant.id}.pdf`);
         if (fs.existsSync(menuPdfPath)) {
+          finalResponse = withMenuLink(finalResponse, menuUrl);
           try {
             const docRes = await this.sendDocumentMessage(
               targetPhoneId,
@@ -1015,8 +1018,7 @@ export class MetaWhatsAppService {
           }
         } else {
           this.logger.warn(`⚠️ PDF de menú no encontrado en ${menuPdfPath}, se envía el enlace al menú web.`);
-          const menuUrl = `${process.env.FRONTEND_URL || 'https://kovalcloud.com'}/menu/${restaurant.slug}`;
-          finalResponse += `\n\n📲 Mira nuestro menú aquí: ${menuUrl}`;
+          finalResponse = withMenuLink(finalResponse, menuUrl);
         }
       }
 

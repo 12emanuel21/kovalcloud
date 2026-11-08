@@ -72,11 +72,16 @@ const OrderIntentSchema = z.object({
     .default(false)
     .describe('True SOLO si el último mensaje del cliente acepta explícitamente la confirmación ("¿Confirmas?") enviada antes'),
   responseToUser: z.string(),
+  sendMenuLink: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('True si el cliente pide el menú, la carta, precios, opciones o qué venden (se envía la carta web en vivo)'),
   sendMenuPdf: z
     .boolean()
     .optional()
     .default(false)
-    .describe('True si el cliente pide el menú, la carta, opciones o qué venden'),
+    .describe('True SOLO si el cliente pide explícitamente la carta en PDF o como archivo/documento'),
 });
 
 export type OrderIntent = z.infer<typeof OrderIntentSchema>;

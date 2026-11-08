@@ -2,7 +2,7 @@ import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundE
 import { PrismaService } from '../prisma/prisma.service';
 import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
 import { createReadStream, promises as fs } from 'fs';
-import { CHAT_ROLE_AGENT, CHAT_ROLE_SYSTEM, CHAT_ROLE_USER } from './chat-history';
+import { CHAT_ROLE_AGENT, CHAT_ROLE_SYSTEM, CHAT_ROLE_USER, RESET_CONTEXT_MARKER } from './chat-history';
 import { MENU_PDF_MEDIA, chatMediaMime, chatMediaPath } from './chat-media';
 import {
   BOT_PAUSED_MARKER,
@@ -197,6 +197,19 @@ export class ChatsService {
       });
     }
     return this.getStatus(restaurantId, customerPhone);
+  }
+
+  /**
+   * Reinicio del contexto de la IA para esta conversación (antes era el comando "reset" que
+   * cualquier cliente podía escribir). Sin borrado: el marcador hace que la IA arranque limpia
+   * tras él y el historial sigue en el Inbox. No le envía nada al cliente.
+   */
+  async resetContext(restaurantId: string, customerPhone: string): Promise<{ reset: true }> {
+    this.assertPhone(customerPhone);
+    await this.prisma.chatHistory.create({
+      data: { restaurantId, customerPhone, role: CHAT_ROLE_SYSTEM, message: RESET_CONTEXT_MARKER },
+    });
+    return { reset: true };
   }
 
   /**
