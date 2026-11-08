@@ -16,6 +16,7 @@ import { UsersModule } from './users/users.module';
 import { ChatsModule } from './chats/chats.module';
 import { DriversModule } from './drivers/drivers.module';
 import { DeliveryZonesModule } from './delivery-zones/delivery-zones.module';
+import { BranchesModule } from './branches/branches.module';
 import { CustomersModule } from './customers/customers.module';
 import { SupportModule } from './support/support.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -46,6 +47,7 @@ import { PaymentsModule } from './payments/payments.module';
     ChatsModule,
     DriversModule,
     DeliveryZonesModule,
+    BranchesModule,
     CustomersModule,
     SupportModule,
     PaymentsModule,

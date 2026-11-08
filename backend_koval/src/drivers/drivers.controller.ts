@@ -7,6 +7,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantParam } from '../auth/decorators/tenant-param.decorator';
 import { KitchenAccess } from '../auth/decorators/kitchen-access.decorator';
 import { DriversService } from './drivers.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateDriverDto, UpdateDriverDto } from './dto/driver.dto';
 
 /**
@@ -24,8 +26,10 @@ export class DriversController {
   @Get()
   @KitchenAccess()
   @Roles(Role.OWNER, Role.SUPERADMIN, Role.KITCHEN)
-  list(@Param('id') restaurantId: string, @Query('active') active?: string) {
-    return this.driversService.list(restaurantId, active === 'true');
+  list(@Param('id') restaurantId: string, @CurrentUser() user: AuthenticatedUser, @Query('active') active?: string) {
+    // La cocina de una sede solo ve sus repartidores (y los que no tienen sede)
+    const branchId = user?.role === Role.KITCHEN ? user.branchId : null;
+    return this.driversService.list(restaurantId, active === 'true', branchId);
   }
 
   @Post()

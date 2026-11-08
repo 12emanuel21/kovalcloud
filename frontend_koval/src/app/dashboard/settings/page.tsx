@@ -10,6 +10,7 @@ import { TeamSection } from './TeamSection';
 import { MyAccountSection } from './MyAccountSection';
 import { DriversSection } from './DriversSection';
 import { DeliveryZonesSection } from './DeliveryZonesSection';
+import { BranchesSection } from './BranchesSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
 import { MenuLayoutPicker } from './MenuLayoutPicker';
@@ -509,6 +510,8 @@ export default function SettingsPage() {
         <RestaurantProfileSection view={activeTab} />
 
         {/* REPARTIDORES: domiciliarios que ofrece el KDS al despachar */}
+        {/* SEDES: cocinas de la marca; los domicilios se enrutan por la sede de cada zona */}
+        {activeTab === 'sedes' && <BranchesSection />}
         {activeTab === 'domicilios' && <DeliveryZonesSection />}
         {activeTab === 'repartidores' && <DriversSection />}
 

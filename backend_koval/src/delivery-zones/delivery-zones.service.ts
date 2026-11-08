@@ -3,8 +3,9 @@ import { OrderType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDeliveryZoneDto, UpdateDeliveryZoneDto } from './dto/delivery-zone.dto';
 import { normalizePlace, quoteFor, usableDefaultFee, type DeliveryQuote } from './delivery-coverage';
+import { assertBranchOf, branchData } from '../branches/branch-ownership';
 
-const zoneSelect = { id: true, name: true, keywords: true, fee: true, isActive: true, createdAt: true } as const;
+const zoneSelect = { id: true, name: true, keywords: true, fee: true, isActive: true, branchId: true, createdAt: true } as const;
 
 /** Palabras clave limpias y sin repetir (se guardan como las escribió el dueño, sin espacios extra) */
 function cleanKeywords(keywords: string[] | undefined): string[] | undefined {
@@ -53,11 +54,18 @@ export class DeliveryZonesService {
     return { coverageConfigured: zones.length > 0 || defaultDeliveryFee !== null, zones, defaultDeliveryFee };
   }
 
-  create(restaurantId: string, dto: CreateDeliveryZoneDto) {
+  async create(restaurantId: string, dto: CreateDeliveryZoneDto) {
     const name = dto.name.trim();
     if (!name) throw new BadRequestException('El nombre de la zona es obligatorio');
+    await assertBranchOf(this.prisma, restaurantId, dto.branchId);
     return this.prisma.deliveryZone.create({
-      data: { restaurantId, name, keywords: cleanKeywords(dto.keywords) ?? [], fee: cleanFee(dto.fee)! },
+      data: {
+        restaurantId,
+        name,
+        keywords: cleanKeywords(dto.keywords) ?? [],
+        fee: cleanFee(dto.fee)!,
+        ...branchData(dto.branchId),
+      },
       select: zoneSelect,
     });
   }
@@ -66,9 +74,16 @@ export class DeliveryZonesService {
     await this.assertOwned(restaurantId, zoneId);
     const name = dto.name === undefined ? undefined : dto.name.trim();
     if (name === '') throw new BadRequestException('El nombre de la zona es obligatorio');
+    await assertBranchOf(this.prisma, restaurantId, dto.branchId);
     return this.prisma.deliveryZone.update({
       where: { id: zoneId },
-      data: { name, keywords: cleanKeywords(dto.keywords), fee: cleanFee(dto.fee), isActive: dto.isActive },
+      data: {
+        name,
+        keywords: cleanKeywords(dto.keywords),
+        fee: cleanFee(dto.fee),
+        isActive: dto.isActive,
+        ...branchData(dto.branchId),
+      },
       select: zoneSelect,
     });
   }
@@ -89,7 +104,7 @@ export class DeliveryZonesService {
     const [zones, restaurant] = await Promise.all([
       this.prisma.deliveryZone.findMany({
         where: { restaurantId, isActive: true },
-        select: { id: true, name: true, keywords: true, fee: true },
+        select: { id: true, name: true, keywords: true, fee: true, branchId: true },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { defaultDeliveryFee: true } }),

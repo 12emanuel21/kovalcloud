@@ -2,7 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 
 /** Datos mínimos del usuario autenticado necesarios para decidir acceso por tenant */
-export type TenantUser = { role: Role; restaurantId: string | null };
+export type TenantUser = { role: Role; restaurantId: string | null; /** Cocina de una sede (null = todas) */ branchId?: string | null };
 
 /**
  * Lanza ForbiddenException si el usuario no puede operar sobre el restaurante indicado.

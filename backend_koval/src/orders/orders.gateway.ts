@@ -21,6 +21,8 @@ type SocketUser = TenantUser & { id: string };
 
 /** Sala del personal de cocina: recibe los mismos eventos, sin datos financieros */
 const kitchenRoom = (restaurantId: string) => `restaurant_${restaurantId}_kitchen`;
+/** Cocina de una sede (multisede): solo los pedidos de esa sede, sin datos financieros */
+export const branchKitchenRoom = (restaurantId: string, branchId: string) => `restaurant_${restaurantId}_kitchen_${branchId}`;
 
 @WebSocketGateway({
   cors: {
@@ -60,10 +62,10 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        select: { id: true, role: true, restaurantId: true, isActive: true, passwordChangedAt: true },
+        select: { id: true, role: true, restaurantId: true, branchId: true, isActive: true, passwordChangedAt: true },
       });
       if (!user?.isActive || isTokenRevoked(payload.iat, user.passwordChangedAt)) return null;
-      return { id: user.id, role: user.role, restaurantId: user.restaurantId };
+      return { id: user.id, role: user.role, restaurantId: user.restaurantId, branchId: user.branchId ?? null };
     } catch {
       return null;
     }
@@ -106,11 +108,36 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return this.reject(client, `Sin acceso a la sala del restaurante ${restaurantId}`);
     }
 
-    // La cocina va a una sala propia que solo recibe pedidos sin importes
-    const room = user.role === Role.KITCHEN ? kitchenRoom(restaurantId) : `restaurant_${restaurantId}`;
+    // La cocina va a una sala propia que solo recibe pedidos sin importes; la de una sede, a la de su sede
+    const room = this.roomFor(user, restaurantId);
     client.join(room);
     this.logger.log(`🏢 Cliente ${client.id} suscrito a sala: ${room}`);
     return { event: 'joined_restaurant', room };
+  }
+
+  private roomFor(user: SocketUser, restaurantId: string): string {
+    if (user.role !== Role.KITCHEN) return `restaurant_${restaurantId}`;
+    return user.branchId ? branchKitchenRoom(restaurantId, user.branchId) : kitchenRoom(restaurantId);
+  }
+
+  /**
+   * La cuenta de cocina cambió de sede: sus KDS abiertos pasan a la sala de la nueva sede sin
+   * recargar ni cerrar sesión.
+   */
+  moveUserToBranch(userId: string, branchId: string | null) {
+    if (!this.server) return;
+    for (const client of this.server.sockets.sockets.values()) {
+      const user = client.data.user as SocketUser | undefined;
+      if (user?.id !== userId || user.role !== Role.KITCHEN) continue;
+      const kitchenRooms = [...client.rooms].filter((room) => /^restaurant_.+_kitchen(_.+)?$/.test(room));
+      const updated: SocketUser = { ...user, branchId };
+      client.data.user = updated;
+      for (const room of kitchenRooms) {
+        const restaurantId = /^restaurant_(.+?)_kitchen/.exec(room)?.[1];
+        void client.leave(room);
+        if (restaurantId) void client.join(this.roomFor(updated, restaurantId));
+      }
+    }
   }
 
   /** Cierra en el acto los WebSockets de un usuario (p. ej. al desactivar su acceso) */
@@ -123,13 +150,20 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  /** Emite a la sala completa del restaurante y, sin importes, a la sala de cocina */
+  /**
+   * Emite a la sala completa del restaurante y, sin importes, a la sala de cocina general. Si el
+   * pedido tiene sede, también (sin importes) a la cocina de esa sede.
+   */
   private emitToRestaurant(restaurantId: string, events: string[], order: unknown) {
     if (!this.server) return;
     const kitchenOrder = redactOrderFinancials(order as Record<string, any>);
+    const branchId = (order as { branchId?: unknown } | null)?.branchId;
     for (const event of events) {
       this.server.to(`restaurant_${restaurantId}`).emit(event, order);
       this.server.to(kitchenRoom(restaurantId)).emit(event, kitchenOrder);
+      if (typeof branchId === 'string' && branchId) {
+        this.server.to(branchKitchenRoom(restaurantId, branchId)).emit(event, kitchenOrder);
+      }
     }
   }
 

@@ -10,6 +10,7 @@ import { KitchenAccess } from '../auth/decorators/kitchen-access.decorator';
 import { UsersService } from './users.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+import { UpdateEmployeeBranchDto } from './dto/update-employee-branch.dto';
 import { UpdateEmployeePasswordDto } from './dto/update-employee-password.dto';
 import { UpdateOwnPasswordDto } from './dto/update-own-password.dto';
 
@@ -45,6 +46,16 @@ export class UsersController {
     @Headers(SUDO_HEADER) sudoToken?: string,
   ) {
     return this.usersService.changeOwnPassword(user.id, dto, sudoToken);
+  }
+
+  /** Sede de una cuenta de cocina (multisede); branchId null = todas las sedes */
+  @Patch(':id/branch')
+  updateBranch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateEmployeeBranchDto,
+  ) {
+    return this.usersService.updateBranch(user, id, dto.branchId);
   }
 
   @Patch(':id/status')

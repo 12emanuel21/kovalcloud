@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 /** Alta de una cuenta de cocina (KITCHEN) para un restaurante */
 export class CreateEmployeeDto {
@@ -22,4 +22,10 @@ export class CreateEmployeeDto {
   @IsUUID('4', { message: 'restaurantId no es un UUID válido' })
   @IsOptional()
   restaurantId?: string;
+
+  /** Sede de la cocina (multisede): su KDS solo recibe los pedidos de esa sede. null = todas */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID('all', { message: 'La sede no es válida' })
+  branchId?: string | null;
 }

@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
   ValidateNested,
@@ -66,6 +67,11 @@ export class CreateOrderDto {
   @IsOptional()
   @MaxLength(120)
   neighborhood?: string;
+
+  /** Sede elegida para recoger (o la mesa); los domicilios se enrutan por la zona del barrio */
+  @IsOptional()
+  @IsUUID('all', { message: 'La sede no es válida' })
+  branchId?: string;
 
   /** El cliente autorizó el tratamiento de sus datos (Ley 1581) en el checkout */
   @IsBoolean()

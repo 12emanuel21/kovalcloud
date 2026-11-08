@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Bike, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { SettingsCardHeader, SettingsFeedback, primaryButtonClass, settingsCardClass } from './settings-ui';
+import { branchNameOf, useBranches } from './useBranches';
+import { BranchSelect } from './BranchSelect';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -13,15 +15,18 @@ export interface Driver {
   phone: string;
   vehicleInfo: string | null;
   isActive: boolean;
+  /** Sede donde trabaja (null = cualquier sede) */
+  branchId?: string | null;
 }
 
 interface DriverForm {
   name: string;
   phone: string;
   vehicleInfo: string;
+  branchId: string | null;
 }
 
-const EMPTY_FORM: DriverForm = { name: '', phone: '', vehicleInfo: '' };
+const EMPTY_FORM: DriverForm = { name: '', phone: '', vehicleInfo: '', branchId: null };
 
 /** "573001234567" -> "+57 300 123 4567" */
 export function formatDriverPhone(digits: string): string {
@@ -44,6 +49,9 @@ const inputClass =
  */
 export function DriversSection() {
   const { token, restaurantId } = useAuth();
+  // Multisede: el KDS de cada sede solo ofrece sus repartidores (y los de "todas las sedes")
+  const { branches } = useBranches();
+  const hasBranches = branches.length > 0;
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -83,7 +91,11 @@ export function DriversSection() {
 
   const openForm = (driver?: Driver) => {
     setEditing(driver ? driver.id : 'new');
-    setForm(driver ? { name: driver.name, phone: driver.phone, vehicleInfo: driver.vehicleInfo ?? '' } : EMPTY_FORM);
+    setForm(
+      driver
+        ? { name: driver.name, phone: driver.phone, vehicleInfo: driver.vehicleInfo ?? '', branchId: driver.branchId ?? null }
+        : EMPTY_FORM,
+    );
     setFeedback(null);
   };
 
@@ -96,7 +108,12 @@ export function DriversSection() {
       const res = await fetch(isNew ? base : `${base}/${editing}`, {
         method: isNew ? 'POST' : 'PATCH',
         headers: headers(),
-        body: JSON.stringify({ name: form.name.trim(), phone: form.phone.trim(), vehicleInfo: form.vehicleInfo.trim() || null }),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          vehicleInfo: form.vehicleInfo.trim() || null,
+          ...(hasBranches ? { branchId: form.branchId } : {}),
+        }),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo guardar el repartidor'));
       const saved: Driver = await res.json();
@@ -200,6 +217,18 @@ export function DriversSection() {
                 />
               </label>
             </div>
+            {hasBranches && (
+              <label className="block sm:max-w-xs">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-400">Sede</span>
+                <BranchSelect
+                  branches={branches}
+                  value={form.branchId}
+                  onChange={(branchId) => setForm({ ...form, branchId })}
+                  emptyLabel="Todas las sedes"
+                  className={inputClass}
+                />
+              </label>
+            )}
             <div className="flex justify-end gap-2">
               <button
                 type="button"
@@ -243,6 +272,7 @@ export function DriversSection() {
                   <p className="truncate text-xs text-slate-400">
                     {formatDriverPhone(driver.phone)}
                     {driver.vehicleInfo ? ` · ${driver.vehicleInfo}` : ''}
+                    {hasBranches ? ` · ${branchNameOf(branches, driver.branchId, 'Todas las sedes')}` : ''}
                   </p>
                 </div>
                 <button

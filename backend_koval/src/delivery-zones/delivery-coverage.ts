@@ -9,6 +9,8 @@ export interface CoverageZone {
   name: string;
   keywords: string[];
   fee: number;
+  /** Sede que atiende la zona (null/ausente = la principal) */
+  branchId?: string | null;
 }
 
 /**
@@ -19,7 +21,15 @@ export interface CoverageZone {
  * - local sin zonas ni tarifa estándar: no restringe (cubierto, sin flete, coverageConfigured: false).
  */
 export type DeliveryQuote =
-  | { isCovered: true; zoneId: string | null; zoneName: string | null; deliveryFee: number; coverageConfigured: boolean }
+  | {
+      isCovered: true;
+      zoneId: string | null;
+      zoneName: string | null;
+      deliveryFee: number;
+      coverageConfigured: boolean;
+      /** Sede de la zona encontrada (solo si la zona tiene sede asignada) */
+      branchId?: string | null;
+    }
   | { isCovered: false; deliveryFee: 0; fallback: 'TAKEAWAY'; coverageConfigured: true };
 
 export const DEFAULT_FEE_ZONE_NAME = 'Tarifa general';
@@ -76,7 +86,16 @@ export function quoteFor<T extends CoverageZone>(
 ): DeliveryQuote {
   // 1. Zona específica del barrio o la dirección
   const zone = matchDeliveryZone(zones, ...places);
-  if (zone) return { isCovered: true, zoneId: zone.id, zoneName: zone.name, deliveryFee: zone.fee, coverageConfigured: true };
+  if (zone) {
+    return {
+      isCovered: true,
+      zoneId: zone.id,
+      zoneName: zone.name,
+      deliveryFee: zone.fee,
+      coverageConfigured: true,
+      ...(zone.branchId ? { branchId: zone.branchId } : {}),
+    };
+  }
   // 2. Tarifa estándar del local: cubre cualquier barrio que no esté en las zonas
   const defaultFee = usableDefaultFee(defaultDeliveryFee);
   if (defaultFee !== null) {

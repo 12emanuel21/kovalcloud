@@ -73,6 +73,8 @@ export interface OrderWhatsAppDetails {
   neighborhood?: string;
   /** Pasa a recoger en el local */
   pickup?: boolean;
+  /** Sede donde recoge (marcas con varias sedes) */
+  pickupBranch?: string;
   tableNumber?: string;
   notes?: string;
 }
@@ -87,7 +89,7 @@ export function buildOrderWhatsAppMessage(order: OrderWhatsAppDetails): string {
     '',
   ];
   if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
-  else if (order.pickup) lines.push('Para recoger en el local');
+  else if (order.pickup) lines.push(order.pickupBranch ? `Para recoger en la sede ${order.pickupBranch}` : 'Para recoger en el local');
   else if (order.deliveryAddress || order.neighborhood) {
     lines.push(`Dirección: ${[order.deliveryAddress, order.neighborhood].filter(Boolean).join(', ')}`);
   }

@@ -45,6 +45,9 @@ model User {
   // Un usuario pertenece a un restaurante (null para SUPERADMIN)
   restaurantId String?
   restaurant   Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  // Cuenta de cocina de una sede: su KDS solo recibe los pedidos de esa sede (null = todas)
+  branchId     String?
+  branch       Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId])
 }
@@ -123,6 +126,7 @@ model Restaurant {
   drivers        DeliveryDriver[]
   customers      Customer[]
   deliveryZones  DeliveryZone[]
+  branches       Branch[]
   autoReplies    AutoReply[]
   supportTickets SupportTicket[]
   chatHistories  ChatHistory[]
@@ -194,6 +198,9 @@ model Order {
   deliveryZone    DeliveryZone? @relation(fields: [deliveryZoneId], references: [id], onDelete: SetNull)
   customerId      String?
   customer        Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  // Sede que prepara el pedido (por la zona del domicilio o la elegida para recoger); null = sin sedes
+  branchId        String?
+  branch          Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
   orderType       OrderType   @default(DELIVERY)
   tableNumber     String?
   channel         String?     @default("WEB_MENU")
@@ -235,6 +242,9 @@ model DeliveryDriver {
   phone       String // Dígitos con indicativo (573001234567), listo para wa.me
   vehicleInfo String? // Ej: "Moto AKT · ABC12D"
   isActive    Boolean @default(true)
+  // Sede donde trabaja (null = cualquier sede)
+  branchId    String?
+  branch      Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   orders Order[]
 
@@ -331,9 +341,36 @@ model DeliveryZone {
   keywords     String[]
   fee          Float
   isActive     Boolean    @default(true)
+  // Sede que atiende los domicilios de esta zona (null = la sede principal)
+  branchId     String?
+  branch       Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
   orders       Order[]
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+
+  @@index([restaurantId])
+}
+
+// Sede de la marca (Ajustes > Sedes). La marca sigue siendo un solo Restaurant (carta, WhatsApp,
+// clientes, pagos); la sede solo decide qué cocina prepara el pedido. isMain recibe los pedidos
+// sin zona (tarifa estándar) y los de recoger sin sede elegida.
+model Branch {
+  id           String     @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  address      String
+  phone        String?
+  isMain       Boolean    @default(false)
+  isActive     Boolean    @default(true)
+
+  orders        Order[]
+  deliveryZones DeliveryZone[]
+  drivers       DeliveryDriver[]
+  users         User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([restaurantId])
 }

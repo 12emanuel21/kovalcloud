@@ -89,7 +89,7 @@ const inputClass =
  * Guarda con PATCH /restaurants/:id/config (solo OWNER del local o SUPERADMIN).
  */
 /** Textos de la tarjeta según la pestaña de Ajustes */
-const VIEW_COPY: Record<Exclude<SettingsTab, 'seguridad' | 'repartidores' | 'domicilios'>, { title: string; description: string; saveLabel: string; hint: string }> = {
+const VIEW_COPY: Record<Exclude<SettingsTab, 'seguridad' | 'repartidores' | 'domicilios' | 'sedes'>, { title: string; description: string; saveLabel: string; hint: string }> = {
   perfil: {
     title: 'Ubicación',
     description: 'Dirección del local que ven tus clientes en la carta.',
@@ -333,7 +333,7 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
   };
 
   // Este formulario cubre Perfil, Horarios y Pagos; Repartidores y Seguridad tienen sus propias tarjetas
-  if (view === 'seguridad' || view === 'repartidores' || view === 'domicilios') return null;
+  if (view === 'seguridad' || view === 'repartidores' || view === 'domicilios' || view === 'sedes') return null;
 
   if (loading) {
     return (

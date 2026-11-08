@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useDeliveryQuote } from './useDeliveryQuote';
+import { usePickupBranches } from './usePickupBranches';
 import { useCart } from '@/context/CartContext';
 import { buildOrderWhatsAppMessage, toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
 import { orderNumberLabel } from '@/lib/order-number';
@@ -195,6 +196,16 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     deliveryAddress,
   );
   const outOfCoverage = isDelivery && quote?.isCovered === false;
+  // Multisede: quien recoge elige la sede (por defecto la principal); con una sola no se pregunta
+  const isPickup = !tableNumber && fulfillment === 'TAKEAWAY';
+  const pickupBranches = usePickupBranches(restaurantId, isOpen && !tableNumber);
+  const [chosenBranchId, setChosenBranchId] = useState<string | null>(null);
+  const pickupBranch =
+    pickupBranches.find((branch) => branch.id === chosenBranchId) ??
+    pickupBranches.find((branch) => branch.isMain) ??
+    pickupBranches[0] ??
+    null;
+  const showBranchPicker = isPickup && pickupBranches.length > 1;
   const grandTotal = totalAmount + (isDelivery ? deliveryFee : 0);
 
   const formatCOP = (val: number) => {
@@ -257,6 +268,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         deliveryAddress: isDelivery ? deliveryAddress.trim() || undefined : undefined,
         neighborhood: isDelivery ? neighborhood.trim() || undefined : undefined,
         acceptTerms,
+        // Sede donde recoge; los domicilios los enruta el backend por la zona del barrio
+        branchId: isPickup && pickupBranch ? pickupBranch.id : undefined,
         notes: notes.trim() || undefined,
         paymentMethod,
         items: items.map((item) => ({
@@ -289,6 +302,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         // El backend no encontró el barrio en las zonas del local: se ofrece recoger
         if (errorData.code === 'OUT_OF_COVERAGE') {
           setErrorMsg(errorData.message || 'Todavía no llegamos a tu barrio con domicilio. Puedes pedirlo para recoger en el local.');
+          return;
+        }
+        // La sede elegida se desactivó mientras el cliente pedía: que elija otra
+        if (errorData.code === 'BRANCH_UNAVAILABLE') {
+          setChosenBranchId(null);
+          setErrorMsg(errorData.message || 'La sede que elegiste no está disponible. Elige otra para recoger tu pedido.');
           return;
         }
         const message = Array.isArray(errorData.message) ? errorData.message.join('. ') : errorData.message;
@@ -338,6 +357,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               deliveryAddress: payload.deliveryAddress,
               neighborhood: payload.neighborhood,
               pickup: payload.orderType === 'TAKEAWAY',
+              pickupBranch: payload.orderType === 'TAKEAWAY' && pickupBranches.length > 1 ? pickupBranch?.name : undefined,
               tableNumber: payload.tableNumber,
               notes: payload.notes,
             }),
@@ -690,6 +710,37 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         </button>
                       ))}
                     </div>
+                  )}
+
+                  {showBranchPicker && (
+                    <fieldset>
+                      <legend className="block text-xs font-medium text-sf-body mb-1.5">¿En qué sede lo recoges?</legend>
+                      <div role="radiogroup" aria-label="Sede para recoger" className="grid gap-2">
+                        {pickupBranches.map((branch) => {
+                          const selected = pickupBranch?.id === branch.id;
+                          return (
+                            <button
+                              key={branch.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={selected}
+                              onClick={() => {
+                                setChosenBranchId(branch.id);
+                                setErrorMsg(null);
+                              }}
+                              className={`rounded-sf border px-3 py-2.5 text-left transition ${
+                                selected ? `border-sf-primary bg-sf-bg` : 'border-sf-border hover:border-sf-muted'
+                              }`}
+                            >
+                              <span className={`block text-xs font-semibold ${selected ? accent.text : 'text-sf-text'}`}>
+                                {branch.name}
+                              </span>
+                              <span className="block text-[11px] text-sf-muted">{branch.address}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
                   )}
 
                   {isDelivery && (

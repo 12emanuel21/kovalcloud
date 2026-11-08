@@ -21,6 +21,7 @@ import { BOT_PAUSED_MARKER, getHandoverState } from '../chats/handover';
 import { ChatQueue } from './chat-queue';
 import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService, PRIVACY_NOTICE, withPrivacyNotice } from '../customers/customers.service';
+import { activeBranchesOf, resolveOrderBranchId } from '../branches/branch-routing';
 import { activeSessionHistory } from './chat-session';
 import { isHttpUrl, menuLinkReply, menuWebUrl, withMenuLink } from './menu-link';
 import {
@@ -1052,9 +1053,16 @@ export class MetaWhatsAppService {
                 address: isDelivery ? aiResult.deliveryAddress : undefined,
                 neighborhood: isDelivery ? aiResult.neighborhood : undefined,
               });
+              // Sede que lo prepara: la de la zona del barrio; recoger o sin zona: la principal
+              const branchId = resolveOrderBranchId({
+                orderType: toPrismaOrderType(aiResult),
+                quote,
+                branches: await activeBranchesOf(this.prisma, restaurant.id),
+              });
               const newOrder = await this.prisma.order.create({
                 data: {
                   restaurantId: restaurant.id,
+                  ...(branchId ? { branchId } : {}),
                   customerName: aiResult.customerName?.trim() || 'Cliente WhatsApp',
                   customerPhone: incomingMsg.from,
                   customerId: customer?.id,

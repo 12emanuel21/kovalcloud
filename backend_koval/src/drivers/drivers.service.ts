@@ -2,8 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { toWhatsAppNumber } from '../restaurants/whatsapp-bot-number';
 import { CreateDriverDto, UpdateDriverDto } from './dto/driver.dto';
+import { assertBranchOf, branchData } from '../branches/branch-ownership';
 
-const driverSelect = { id: true, name: true, phone: true, vehicleInfo: true, isActive: true, createdAt: true } as const;
+const driverSelect = { id: true, name: true, phone: true, vehicleInfo: true, isActive: true, branchId: true, createdAt: true } as const;
 
 /** Celular del repartidor listo para wa.me (dígitos con indicativo; Colombia por defecto) */
 export function normalizeDriverPhone(phone: string): string {
@@ -22,19 +23,31 @@ const cleanText = (value: string | null | undefined) => (value === undefined ? u
 export class DriversService {
   constructor(private readonly prisma: PrismaService) {}
 
-  list(restaurantId: string, activeOnly = false) {
+  /** branchId (cocina de una sede): sus repartidores y los que no tienen sede */
+  list(restaurantId: string, activeOnly = false, branchId?: string | null) {
     return this.prisma.deliveryDriver.findMany({
-      where: { restaurantId, ...(activeOnly ? { isActive: true } : {}) },
+      where: {
+        restaurantId,
+        ...(activeOnly ? { isActive: true } : {}),
+        ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}),
+      },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       select: driverSelect,
     });
   }
 
-  create(restaurantId: string, dto: CreateDriverDto) {
+  async create(restaurantId: string, dto: CreateDriverDto) {
     const name = dto.name.trim();
     if (!name) throw new BadRequestException('El nombre del repartidor es obligatorio');
+    await assertBranchOf(this.prisma, restaurantId, dto.branchId);
     return this.prisma.deliveryDriver.create({
-      data: { restaurantId, name, phone: normalizeDriverPhone(dto.phone), vehicleInfo: cleanText(dto.vehicleInfo) ?? null },
+      data: {
+        restaurantId,
+        name,
+        phone: normalizeDriverPhone(dto.phone),
+        vehicleInfo: cleanText(dto.vehicleInfo) ?? null,
+        ...branchData(dto.branchId),
+      },
       select: driverSelect,
     });
   }
@@ -43,6 +56,7 @@ export class DriversService {
     await this.assertOwned(restaurantId, driverId);
     const name = dto.name === undefined ? undefined : dto.name.trim();
     if (name === '') throw new BadRequestException('El nombre del repartidor es obligatorio');
+    await assertBranchOf(this.prisma, restaurantId, dto.branchId);
     return this.prisma.deliveryDriver.update({
       where: { id: driverId },
       data: {
@@ -50,6 +64,7 @@ export class DriversService {
         phone: dto.phone === undefined ? undefined : normalizeDriverPhone(dto.phone),
         vehicleInfo: cleanText(dto.vehicleInfo),
         isActive: dto.isActive,
+        ...branchData(dto.branchId),
       },
       select: driverSelect,
     });

@@ -11,7 +11,7 @@ import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { OrderStatus, OrderType } from '@prisma/client';
+import { OrderStatus, OrderType, Role } from '@prisma/client';
 import { OrdersGateway } from './orders.gateway';
 import { buildClosedNotice, isRestaurantClosed } from '../restaurants/business-hours';
 import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/tenant-access';
@@ -25,6 +25,7 @@ import { normalizeDriverPhone } from '../drivers/drivers.service';
 import { buildOrdersWorkbook, exportFilename, resolveExportRange } from './orders-export';
 import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService } from '../customers/customers.service';
+import { resolveOrderBranchId } from '../branches/branch-routing';
 
 /**
  * Confirmación inicial por WhatsApp. Con `paymentUrl` adjunta el link de pago (plan B si el cliente
@@ -88,13 +89,15 @@ export class OrdersService {
       notes,
       items,
       paymentMethod,
+      branchId: requestedBranchId,
     } = createOrderDto;
     // Endpoint público: `status` y `unitPrice` del cliente se ignoran.
     // El pedido nace PENDING y los precios salen siempre de la base de datos.
 
-    // 1. Validar que el restaurante exista
+    // 1. Validar que el restaurante exista (con sus sedes activas, para enrutar el pedido)
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: restaurantId },
+      include: { branches: { where: { isActive: true }, select: { id: true, isMain: true } } },
     });
     if (!restaurant) {
       throw new NotFoundException('Restaurante no encontrado');
@@ -185,6 +188,19 @@ export class OrdersService {
     const deliveryFee = quote?.deliveryFee ?? 0;
     const phone = normalizeColombianPhone(customerPhone);
 
+    // 3.55. Sede que lo prepara: la de la zona (domicilio) o la elegida (recoger); si no, la principal.
+    //       Sin sedes configuradas queda en null y todo funciona como un solo local.
+    const branches = restaurant.branches ?? [];
+    if (requestedBranchId && orderType !== OrderType.DELIVERY && !branches.some((b) => b.id === requestedBranchId)) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'BRANCH_UNAVAILABLE',
+        message: 'La sede que elegiste no está disponible. Elige otra para recoger tu pedido.',
+      });
+    }
+    const branchId = resolveOrderBranchId({ orderType, quote, requestedBranchId, branches });
+
     // 3.6. Cliente del local (teléfono único por restaurante) y su autorización de datos (Ley 1581)
     const customer = await this.customers.safeTouch(restaurantId, phone, {
       name: customerName,
@@ -214,6 +230,7 @@ export class OrdersService {
           deliveryFee,
           total: calculatedTotal + deliveryFee,
           deliveryZoneId: quote?.isCovered ? quote.zoneId : null,
+          ...(branchId ? { branchId } : {}),
           // WOMPI se reemplaza por el método real (NEQUI, CARD...) cuando llega el webhook
           paymentMethod: payOnline ? 'WOMPI' : 'CASH',
           items: {
@@ -283,9 +300,12 @@ export class OrdersService {
     }
     const restaurantId = resolveTenantFilter(user, requestedRestaurantId);
     const activeBoard = scope !== 'all';
+    // La cocina de una sede solo ve los pedidos de su sede (el dueño ve todos)
+    const kitchenBranchId = user.role === Role.KITCHEN ? user.branchId : null;
     const orders = await this.prisma.order.findMany({
       where: {
         ...(restaurantId ? { restaurantId } : {}),
+        ...(kitchenBranchId ? { branchId: kitchenBranchId } : {}),
         ...(activeBoard ? { createdAt: { gte: businessDayStart(new Date()) } } : {}),
       },
       include: {

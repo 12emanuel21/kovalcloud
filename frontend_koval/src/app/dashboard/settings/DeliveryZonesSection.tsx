@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { MapPin, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { SettingsCardHeader, SettingsFeedback, primaryButtonClass, settingsCardClass } from './settings-ui';
+import { branchNameOf, useBranches } from './useBranches';
+import { BranchSelect } from './BranchSelect';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -13,6 +15,8 @@ export interface DeliveryZone {
   keywords: string[];
   fee: number;
   isActive: boolean;
+  /** Sede que atiende la zona (null = la principal) */
+  branchId?: string | null;
 }
 
 interface ZoneForm {
@@ -20,9 +24,10 @@ interface ZoneForm {
   /** Barrios separados por coma */
   keywords: string;
   fee: string;
+  branchId: string | null;
 }
 
-const EMPTY_FORM: ZoneForm = { name: '', keywords: '', fee: '' };
+const EMPTY_FORM: ZoneForm = { name: '', keywords: '', fee: '', branchId: null };
 
 const formatCOP = (value: number) => `$${value.toLocaleString('es-CO')}`;
 
@@ -42,6 +47,9 @@ const inputClass =
  */
 export function DeliveryZonesSection() {
   const { token, restaurantId } = useAuth();
+  // Multisede: con sedes creadas, cada zona se asigna a la cocina que la atiende
+  const { branches } = useBranches();
+  const hasBranches = branches.length > 0;
   const [zones, setZones] = useState<DeliveryZone[]>([]);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -82,7 +90,11 @@ export function DeliveryZonesSection() {
 
   const openForm = (zone?: DeliveryZone) => {
     setEditing(zone ? zone.id : 'new');
-    setForm(zone ? { name: zone.name, keywords: zone.keywords.join(', '), fee: String(zone.fee) } : EMPTY_FORM);
+    setForm(
+      zone
+        ? { name: zone.name, keywords: zone.keywords.join(', '), fee: String(zone.fee), branchId: zone.branchId ?? null }
+        : EMPTY_FORM,
+    );
     setFeedback(null);
   };
 
@@ -104,6 +116,8 @@ export function DeliveryZonesSection() {
           name: form.name.trim(),
           keywords: form.keywords.split(',').map((k) => k.trim()).filter(Boolean),
           fee,
+          // Multisede: qué cocina atiende los domicilios de esta zona
+          ...(hasBranches ? { branchId: form.branchId } : {}),
         }),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo guardar la zona'));
@@ -207,8 +221,21 @@ export function DeliveryZonesSection() {
                   />
                 </label>
               </div>
+              {hasBranches && (
+                <label className="block sm:max-w-xs">
+                  <span className="mb-1 block text-[11px] font-semibold text-slate-400">Sede que atiende la zona</span>
+                  <BranchSelect
+                    branches={branches}
+                    value={form.branchId}
+                    onChange={(branchId) => setForm({ ...form, branchId })}
+                    emptyLabel="Sede principal (por defecto)"
+                    className={inputClass}
+                  />
+                </label>
+              )}
               <p className="text-[11px] text-slate-500">
                 El nombre de la zona también cuenta como barrio. No importan las tildes ni las mayúsculas.
+                {hasBranches && ' Los domicilios de esta zona sonarán solo en el KDS de la sede elegida.'}
               </p>
               <div className="flex justify-end gap-2">
                 <button
@@ -246,6 +273,7 @@ export function DeliveryZonesSection() {
                   <tr>
                     <th className="px-4 py-2 font-semibold">Zona</th>
                     <th className="px-4 py-2 font-semibold">Barrios</th>
+                    {hasBranches && <th className="px-4 py-2 font-semibold">Sede</th>}
                     <th className="px-4 py-2 text-right font-semibold">Tarifa</th>
                     <th className="px-4 py-2 font-semibold">
                       <span className="sr-only">Acciones</span>
@@ -257,6 +285,9 @@ export function DeliveryZonesSection() {
                     <tr key={zone.id} className={zone.isActive ? '' : 'opacity-60'}>
                       <td className="px-4 py-3 font-semibold text-white">{zone.name}</td>
                       <td className="px-4 py-3 text-xs text-slate-400">{zone.keywords.join(', ') || '—'}</td>
+                      {hasBranches && (
+                        <td className="px-4 py-3 text-xs text-slate-300">{branchNameOf(branches, zone.branchId, 'Principal')}</td>
+                      )}
                       <td className="px-4 py-3 text-right font-mono text-emerald-300">{formatCOP(zone.fee)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">

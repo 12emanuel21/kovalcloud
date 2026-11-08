@@ -1,5 +1,5 @@
 import { PartialType } from '@nestjs/mapped-types';
-import { IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, ValidateIf } from 'class-validator';
 
 export class CreateDriverDto {
   @IsString()
@@ -17,6 +17,12 @@ export class CreateDriverDto {
   @IsString()
   @MaxLength(80)
   vehicleInfo?: string | null;
+
+  /** Sede donde trabaja; null = cualquier sede */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID('all', { message: 'La sede no es válida' })
+  branchId?: string | null;
 }
 
 export class UpdateDriverDto extends PartialType(CreateDriverDto) {

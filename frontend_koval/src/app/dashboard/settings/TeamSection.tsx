@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { SudoCancelledError, useSudoMode } from '@/context/SudoContext';
+import { useBranches } from './useBranches';
+import { BranchSelect } from './BranchSelect';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -12,6 +14,8 @@ interface Employee {
   name: string;
   email: string;
   isActive: boolean;
+  /** Sede de la cocina (multisede): su KDS solo recibe esos pedidos. null = todas */
+  branchId?: string | null;
   createdAt: string;
 }
 
@@ -46,6 +50,11 @@ export function TeamSection() {
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newBranchId, setNewBranchId] = useState<string | null>(null);
+  // Multisede: cada cocina puede quedar atada a una sede
+  const { branches } = useBranches();
+  const hasBranches = branches.length > 0;
+  const [branchSavingId, setBranchSavingId] = useState<string | null>(null);
 
   const authHeaders = useCallback(
     (): Record<string, string> => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }),
@@ -96,6 +105,26 @@ export function TeamSection() {
     }
   };
 
+  /** Cambia la sede de una cocina; sus KDS abiertos pasan a la nueva sede sin recargar */
+  const handleBranchChange = async (employee: Employee, branchId: string | null) => {
+    setBranchSavingId(employee.id);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/users/${employee.id}/branch`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ branchId }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo cambiar la sede'));
+      const updated: Employee = await res.json();
+      setEmployees((prev) => prev.map((e) => (e.id === employee.id ? { ...e, branchId: updated.branchId ?? null } : e)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar la sede');
+    } finally {
+      setBranchSavingId(null);
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreating(true);
@@ -109,6 +138,7 @@ export function TeamSection() {
           email: newEmail.trim(),
           password: newPassword,
           ...(restaurantId ? { restaurantId } : {}),
+          ...(hasBranches && newBranchId ? { branchId: newBranchId } : {}),
         }),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res, 'No se pudo crear el empleado'));
@@ -117,6 +147,7 @@ export function TeamSection() {
       setNewName('');
       setNewEmail('');
       setNewPassword('');
+      setNewBranchId(null);
       setShowForm(false);
       setError(null);
     } catch (err) {
@@ -204,6 +235,18 @@ export function TeamSection() {
               />
             </div>
           </div>
+          {hasBranches && (
+            <div className="sm:max-w-xs">
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">Sede (KDS)</label>
+              <BranchSelect
+                branches={branches}
+                value={newBranchId}
+                onChange={setNewBranchId}
+                emptyLabel="Todas las sedes"
+                className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
+              />
+            </div>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
@@ -229,6 +272,7 @@ export function TeamSection() {
             <tr>
               <th className="p-3.5 font-semibold">Nombre</th>
               <th className="p-3.5 font-semibold">Email</th>
+              {hasBranches && <th className="p-3.5 font-semibold">Sede (KDS)</th>}
               <th className="p-3.5 font-semibold text-right">Contraseña</th>
               <th className="p-3.5 font-semibold text-right">Acceso al Sistema</th>
             </tr>
@@ -236,13 +280,13 @@ export function TeamSection() {
           <tbody className="divide-y divide-slate-800/60">
             {loading ? (
               <tr>
-                <td colSpan={4} className="p-6 text-center text-slate-500">
+                <td colSpan={hasBranches ? 5 : 4} className="p-6 text-center text-slate-500">
                   Cargando equipo...
                 </td>
               </tr>
             ) : employees.length === 0 ? (
               <tr>
-                <td colSpan={4} className="p-6 text-center text-slate-500">
+                <td colSpan={hasBranches ? 5 : 4} className="p-6 text-center text-slate-500">
                   Aún no hay cuentas de cocina. Crea la primera con “+ Crear Empleado”.
                 </td>
               </tr>
@@ -262,6 +306,19 @@ export function TeamSection() {
                     </div>
                   </td>
                   <td className="p-3.5 text-slate-400 font-mono text-[11px]">{employee.email}</td>
+                  {hasBranches && (
+                    <td className="p-3.5">
+                      <BranchSelect
+                        branches={branches}
+                        value={employee.branchId}
+                        onChange={(branchId) => handleBranchChange(employee, branchId)}
+                        emptyLabel="Todas las sedes"
+                        ariaLabel={`Sede del KDS de ${employee.name}`}
+                        disabled={branchSavingId === employee.id}
+                        className="min-w-[150px] bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg px-2 py-1.5 text-[11px] text-white outline-none disabled:opacity-60"
+                      />
+                    </td>
+                  )}
                   <td className="p-3.5 text-right">
                     <button
                       type="button"

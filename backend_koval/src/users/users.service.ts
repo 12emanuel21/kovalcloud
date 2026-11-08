@@ -13,6 +13,7 @@ import { resolveTenantFilter, type TenantUser } from '../auth/tenant-access';
 import { TwoFactorAuthService } from '../auth/two-factor-auth.service';
 import { AuthService } from '../auth/auth.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
+import { assertBranchOf } from '../branches/branch-ownership';
 
 type Manager = TenantUser & { id: string; isTwoFactorEnabled?: boolean };
 
@@ -24,6 +25,7 @@ const employeeSelect = {
   role: true,
   isActive: true,
   restaurantId: true,
+  branchId: true,
   createdAt: true,
 } as const;
 
@@ -70,6 +72,7 @@ export class UsersService {
     const email = dto.email.toLowerCase().trim();
     const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (existing) throw new ConflictException('El correo electrónico ya se encuentra registrado');
+    await assertBranchOf(this.prisma, restaurantId, dto.branchId);
 
     return this.prisma.user.create({
       data: {
@@ -78,9 +81,37 @@ export class UsersService {
         password: await bcrypt.hash(dto.password, 10),
         role: Role.KITCHEN,
         restaurantId,
+        ...(dto.branchId ? { branchId: dto.branchId } : {}),
       },
       select: employeeSelect,
     });
+  }
+
+  /**
+   * Sede de una cuenta de cocina (multisede). OWNER: solo cocinas de su restaurante (otro -> 404).
+   * Los KDS abiertos de esa cuenta pasan a la sala de la nueva sede en el acto.
+   */
+  async updateBranch(user: Manager, targetId: string, branchId: string | null) {
+    this.assertManager(user);
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetId },
+      select: { id: true, role: true, restaurantId: true },
+    });
+    if (!target || target.role !== Role.KITCHEN || !target.restaurantId) {
+      throw new NotFoundException('Empleado no encontrado');
+    }
+    if (user.role === Role.OWNER && target.restaurantId !== user.restaurantId) {
+      throw new NotFoundException('Empleado no encontrado');
+    }
+    await assertBranchOf(this.prisma, target.restaurantId, branchId);
+
+    const updated = await this.prisma.user.update({
+      where: { id: targetId },
+      data: { branchId },
+      select: employeeSelect,
+    });
+    this.ordersGateway.moveUserToBranch(targetId, branchId);
+    return updated;
   }
 
   async updateStatus(user: Manager, targetId: string, isActive: boolean) {
