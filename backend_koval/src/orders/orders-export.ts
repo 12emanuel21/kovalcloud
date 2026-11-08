@@ -76,9 +76,14 @@ const WOMPI_METHOD_LABELS: Record<string, string> = {
 const isOnlineOrder = (order: ExportOrder) =>
   Boolean(order.paymentReference) || (order.paymentMethod !== null && order.paymentMethod !== 'CASH');
 
-/** "Efectivo" o "Wompi · Nequi" (WOMPI a secas mientras el webhook no confirma el medio) */
+/** Transferencia directa (Nequi/Daviplata) con comprobante por WhatsApp: la valida el local, no Wompi */
+const MANUAL_TRANSFER = 'TRANSFERENCIA';
+const isManualTransfer = (order: ExportOrder) => !order.paymentReference && order.paymentMethod === MANUAL_TRANSFER;
+
+/** "Efectivo", "Transferencia" o "Wompi · Nequi" (WOMPI a secas mientras el webhook no confirma el medio) */
 export function paymentMethodLabel(order: ExportOrder): string {
   if (!isOnlineOrder(order)) return 'Efectivo';
+  if (isManualTransfer(order)) return 'Transferencia';
   const method = order.paymentMethod && order.paymentMethod !== 'WOMPI' ? order.paymentMethod : null;
   return method ? `Wompi · ${WOMPI_METHOD_LABELS[method] ?? method}` : 'Wompi';
 }
@@ -88,6 +93,10 @@ export function paymentStatusLabel(order: ExportOrder): string {
   if (!isOnlineOrder(order)) {
     if (order.status === 'CANCELLED') return 'Anulado';
     return order.status === 'DELIVERED' ? 'Cobrado (contra entrega)' : 'Por cobrar';
+  }
+  if (isManualTransfer(order)) {
+    if (order.paymentStatus === 'PAID') return 'Pagado';
+    return order.status === 'CANCELLED' ? 'Anulado' : 'Por validar';
   }
   return { PAID: 'Pagado', FAILED: 'Rechazado', CANCELLED: 'Anulado' }[order.paymentStatus] ?? 'Pendiente';
 }

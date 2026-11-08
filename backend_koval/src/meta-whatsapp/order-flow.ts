@@ -14,25 +14,47 @@ export interface OrderLine {
   quantity: number;
   unitPrice: number;
   subtotal: number;
+  /** Nota del cliente para la cocina ("sin cebolla") */
+  notes?: string;
 }
 
 const money = (value: number) => `$${value.toLocaleString('es-CO')}`;
 
+/** El valor del domicilio depende de la zona y lo define el local: el bot nunca lo inventa */
+export const DELIVERY_FEE_NOTE = 'El valor del domicilio, si aplica, se suma según tu zona.';
+
+/** "Limonada Cerezada " -> "limonada cerezada" (sin tildes ni mayúsculas) */
+const normalizeName = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
 /**
  * Cruza los items de la IA con el menú de la BD. Los precios SIEMPRE salen de la BD
- * (la IA nunca fija precios). Items con IDs inexistentes se descartan.
+ * (la IA nunca fija precios). Se busca por ID y, si la IA puso el nombre en vez del ID, por
+ * nombre exacto. Productos que no están en la carta y cantidades inválidas se descartan sin
+ * romper el flujo.
  */
 export function buildOrderLines(items: OrderIntent['items'], menuItems: MenuItemRef[]): OrderLine[] {
   const lines: OrderLine[] = [];
-  for (const item of items ?? []) {
-    const menuItem = menuItems.find((m) => m.id === item.productId);
-    if (!menuItem || item.quantity <= 0) continue;
+  for (const item of Array.isArray(items) ? items : []) {
+    const productId = typeof item?.productId === 'string' ? item.productId.trim() : '';
+    const quantity = Math.floor(Number(item?.quantity));
+    if (!productId || !Number.isFinite(quantity) || quantity < 1) continue;
+    const menuItem =
+      menuItems.find((m) => m.id === productId) ??
+      menuItems.find((m) => normalizeName(m.name) === normalizeName(productId));
+    if (!menuItem) continue;
     lines.push({
       menuItemId: menuItem.id,
       name: menuItem.name,
-      quantity: item.quantity,
+      quantity,
       unitPrice: menuItem.price,
-      subtotal: menuItem.price * item.quantity,
+      subtotal: menuItem.price * quantity,
+      ...(typeof item.notes === 'string' && item.notes.trim() ? { notes: item.notes.trim() } : {}),
     });
   }
   return lines;
@@ -42,7 +64,7 @@ export const orderTotal = (lines: OrderLine[]) => lines.reduce((acc, l) => acc +
 
 /** Una reserva de mesa: viene al local con personas y hora */
 export function isReservation(ai: OrderIntent): boolean {
-  return ai.orderType === 'DINE_IN' && !!ai.reservation?.people && !!ai.reservation?.time;
+  return ai.orderType === 'DINE_IN' && (ai.reservation?.people ?? 0) >= 1 && !!ai.reservation?.time?.trim();
 }
 
 /**
@@ -67,12 +89,41 @@ function itemsSummary(lines: OrderLine[]): string {
   return lines.map((l) => `• ${l.quantity}x ${l.name} — ${money(l.subtotal)}`).join('\n');
 }
 
-/** Mensaje de confirmación con el total exacto calculado por el backend */
+/** Domicilio y recoger se pagan en efectivo o por transferencia; la reserva de mesa, en el local */
+export function needsPaymentMethod(ai: OrderIntent): boolean {
+  return ai.orderType === 'DELIVERY' || ai.orderType === 'TAKEAWAY';
+}
+
+/**
+ * Pregunta del método de pago cuando la IA dio el pedido por listo sin saberlo. La agrega el backend
+ * para no confirmar sin método; si la IA ya lo está preguntando, no se repite.
+ */
+export function withPaymentMethodQuestion(ai: OrderIntent, response: string): string {
+  if (/efectivo|transferencia/i.test(response)) return response;
+  const when = ai.orderType === 'TAKEAWAY' ? 'al recoger' : 'al recibir';
+  return `${response}\n\n¿Pagas en efectivo ${when} o por transferencia?`.trim();
+}
+
+/** Método de pago con el que se registra el pedido (los mismos valores que la web y el Kanban) */
+export function toOrderPaymentMethod(ai: OrderIntent): 'CASH' | 'TRANSFERENCIA' | null {
+  if (!needsPaymentMethod(ai)) return null;
+  if (ai.paymentMethod === 'CASH') return 'CASH';
+  return ai.paymentMethod === 'TRANSFER' ? 'TRANSFERENCIA' : null;
+}
+
+function paymentLine(ai: OrderIntent): string {
+  if (ai.paymentMethod === 'TRANSFER') return 'Pago: Transferencia';
+  if (ai.paymentMethod === 'CASH') return `Pago: Efectivo ${ai.orderType === 'TAKEAWAY' ? 'al recoger' : 'al recibir'}`;
+  return 'Pago: por definir';
+}
+
+/** Mensaje de confirmación con el total exacto calculado por el backend y el método de pago elegido */
 export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[]): string {
   const total = orderTotal(lines);
 
-  if (ai.orderType === 'DINE_IN' && ai.reservation) {
-    const { people, time } = ai.reservation;
+  if (isReservation(ai) && ai.reservation) {
+    const people = Math.floor(ai.reservation.people ?? 1);
+    const { time } = ai.reservation;
     const header = `📅 *Reserva de mesa* para ${people} ${people === 1 ? 'persona' : 'personas'} a las ${time}.`;
     if (lines.length === 0) {
       return `${header}\n\n¿Confirmas?`;
@@ -81,11 +132,10 @@ export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[]): s
   }
 
   if (ai.orderType === 'TAKEAWAY') {
-    return `🛍️ *Para recoger*\n${itemsSummary(lines)}\n\nTu total es ${money(total)}. Se paga al recoger. ¿Confirmas?`;
+    return `🛍️ *Para recoger*\n${itemsSummary(lines)}\n\nTu total es ${money(total)}.\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
-
-  // DELIVERY
-  return `🛵 *Domicilio* a: ${ai.deliveryAddress}\n${itemsSummary(lines)}\n\nTu total es ${money(total)}. Se paga al recibir. ¿Confirmas?`;
+  // Domicilio: el sistema no conoce el valor del envío por zona; nunca se presenta como total final
+  return `🛵 *Domicilio* a: ${ai.deliveryAddress}\n${itemsSummary(lines)}\n\nTu total en productos es ${money(total)}. ${DELIVERY_FEE_NOTE}\n${paymentLine(ai)}\n\n¿Confirmas?`;
 }
 
 /**
@@ -95,26 +145,104 @@ export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[]): s
 export function buildRegisteredMessage(ai: OrderIntent, dailyNumber: number): string {
   const ref = formatDailyNumber(dailyNumber);
   if (isReservation(ai)) {
-    return `✅ ¡Reserva confirmada! Tu turno es el ${ref}. Te esperamos 🙌`;
+    return `✅ Reserva confirmada. Tu turno es el ${ref}. Te esperamos.`;
   }
   return ai.orderType === 'TAKEAWAY'
-    ? `✅ ¡Pedido confirmado! Tu turno es el ${ref}. Te avisamos cuando esté listo para recoger.`
-    : `✅ ¡Pedido confirmado! Tu turno es el ${ref}. Ya lo estamos preparando 👨‍🍳`;
+    ? `✅ Pedido confirmado. Tu turno es el ${ref}. Te avisamos cuando esté listo para recoger.`
+    : `✅ Pedido confirmado. Tu turno es el ${ref}. Ya lo estamos preparando.`;
+}
+
+/**
+ * Cómo pagar, tras registrar el pedido. Efectivo: nada de cuentas (no confundir al cliente).
+ * Transferencia (o sin método): los datos de pago del local y la petición del comprobante, que el
+ * bot adjunta al pedido cuando llega.
+ */
+export function buildPaymentInstructions(ai: OrderIntent, paymentDetails: string | null | undefined): string | null {
+  if (isReservation(ai)) return null;
+  if (ai.paymentMethod === 'CASH') {
+    return ai.orderType === 'TAKEAWAY' ? 'Pagas en efectivo al recoger.' : 'Pagas en efectivo al recibir.';
+  }
+  const details = paymentDetails?.trim();
+  if (!details) return 'En un momento te compartimos los datos para la transferencia.';
+  return `💳 *Datos de pago:*\n${details}\n\nPor favor envíanos la captura del comprobante por aquí.`;
 }
 
 /** Notas del pedido que verá la cocina (reserva + notas por producto) */
 export function buildOrderNotes(ai: OrderIntent, lines: OrderLine[]): string | undefined {
   const parts: string[] = [];
   if (isReservation(ai) && ai.reservation) {
-    parts.push(`📅 RESERVA: ${ai.reservation.people} personas · ${ai.reservation.time}`);
+    parts.push(`📅 RESERVA: ${Math.floor(ai.reservation.people ?? 1)} personas · ${ai.reservation.time}`);
   }
-  for (const item of ai.items ?? []) {
-    const line = lines.find((l) => l.menuItemId === item.productId);
-    if (line && item.notes?.trim()) parts.push(`${line.name}: ${item.notes.trim()}`);
+  for (const line of lines) {
+    if (line.notes) parts.push(`${line.name}: ${line.notes}`);
   }
   return parts.length ? parts.join('\n') : undefined;
 }
 
 export function toPrismaOrderType(ai: OrderIntent): OrderType {
   return (ai.orderType ?? 'DELIVERY') as OrderType;
+}
+
+// ── Adición a un pedido ya registrado ("agrégame una gaseosa" justo después de confirmar) ──
+
+/** Estados en los que todavía se le pueden sumar productos (aún no sale del local) */
+export const ADD_ON_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING'] as const;
+/** Ventana para tomar "agrégame..." como parte del pedido recién confirmado */
+export const ADD_ON_WINDOW_MS = 60 * 60 * 1000;
+
+export function buildAddOnConfirmationMessage(lines: OrderLine[], dailyNumber: number): string {
+  return `➕ *Agregar a tu pedido ${formatDailyNumber(dailyNumber)}:*\n${itemsSummary(lines)}\n\nValor adicional: ${money(orderTotal(lines))}. ¿Confirmas?`;
+}
+
+export function buildAddOnRegisteredMessage(lines: OrderLine[], dailyNumber: number, newTotal: number): string {
+  const added = lines.map((l) => `${l.quantity}x ${l.name}`).join(', ');
+  return `✅ Listo, agregamos ${added} a tu pedido ${formatDailyNumber(dailyNumber)}. Nuevo total en productos: ${money(newTotal)}.`;
+}
+
+// ── "¿Cómo va mi pedido?": respuesta con el estado real de la BD (sin IA ni intento de venta) ──
+
+export interface StatusOrder {
+  status: string;
+  orderType: string;
+  archivedAt?: Date | null;
+  driverName?: string | null;
+  paymentMethod?: string | null;
+  paymentStatus?: string | null;
+}
+
+export const NO_RECENT_ORDER_REPLY =
+  'No encuentro un pedido reciente desde este número. Si lo hiciste desde otro teléfono, dime a nombre de quién quedó y le pido al equipo que lo revise.';
+
+export function buildOrderStatusMessage(order: StatusOrder | null, dailyNumber: number | null): string {
+  if (!order || dailyNumber === null) return NO_RECENT_ORDER_REPLY;
+  const ref = `Tu pedido ${formatDailyNumber(dailyNumber)}`;
+  let text: string;
+  switch (order.status) {
+    case 'PENDING':
+    case 'CONFIRMED':
+      text = `${ref} está recibido y en cola. En breve la cocina empieza a prepararlo.`;
+      break;
+    case 'PREPARING':
+      text = `${ref} está en preparación en la cocina.`;
+      break;
+    case 'DELIVERED':
+      if (order.archivedAt) {
+        text = `${ref} ya fue entregado.`;
+      } else if (order.orderType === 'DELIVERY') {
+        text = order.driverName ? `${ref} va en camino con ${order.driverName}.` : `${ref} ya salió y va en camino.`;
+      } else if (order.orderType === 'TAKEAWAY') {
+        text = `${ref} está listo para recoger.`;
+      } else {
+        text = `${ref} ya está listo.`;
+      }
+      break;
+    case 'CANCELLED':
+      return `${ref} fue cancelado. Si tienes alguna duda, le aviso al equipo para que te escriba.`;
+    default:
+      text = `${ref} está en proceso.`;
+  }
+  if (order.paymentMethod === 'TRANSFERENCIA' && order.paymentStatus !== 'PAID') {
+    text += ' Tu pago está pendiente de validar: si aún no envías el comprobante, puedes mandarlo por aquí.';
+  }
+  return text;
 }

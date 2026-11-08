@@ -22,18 +22,27 @@ const PdfMenuSchema = z.object({
 });
 
 const OrderIntentSchema = z.object({
-  intent: z.enum(['ORDER', 'RESERVATION', 'QUESTION', 'COMPLAINT', 'GREETING']),
+  intent: z
+    .enum(['ORDER', 'RESERVATION', 'ORDER_STATUS', 'QUESTION', 'COMPLAINT', 'GREETING'])
+    .describe('ORDER_STATUS = pregunta cómo va un pedido ya hecho; COMPLAINT = queja o reclamo real sobre un pedido o el servicio'),
   items: z
     .array(
       z.object({
         productId: z.string().describe('ID exacto del inventario'),
-        // Sin tope de cantidad: se aceptan pedidos de cualquier tamaño
-        quantity: z.number().int().positive(),
+        // Sin tope de cantidad. Sin .int().positive(): un 0 o un decimal de la IA (p. ej. con un
+        // producto que no existe) tumbaba toda la respuesta; buildOrderLines descarta los inválidos
+        quantity: z.number(),
         notes: z.string().optional(),
       }),
     )
     .default([])
-    .describe('Pedido COMPLETO acumulado en la conversación'),
+    .describe(
+      'Estado ACTUAL del carrito (lo quitado o cambiado ya no va). Si addToPreviousOrder = true, SOLO los productos nuevos a agregar',
+    ),
+  addToPreviousOrder: z
+    .boolean()
+    .default(false)
+    .describe('True si el pedido ya quedó registrado (✅) y el cliente quiere agregarle productos'),
   orderType: z
     .enum(['DELIVERY', 'DINE_IN', 'TAKEAWAY'])
     .optional()
@@ -42,15 +51,22 @@ const OrderIntentSchema = z.object({
   deliveryAddress: z.string().optional().describe('Dirección completa, solo para DELIVERY'),
   reservation: z
     .object({
-      people: z.number().int().positive().describe('Número de personas'),
-      time: z.string().describe('Hora de llegada, ej: "8:00 pm"'),
+      // Opcionales: una reserva a medio pedir (solo personas) no debe romper la respuesta
+      people: z.number().optional().describe('Número de personas'),
+      time: z.string().optional().describe('Hora de llegada, ej: "8:00 pm"'),
     })
     .optional()
     .describe('Solo para DINE_IN'),
+  paymentMethod: z
+    .enum(['CASH', 'TRANSFER'])
+    .optional()
+    .describe(
+      'Solo DELIVERY/TAKEAWAY y solo si el cliente lo dijo: CASH = efectivo al recibir o recoger, TRANSFER = transferencia (Nequi, Daviplata...)',
+    ),
   readyToConfirm: z
     .boolean()
     .default(false)
-    .describe('True cuando ya se hizo el upselling y están todos los datos del tipo de pedido'),
+    .describe('True cuando ya se hizo el upselling y están todos los datos del tipo de pedido y el método de pago'),
   customerConfirmed: z
     .boolean()
     .default(false)
@@ -122,7 +138,7 @@ export class AiService {
     // Solo la franja del día (mañana/tarde/noche): con la hora exacta el modelo la recitaba en el saludo
     const dayPart = dayPartOf(new Date());
 
-    const { object } = await generateObject({
+    const request = {
       model: google('gemini-2.5-flash'),
       schema: OrderIntentSchema,
       system: WAITER_SYSTEM_PROMPT
@@ -132,11 +148,21 @@ export class AiService {
       messages: [
         ...historyMessages,
         {
-          role: 'user',
+          role: 'user' as const,
           content: userMessage,
         },
       ],
-    });
+    };
+
+    // Un JSON que no cumple el esquema (o un fallo puntual de Gemini) se reintenta una vez;
+    // si vuelve a fallar, quien llama responde con un mensaje de respaldo (el bot nunca calla)
+    let object: OrderIntent;
+    try {
+      ({ object } = await generateObject(request));
+    } catch (error: any) {
+      this.logger.warn(`⚠️ La IA no devolvió una respuesta válida, reintentando: ${error?.message || error}`);
+      ({ object } = await generateObject(request));
+    }
 
     this.logger.log('Parsed intent: ' + object.intent);
     return object;

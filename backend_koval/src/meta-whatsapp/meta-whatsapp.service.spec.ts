@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { MetaWhatsAppService } from './meta-whatsapp.service';
+import { AI_FALLBACK_REPLY, COMPLAINT_HANDOVER_REPLY, MetaWhatsAppService } from './meta-whatsapp.service';
+import { BOT_PAUSED_MARKER } from '../chats/handover';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { OrdersGateway } from '../orders/orders.gateway';
@@ -472,28 +473,166 @@ describe('MetaWhatsAppService', () => {
       expect(aiService.parseOrderIntent).not.toHaveBeenCalled();
     });
 
-    it('al registrar un pedido concatena los datos de pago del local', async () => {
+    const confirmedTakeaway = (paymentMethod?: 'CASH' | 'TRANSFER') => ({
+      intent: 'ORDER',
+      orderType: 'TAKEAWAY',
+      items: [{ productId: 'item-1', quantity: 1 }],
+      customerConfirmed: true,
+      readyToConfirm: true,
+      customerName: 'Ana',
+      paymentMethod,
+      responseToUser: 'Perfecto.',
+    });
+
+    const confirmOrder = async (paymentMethod?: 'CASH' | 'TRANSFER') => {
       jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce({
         ...baseRestaurant,
         paymentDetails: 'Nequi 300 123 4567 (Juan)',
       } as any);
       (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(null);
+      (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce(confirmedTakeaway(paymentMethod));
+      const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+      await service.processIncomingWebhook(textPayload('sí, confirmo'), 'napoles-verify-token');
+      return sendSpy.mock.calls[0][3] as string;
+    };
+
+    it('transferencia: confirma con el turno, los datos de pago y pide el comprobante', async () => {
+      const sentText = await confirmOrder('TRANSFER');
+
+      expect(sentText).toContain('Pedido confirmado');
+      expect(sentText).toContain('💳 *Datos de pago:*\nNequi 300 123 4567 (Juan)');
+      expect(sentText).toContain('Por favor envíanos la captura del comprobante por aquí.');
+      expect((prismaService.order.create as jest.Mock).mock.calls.at(-1)[0].data.paymentMethod).toBe('TRANSFERENCIA');
+    });
+
+    it('efectivo: confirma con el turno SIN números de cuenta y registra el pedido como CASH', async () => {
+      const sentText = await confirmOrder('CASH');
+
+      expect(sentText).toContain('Pedido confirmado');
+      expect(sentText).toContain('Pagas en efectivo al recoger.');
+      expect(sentText).not.toContain('Datos de pago');
+      expect(sentText).not.toContain('Nequi');
+      expect((prismaService.order.create as jest.Mock).mock.calls.at(-1)[0].data.paymentMethod).toBe('CASH');
+    });
+
+    it('sin método de pago no confirma ni registra: pregunta efectivo o transferencia', async () => {
+      const createCalls = (prismaService.order.create as jest.Mock).mock.calls.length;
+      const sentText = await confirmOrder(undefined);
+
+      expect(sentText).toBe('Perfecto.\n\n¿Pagas en efectivo al recoger o por transferencia?');
+      expect((prismaService.order.create as jest.Mock).mock.calls.length).toBe(createCalls);
+    });
+
+    it('si la IA falla (incluso tras reintentar) el bot responde igual y no se queda callado', async () => {
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+      (aiService.parseOrderIntent as jest.Mock).mockRejectedValueOnce(new Error('No object generated: response did not match schema'));
+      const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+      await service.processIncomingWebhook(textPayload('quiero una coca-cola'), 'napoles-verify-token');
+
+      expect(sendSpy).toHaveBeenCalledWith('9988776655', 'EAAB_TEST_TOKEN', '573009876543', AI_FALLBACK_REPLY, false);
+    });
+
+    it('si el armado del pedido falla, responde con el texto de la IA', async () => {
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
       (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({
         intent: 'ORDER',
         orderType: 'TAKEAWAY',
         items: [{ productId: 'item-1', quantity: 1 }],
         customerConfirmed: true,
         readyToConfirm: true,
-        customerName: 'Ana',
-        responseToUser: '¡Perfecto!',
+        paymentMethod: 'CASH',
+        responseToUser: 'No tenemos Coca-Cola, pero tenemos Limonada Cerezada. ¿Para domicilio o recoger?',
+      });
+      (prismaService.order as any).findFirst = jest.fn().mockRejectedValue(new Error('db caída'));
+      const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+      await service.processIncomingWebhook(textPayload('sí'), 'napoles-verify-token');
+
+      expect(sendSpy.mock.calls[0][3]).toBe('No tenemos Coca-Cola, pero tenemos Limonada Cerezada. ¿Para domicilio o recoger?');
+    });
+
+    it('reclamo: pausa el bot (handover a humano) y responde sin intentar vender', async () => {
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+      (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({
+        intent: 'COMPLAINT',
+        items: [],
+        responseToUser: '¿Te provoca algo más?',
       });
       const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
 
-      await service.processIncomingWebhook(textPayload('sí, confirmo'), 'napoles-verify-token');
+      await service.processIncomingWebhook(textPayload('el pedido llegó frío y falta la gaseosa'), 'napoles-verify-token');
 
-      const sentText = sendSpy.mock.calls[0][3];
-      expect(sentText).toContain('Pedido confirmado');
-      expect(sentText).toContain('💳 *Datos de pago:*\nNequi 300 123 4567 (Juan)');
+      expect(sendSpy.mock.calls[0][3]).toBe(COMPLAINT_HANDOVER_REPLY);
+      const created = (prismaService.chatHistory.create as jest.Mock).mock.calls.map(([arg]) => arg.data);
+      expect(created).toContainEqual(expect.objectContaining({ role: 'system', message: BOT_PAUSED_MARKER }));
+    });
+
+    it('"¿cómo va mi pedido?": responde con el estado real de la BD', async () => {
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+      (prismaService.order as any).findFirst = jest.fn().mockResolvedValue({
+        id: 'o-9', restaurantId: 'rest-1', createdAt: new Date(), status: 'PREPARING', orderType: 'DELIVERY',
+        archivedAt: null, driverName: null, paymentMethod: 'CASH', paymentStatus: 'PENDING',
+      });
+      (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({ intent: 'ORDER_STATUS', items: [], responseToUser: 'Ya casi' });
+      const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+      await service.processIncomingWebhook(textPayload('cómo va mi pedido?'), 'napoles-verify-token');
+
+      expect(sendSpy.mock.calls[0][3]).toBe('Tu pedido #03 está en preparación en la cocina.');
+    });
+
+    it('agregar tras confirmar: suma al pedido abierto (no crea otro ni recobra lo anterior)', async () => {
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+      const open = { id: 'o-7', restaurantId: 'rest-1', createdAt: new Date(), status: 'PENDING', total: 25000, notes: null };
+      (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(open);
+      (prismaService.order as any).update = jest.fn().mockResolvedValue({ ...open, total: 50000, items: [] });
+      (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce({
+        intent: 'ORDER',
+        addToPreviousOrder: true,
+        items: [{ productId: 'item-1', quantity: 1 }],
+        customerConfirmed: true,
+        readyToConfirm: true,
+        responseToUser: 'Listo.',
+      });
+      const createCalls = (prismaService.order.create as jest.Mock).mock.calls.length;
+      const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+      await service.processIncomingWebhook(textPayload('sí, agrégala'), 'napoles-verify-token');
+
+      expect((prismaService.order.create as jest.Mock).mock.calls.length).toBe(createCalls);
+      const update = (prismaService.order as any).update.mock.calls[0][0];
+      expect(update.where).toEqual({ id: 'o-7' });
+      expect(update.data.total).toEqual({ increment: 25000 });
+      expect(update.data.items.create).toEqual([{ menuItemId: 'item-1', quantity: 1, unitPrice: 25000, subtotal: 25000 }]);
+      expect(sendSpy.mock.calls[0][3]).toBe('✅ Listo, agregamos 1x Pizza Margherita a tu pedido #03. Nuevo total en productos: $50.000.');
+    });
+
+    it('mensajes en ráfaga del mismo chat se procesan en orden, uno a la vez', async () => {
+      const events: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      (aiService.parseOrderIntent as jest.Mock)
+        .mockImplementationOnce(async (text: string) => {
+          events.push(`start:${text}`);
+          await gate;
+          events.push(`end:${text}`);
+          return { intent: 'GREETING', items: [], responseToUser: 'Hola' };
+        })
+        .mockImplementationOnce(async (text: string) => {
+          events.push(`start:${text}`);
+          return { intent: 'GREETING', items: [], responseToUser: 'Hola' };
+        });
+      jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValue(baseRestaurant as any);
+      jest.spyOn(service, 'sendTextMessage').mockResolvedValue({});
+
+      const first = service.processIncomingWebhook(textPayload('uno'), 'napoles-verify-token');
+      const second = service.processIncomingWebhook(textPayload('dos'), 'napoles-verify-token');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(events).toEqual(['start:uno']); // "dos" espera a que termine "uno"
+      release();
+      await Promise.all([first, second]);
+      expect(events).toEqual(['start:uno', 'end:uno', 'start:dos']);
     });
   });
 });

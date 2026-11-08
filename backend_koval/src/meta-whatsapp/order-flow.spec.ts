@@ -1,10 +1,19 @@
 import type { OrderIntent } from '../ai/ai.service';
 import {
+  buildAddOnConfirmationMessage,
+  buildAddOnRegisteredMessage,
   buildConfirmationMessage,
   buildOrderLines,
+  buildOrderStatusMessage,
+  NO_RECENT_ORDER_REPLY,
   buildOrderNotes,
+  buildPaymentInstructions,
+  buildRegisteredMessage,
   hasRequiredData,
+  needsPaymentMethod,
   orderTotal,
+  toOrderPaymentMethod,
+  withPaymentMethodQuestion,
 } from './order-flow';
 
 const MENU = [
@@ -17,6 +26,7 @@ const ai = (overrides: Partial<OrderIntent>): OrderIntent => ({
   items: [],
   readyToConfirm: false,
   customerConfirmed: false,
+  addToPreviousOrder: false,
   responseToUser: '',
   sendMenuPdf: false,
   ...overrides,
@@ -46,7 +56,7 @@ describe('order-flow', () => {
     expect(hasRequiredData(ai({ orderType: 'DELIVERY', deliveryAddress: 'Cra 1 # 2-3' }), lines)).toBe(true);
   });
 
-  it('confirmación de domicilio usa la frase exacta con el total', () => {
+  it('confirmación de domicilio: total exacto y el método de pago elegido (no asume "se paga al recibir")', () => {
     const lines = buildOrderLines(
       [
         { productId: 'pizza', quantity: 1 },
@@ -54,8 +64,58 @@ describe('order-flow', () => {
       ],
       MENU,
     );
-    const msg = buildConfirmationMessage(ai({ orderType: 'DELIVERY', deliveryAddress: 'Cra 1 # 2-3' }), lines);
-    expect(msg).toContain('Tu total es $53.000. Se paga al recibir. ¿Confirmas?');
+    const delivery = { orderType: 'DELIVERY' as const, deliveryAddress: 'Cra 1 # 2-3' };
+    const cash = buildConfirmationMessage(ai({ ...delivery, paymentMethod: 'CASH' }), lines);
+    // Domicilio: total en productos + aclaración del envío (nunca un flete inventado)
+    expect(cash).toContain(
+      'Tu total en productos es $53.000. El valor del domicilio, si aplica, se suma según tu zona.\nPago: Efectivo al recibir\n\n¿Confirmas?',
+    );
+    expect(cash).not.toContain('Se paga al recibir');
+    expect(buildConfirmationMessage(ai({ ...delivery, paymentMethod: 'TRANSFER' }), lines)).toContain('Pago: Transferencia');
+    expect(buildConfirmationMessage(ai({ orderType: 'TAKEAWAY', paymentMethod: 'CASH' }), lines)).toContain(
+      'Pago: Efectivo al recoger',
+    );
+  });
+
+  it('método de pago: solo domicilio/recoger lo necesitan y se registra como CASH o TRANSFERENCIA', () => {
+    expect(needsPaymentMethod(ai({ orderType: 'DELIVERY' }))).toBe(true);
+    expect(needsPaymentMethod(ai({ orderType: 'TAKEAWAY' }))).toBe(true);
+    expect(needsPaymentMethod(ai({ orderType: 'DINE_IN' }))).toBe(false);
+    expect(toOrderPaymentMethod(ai({ orderType: 'DELIVERY', paymentMethod: 'CASH' }))).toBe('CASH');
+    expect(toOrderPaymentMethod(ai({ orderType: 'TAKEAWAY', paymentMethod: 'TRANSFER' }))).toBe('TRANSFERENCIA');
+    expect(toOrderPaymentMethod(ai({ orderType: 'DELIVERY' }))).toBeNull();
+    expect(toOrderPaymentMethod(ai({ orderType: 'DINE_IN', paymentMethod: 'CASH' }))).toBeNull();
+  });
+
+  it('si la IA no preguntó el método de pago, el backend lo pregunta (sin repetirlo)', () => {
+    expect(withPaymentMethodQuestion(ai({ orderType: 'DELIVERY' }), 'Perfecto.')).toBe(
+      'Perfecto.\n\n¿Pagas en efectivo al recibir o por transferencia?',
+    );
+    expect(withPaymentMethodQuestion(ai({ orderType: 'TAKEAWAY' }), '')).toBe(
+      '¿Pagas en efectivo al recoger o por transferencia?',
+    );
+    const asked = 'Listo. ¿Pagas en efectivo o por transferencia?';
+    expect(withPaymentMethodQuestion(ai({ orderType: 'DELIVERY' }), asked)).toBe(asked);
+  });
+
+  it('al registrar: transferencia con datos de pago y comprobante; efectivo sin cuentas', () => {
+    const details = 'Nequi 300 123 4567';
+    const transfer = buildPaymentInstructions(ai({ orderType: 'DELIVERY', paymentMethod: 'TRANSFER' }), details);
+    expect(transfer).toBe('💳 *Datos de pago:*\nNequi 300 123 4567\n\nPor favor envíanos la captura del comprobante por aquí.');
+    // Sin método (no debería pasar en el bot) se trata como transferencia
+    expect(buildPaymentInstructions(ai({ orderType: 'DELIVERY' }), details)).toBe(transfer);
+    const cash = buildPaymentInstructions(ai({ orderType: 'DELIVERY', paymentMethod: 'CASH' }), details);
+    expect(cash).toBe('Pagas en efectivo al recibir.');
+    expect(cash).not.toContain('Nequi');
+    expect(buildPaymentInstructions(ai({ orderType: 'TAKEAWAY', paymentMethod: 'TRANSFER' }), null)).toContain(
+      'te compartimos los datos',
+    );
+    expect(
+      buildPaymentInstructions(ai({ orderType: 'DINE_IN', reservation: { people: 2, time: '8 pm' } }), details),
+    ).toBeNull();
+    expect(buildRegisteredMessage(ai({ orderType: 'DELIVERY' }), 1)).toBe(
+      '✅ Pedido confirmado. Tu turno es el #01. Ya lo estamos preparando.',
+    );
   });
 
   it('reserva de mesa exige personas y hora, y puede ir sin comida', () => {
@@ -69,5 +129,60 @@ describe('order-flow', () => {
     expect(buildConfirmationMessage(reservation, [])).toContain('4 personas a las 8:00 pm');
     expect(buildConfirmationMessage(reservation, [])).toMatch(/¿Confirmas\?$/);
     expect(buildOrderNotes(reservation, [])).toBe('📅 RESERVA: 4 personas · 8:00 pm');
+  });
+
+  it('productos fuera de carta o datos raros de la IA se descartan sin romper el flujo', () => {
+    const lines = buildOrderLines(
+      [
+        { productId: 'coca-cola', quantity: 1 }, // no está en la carta
+        { productId: 'pizza', quantity: 0 },
+        { productId: 'pizza', quantity: 1.7 },
+        { productId: 'LIMONADA de coco ', quantity: 2, notes: ' sin hielo ' }, // nombre en vez de ID
+        null as never,
+        { productId: 42 as never, quantity: 1 },
+      ],
+      MENU,
+    );
+    expect(lines.map((l) => [l.menuItemId, l.quantity])).toEqual([
+      ['pizza', 1],
+      ['limonada', 2],
+    ]);
+    expect(orderTotal(lines)).toBe(53000);
+    expect(buildOrderNotes(ai({}), lines)).toBe('Limonada de Coco: sin hielo');
+    expect(buildOrderLines(undefined as never, MENU)).toEqual([]);
+  });
+
+  it('una reserva a medio pedir (sin hora) no es una reserva completa', () => {
+    expect(hasRequiredData(ai({ orderType: 'DINE_IN', reservation: { people: 2 } }), [])).toBe(false);
+    expect(hasRequiredData(ai({ orderType: 'DINE_IN', reservation: { time: '8 pm' } }), [])).toBe(false);
+  });
+
+  it('para recoger no menciona domicilio', () => {
+    const lines = buildOrderLines([{ productId: 'pizza', quantity: 1 }], MENU);
+    const msg = buildConfirmationMessage(ai({ orderType: 'TAKEAWAY', paymentMethod: 'CASH' }), lines);
+    expect(msg).toContain('Tu total es $35.000.');
+    expect(msg).not.toContain('domicilio');
+  });
+
+  it('adición a un pedido registrado: confirma solo lo nuevo y responde con el nuevo total', () => {
+    const lines = buildOrderLines([{ productId: 'limonada', quantity: 1 }], MENU);
+    expect(buildAddOnConfirmationMessage(lines, 7)).toBe(
+      '➕ *Agregar a tu pedido #07:*\n• 1x Limonada de Coco — $9.000\n\nValor adicional: $9.000. ¿Confirmas?',
+    );
+    expect(buildAddOnRegisteredMessage(lines, 7, 44000)).toBe(
+      '✅ Listo, agregamos 1x Limonada de Coco a tu pedido #07. Nuevo total en productos: $44.000.',
+    );
+  });
+
+  it('estado del pedido: responde con el estado real según tipo, repartidor y pago', () => {
+    const base = { orderType: 'DELIVERY', archivedAt: null, driverName: null, paymentMethod: 'CASH', paymentStatus: 'PENDING' };
+    expect(buildOrderStatusMessage({ ...base, status: 'PENDING' }, 3)).toBe('Tu pedido #03 está recibido y en cola. En breve la cocina empieza a prepararlo.');
+    expect(buildOrderStatusMessage({ ...base, status: 'PREPARING' }, 3)).toBe('Tu pedido #03 está en preparación en la cocina.');
+    expect(buildOrderStatusMessage({ ...base, status: 'DELIVERED', driverName: 'Juan' }, 3)).toBe('Tu pedido #03 va en camino con Juan.');
+    expect(buildOrderStatusMessage({ ...base, status: 'DELIVERED', archivedAt: new Date() }, 3)).toBe('Tu pedido #03 ya fue entregado.');
+    expect(buildOrderStatusMessage({ ...base, status: 'DELIVERED', orderType: 'TAKEAWAY' }, 3)).toBe('Tu pedido #03 está listo para recoger.');
+    expect(buildOrderStatusMessage({ ...base, status: 'CANCELLED' }, 3)).toContain('fue cancelado');
+    expect(buildOrderStatusMessage({ ...base, status: 'PREPARING', paymentMethod: 'TRANSFERENCIA' }, 3)).toContain('pendiente de validar');
+    expect(buildOrderStatusMessage(null, null)).toBe(NO_RECENT_ORDER_REPLY);
   });
 });

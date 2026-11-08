@@ -1,6 +1,13 @@
 import * as XLSX from 'xlsx';
 import { BadRequestException } from '@nestjs/common';
-import { buildOrdersWorkbook, exportFilename, resolveExportRange, type ExportOrder } from './orders-export';
+import {
+  buildOrdersWorkbook,
+  exportFilename,
+  paymentMethodLabel,
+  paymentStatusLabel,
+  resolveExportRange,
+  type ExportOrder,
+} from './orders-export';
 
 const order = (fields: Partial<ExportOrder>): ExportOrder => ({
   id: 'f2796cc8-fa48-4954-b0cb-d7d2b1a46a3f',
@@ -99,5 +106,13 @@ describe('Reporte contable de pedidos (.xlsx)', () => {
     expect(() => resolveExportRange('01/10/2026', '2026-10-31')).toThrow(BadRequestException);
     expect(() => resolveExportRange('2024-01-01', '2026-10-31')).toThrow(/366/);
     expect(exportFilename('burger-bq', range)).toBe('pedidos-burger-bq-2026-10-01_2026-10-31.xlsx');
+  });
+
+  it('transferencia por comprobante (Kanban / bot): "Transferencia", por validar hasta que el local la confirma', () => {
+    const transfer = order({ paymentMethod: 'TRANSFERENCIA', status: 'PREPARING' });
+    expect(paymentMethodLabel(transfer)).toBe('Transferencia');
+    expect(paymentStatusLabel(transfer)).toBe('Por validar');
+    expect(paymentStatusLabel({ ...transfer, paymentStatus: 'PAID' })).toBe('Pagado');
+    expect(paymentStatusLabel({ ...transfer, status: 'CANCELLED' })).toBe('Anulado');
   });
 });

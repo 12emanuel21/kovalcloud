@@ -3,7 +3,8 @@ import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { syncWhatsAppBotNumber } from '../restaurants/whatsapp-bot-number';
-import { AiService } from '../ai/ai.service';
+import { AiService, type OrderIntent } from '../ai/ai.service';
+import { isLidContact } from '../orders/phone';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { OrderStatus } from '@prisma/client';
 import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
@@ -16,7 +17,8 @@ import {
   CHAT_ROLE_USER,
   RESET_CONTEXT_MARKER,
 } from '../chats/chat-history';
-import { getHandoverState } from '../chats/handover';
+import { BOT_PAUSED_MARKER, getHandoverState } from '../chats/handover';
+import { ChatQueue } from './chat-queue';
 import {
   BAILEYS_MEDIA_PREFIX,
   MENU_PDF_MEDIA,
@@ -30,14 +32,23 @@ import {
 } from '../chats/chat-media';
 import { dailyNumberOf, formatDailyNumber } from '../orders/daily-number';
 import {
+  ADD_ON_STATUSES,
+  ADD_ON_WINDOW_MS,
+  buildAddOnConfirmationMessage,
+  buildAddOnRegisteredMessage,
   buildConfirmationMessage,
+  buildOrderStatusMessage,
+  type OrderLine,
+  buildPaymentInstructions,
   buildOrderLines,
   buildOrderNotes,
   buildRegisteredMessage,
   hasRequiredData,
-  isReservation,
+  needsPaymentMethod,
   orderTotal,
   toPrismaOrderType,
+  toOrderPaymentMethod,
+  withPaymentMethodQuestion,
 } from './order-flow';
 
 /**
@@ -98,6 +109,16 @@ export const PAYMENT_PROOF_ACK = (dailyNumber: number) =>
 export const IMAGE_RECEIVED_REPLY =
   '📷 ¡Recibimos tu archivo! Si es el comprobante de pago, envíalo después de confirmar tu pedido. ¿En qué más te ayudamos?';
 
+/** Si la IA falla del todo: el cliente recibe respuesta y el contexto sigue en el historial */
+export const AI_FALLBACK_REPLY =
+  'Disculpa, tuve un inconveniente procesando tu mensaje. ¿Me lo repites, por favor? Sigo con tu pedido donde íbamos.';
+
+/** Reclamo: se pausa el bot y se avisa que lo atiende una persona */
+export const COMPLAINT_HANDOVER_REPLY =
+  'Lamento mucho lo que pasó con tu pedido. Ya le pasé tu caso al equipo del local y una persona te escribe por aquí en breve para solucionarlo.';
+/** Pedidos de las últimas horas a los que responde "¿cómo va mi pedido?" */
+const ORDER_STATUS_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
 export interface BotpressConverseResponse {
   responses: Array<{
     type: string;
@@ -110,6 +131,7 @@ export interface BotpressConverseResponse {
 export class MetaWhatsAppService {
   private readonly logger = new Logger(MetaWhatsAppService.name);
   private readonly botpressUrl = process.env.BOTPRESS_URL || 'http://localhost:3000';
+  private readonly chatQueue = new ChatQueue();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -152,7 +174,8 @@ export class MetaWhatsAppService {
       return;
     }
 
-    const cleanTo = to.replace(/\D/g, '');
+    // Un contacto con LID va tal cual a Baileys, que lo responde en su chat @lid
+    const cleanTo = isLidContact(to) ? to : to.replace(/\D/g, '');
 
     // --- Baileys: se envía el PDF en Base64 ---
     if (isBaileys) {
@@ -236,7 +259,8 @@ export class MetaWhatsAppService {
 
     const fsLib = require('fs');
     const isLocalFile = !/^https?:\/\//i.test(filePathOrUrl);
-    const cleanTo = to.replace(/\D/g, '');
+    // Un contacto con LID va tal cual a Baileys, que lo responde en su chat @lid
+    const cleanTo = isLidContact(to) ? to : to.replace(/\D/g, '');
 
     try {
       // --- Baileys: se envía el PDF en Base64 ---
@@ -410,6 +434,56 @@ export class MetaWhatsAppService {
     }
   }
 
+  /** "¿Cómo va mi pedido?": último pedido del cliente (24 h) con su estado real */
+  private async buildOrderStatusReply(restaurantId: string, customerPhone: string): Promise<string> {
+    const order = await this.prisma.order.findFirst({
+      where: { restaurantId, customerPhone, createdAt: { gte: new Date(Date.now() - ORDER_STATUS_LOOKBACK_MS) } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!order) return buildOrderStatusMessage(null, null);
+    return buildOrderStatusMessage(order, await dailyNumberOf(this.prisma, order));
+  }
+
+  /** Pedido recién registrado del cliente al que todavía se le pueden sumar productos */
+  private async findOpenOrderForAddOn(restaurantId: string, customerPhone: string) {
+    const order = await this.prisma.order.findFirst({
+      where: {
+        restaurantId,
+        customerPhone,
+        status: { in: [...ADD_ON_STATUSES] as OrderStatus[] },
+        archivedAt: null,
+        createdAt: { gte: new Date(Date.now() - ADD_ON_WINDOW_MS) },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return order ? { order, dailyNumber: await dailyNumberOf(this.prisma, order) } : null;
+  }
+
+  /** Suma productos (precios de la BD) a un pedido existente y avisa al Kanban/KDS; devuelve el nuevo total */
+  private async appendItemsToOrder(
+    order: { id: string; restaurantId: string; total: number; notes: string | null },
+    lines: OrderLine[],
+    dailyNumber: number,
+  ): Promise<number> {
+    const extraNotes = lines.filter((l) => l.notes).map((l) => `${l.name}: ${l.notes}`);
+    const updated = await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        total: { increment: orderTotal(lines) },
+        notes: [order.notes, `➕ Adición: ${lines.map((l) => `${l.quantity}x ${l.name}`).join(', ')}`, ...extraNotes]
+          .filter(Boolean)
+          .join('\n'),
+        items: {
+          create: lines.map(({ menuItemId, quantity, unitPrice, subtotal }) => ({ menuItemId, quantity, unitPrice, subtotal })),
+        },
+      },
+      include: { items: { include: { menuItem: true } } },
+    });
+    this.ordersGateway.emitOrderUpdated(order.restaurantId, { ...updated, dailyNumber });
+    this.logger.log(`➕ Adición al pedido ${order.id} (turno ${formatDailyNumber(dailyNumber)}): nuevo total $${updated.total}`);
+    return updated.total;
+  }
+
   /**
    * Comprobante de pago: una imagen o PDF que llega poco después de un pedido sin pagar del mismo
    * cliente queda adjunta al pedido; el Kanban la muestra para que el local valide y marque el pago.
@@ -505,6 +579,21 @@ export class MetaWhatsAppService {
     payload: MetaWebhookPayloadDto | any,
     verifyToken: string,
     isBaileys: boolean = false,
+    trustedRestaurantIds?: string[],
+  ): Promise<void> {
+    // Mensajes en ráfaga del mismo chat: de a uno y en orden (ver ChatQueue)
+    const value = payload?.entry?.[0]?.changes?.[0]?.value;
+    const from = value?.messages?.[0]?.from;
+    const run = () => this.handleIncomingWebhook(payload, verifyToken, isBaileys, trustedRestaurantIds);
+    if (!from) return run();
+    const line = value?.metadata?.phone_number_id || payload?.entry?.[0]?.id || verifyToken;
+    return this.chatQueue.run(`${line}|${from}`, run);
+  }
+
+  private async handleIncomingWebhook(
+    payload: MetaWebhookPayloadDto | any,
+    verifyToken: string,
+    isBaileys: boolean,
     trustedRestaurantIds?: string[],
   ): Promise<void> {
     try {
@@ -769,88 +858,140 @@ export class MetaWhatsAppService {
         },
       });
 
-      // 5. Procesar el mensaje con Inteligencia Artificial (Gemini)
-      const aiResult = await this.aiService.parseOrderIntent(
-        messageText.trim(),
-        menuString,
-        chatHistory,
-        restaurant.name,
-      );
+      // 5. Procesar el mensaje con Inteligencia Artificial (Gemini). Si falla (incluso tras el
+      //    reintento), se responde igual: el cliente nunca se queda sin respuesta
+      let aiResult: OrderIntent;
+      try {
+        aiResult = await this.aiService.parseOrderIntent(messageText.trim(), menuString, chatHistory, restaurant.name);
+      } catch (error: any) {
+        this.logger.error(`❌ La IA no pudo procesar el mensaje de ${senderNumber}: ${error?.message || error}`);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, AI_FALLBACK_REPLY, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [{ role: CHAT_ROLE_MODEL, message: AI_FALLBACK_REPLY }]);
+        return;
+      }
 
       // Log de la estructura extraída por IA
       console.log('JSON Extraído por IA:', JSON.stringify(aiResult, null, 2));
+
+      // 5.1. Queja o reclamo ("llegó frío", "falta un producto"): el bot se pausa y lo atiende una
+      //      persona desde el Inbox; no se intenta vender ni responder con la IA
+      if (aiResult.intent === 'COMPLAINT') {
+        this.logger.warn(`🚨 [${restaurant.name}] Reclamo de [${senderNumber}]: bot pausado, pasa a un humano`);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, COMPLAINT_HANDOVER_REPLY, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [
+          { role: CHAT_ROLE_MODEL, message: COMPLAINT_HANDOVER_REPLY },
+          { role: CHAT_ROLE_SYSTEM, message: BOT_PAUSED_MARKER },
+        ]);
+        return;
+      }
+
+      // 5.2. "¿Cómo va mi pedido?": estado real de la BD (la IA no lo conoce y tendería a vender)
+      if (aiResult.intent === 'ORDER_STATUS') {
+        const statusReply = await this.buildOrderStatusReply(restaurant.id, senderNumber);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, statusReply, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [{ role: CHAT_ROLE_MODEL, message: statusReply }]);
+        return;
+      }
 
       // 6. Flujo de pedido / reserva con confirmación estricta.
       //    El backend decide con los datos (no solo con el flag de la IA) y calcula el total con precios de la BD.
       let finalResponse = aiResult.responseToUser;
 
-      if (aiResult.intent === 'ORDER' || aiResult.intent === 'RESERVATION') {
-        const lines = buildOrderLines(aiResult.items, menuItems);
-        const complete = hasRequiredData(aiResult, lines);
+      // El matching de ítems y el armado del pedido nunca deben dejar al bot callado: si algo falla
+      // (dato inesperado de la IA, error de BD), se responde con lo que dijo la IA o un respaldo
+      try {
+        // 6.A. "Agrégame una bebida" con el pedido ya registrado: se suma a ese pedido (no se crea
+        //      otro desde cero ni se vuelven a cobrar los productos anteriores)
+        const addOnTarget =
+          aiResult.intent === 'ORDER' && aiResult.addToPreviousOrder
+            ? await this.findOpenOrderForAddOn(restaurant.id, senderNumber)
+            : null;
+        const addOnLines = addOnTarget ? buildOrderLines(aiResult.items, menuItems) : [];
 
-        if (complete && aiResult.customerConfirmed) {
-          // 6.1. El cliente aceptó la confirmación: registrar el pedido
-          const total = orderTotal(lines);
-          const duplicate = await this.prisma.order.findFirst({
-            where: {
-              restaurantId: restaurant.id,
-              customerPhone: incomingMsg.from,
-              total,
-              orderType: toPrismaOrderType(aiResult),
-              status: { not: OrderStatus.CANCELLED },
-              createdAt: { gte: new Date(Date.now() - DUPLICATE_ORDER_WINDOW_MS) },
-            },
-          });
+        if (addOnTarget && addOnLines.length > 0) {
+          if (aiResult.customerConfirmed) {
+            const newTotal = await this.appendItemsToOrder(addOnTarget.order, addOnLines, addOnTarget.dailyNumber);
+            finalResponse = buildAddOnRegisteredMessage(addOnLines, addOnTarget.dailyNumber, newTotal);
+          } else if (aiResult.readyToConfirm) {
+            finalResponse = `${aiResult.responseToUser}\n\n${buildAddOnConfirmationMessage(addOnLines, addOnTarget.dailyNumber)}`.trim();
+          }
+        } else if (aiResult.intent === 'ORDER' || aiResult.intent === 'RESERVATION') {
+          const lines = buildOrderLines(aiResult.items, menuItems);
+          const complete = hasRequiredData(aiResult, lines);
+          // Domicilio/recoger no se confirman sin saber si paga en efectivo o por transferencia
+          const missingPaymentMethod = complete && needsPaymentMethod(aiResult) && !aiResult.paymentMethod;
 
-          if (duplicate) {
-            this.logger.warn(`⚠️ Confirmación duplicada de ${incomingMsg.from}: pedido ${duplicate.id} ya existe`);
-            const duplicateNumber = await dailyNumberOf(this.prisma, duplicate);
-            finalResponse = `✅ Tu pedido ${formatDailyNumber(duplicateNumber)} ya está registrado. ¡No te preocupes, no lo duplicamos!`;
-          } else {
-            const newOrder = await this.prisma.order.create({
-              data: {
+          if (missingPaymentMethod && (aiResult.readyToConfirm || aiResult.customerConfirmed)) {
+            // 6.0. La IA dio el pedido por listo sin el método de pago: se pregunta antes del resumen
+            finalResponse = withPaymentMethodQuestion(aiResult, aiResult.responseToUser);
+          } else if (complete && aiResult.customerConfirmed) {
+            // 6.1. El cliente aceptó la confirmación: registrar el pedido
+            const total = orderTotal(lines);
+            const duplicate = await this.prisma.order.findFirst({
+              where: {
                 restaurantId: restaurant.id,
-                customerName: aiResult.customerName?.trim() || 'Cliente WhatsApp',
                 customerPhone: incomingMsg.from,
-                channel: 'WHATSAPP',
-                orderType: toPrismaOrderType(aiResult),
-                deliveryAddress: aiResult.orderType === 'DELIVERY' ? aiResult.deliveryAddress?.trim() : undefined,
-                notes: buildOrderNotes(aiResult, lines),
                 total,
-                status: OrderStatus.PENDING,
-                items: {
-                  create: lines.map(({ menuItemId, quantity, unitPrice, subtotal }) => ({
-                    menuItemId,
-                    quantity,
-                    unitPrice,
-                    subtotal,
-                  })),
-                },
+                orderType: toPrismaOrderType(aiResult),
+                status: { not: OrderStatus.CANCELLED },
+                createdAt: { gte: new Date(Date.now() - DUPLICATE_ORDER_WINDOW_MS) },
               },
-              include: { items: { include: { menuItem: true } } },
             });
 
-            this.logger.log(`✅ Orden confirmada y guardada en BD: ${newOrder.id} (${newOrder.orderType}, $${total})`);
+            if (duplicate) {
+              this.logger.warn(`⚠️ Confirmación duplicada de ${incomingMsg.from}: pedido ${duplicate.id} ya existe`);
+              const duplicateNumber = await dailyNumberOf(this.prisma, duplicate);
+              finalResponse = `✅ Tu pedido ${formatDailyNumber(duplicateNumber)} ya está registrado. ¡No te preocupes, no lo duplicamos!`;
+            } else {
+              const newOrder = await this.prisma.order.create({
+                data: {
+                  restaurantId: restaurant.id,
+                  customerName: aiResult.customerName?.trim() || 'Cliente WhatsApp',
+                  customerPhone: incomingMsg.from,
+                  channel: 'WHATSAPP',
+                  orderType: toPrismaOrderType(aiResult),
+                  deliveryAddress: aiResult.orderType === 'DELIVERY' ? aiResult.deliveryAddress?.trim() : undefined,
+                  notes: buildOrderNotes(aiResult, lines),
+                  total,
+                  paymentMethod: toOrderPaymentMethod(aiResult),
+                  status: OrderStatus.PENDING,
+                  items: {
+                    create: lines.map(({ menuItemId, quantity, unitPrice, subtotal }) => ({
+                      menuItemId,
+                      quantity,
+                      unitPrice,
+                      subtotal,
+                    })),
+                  },
+                },
+                include: { items: { include: { menuItem: true } } },
+              });
 
-            // Turno del día (#07): la referencia que ven el cliente, el Kanban y el repartidor
-            const dailyNumber = await dailyNumberOf(this.prisma, newOrder);
+              this.logger.log(`✅ Orden confirmada y guardada en BD: ${newOrder.id} (${newOrder.orderType}, $${total})`);
 
-            // Emitir el evento por WebSocket al KDS (Kitchen Display System)
-            this.ordersGateway.emitNewOrder(restaurant.id, { ...newOrder, dailyNumber });
+              // Turno del día (#07): la referencia que ven el cliente, el Kanban y el repartidor
+              const dailyNumber = await dailyNumberOf(this.prisma, newOrder);
 
-            finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber)}`.trim();
+              // Emitir el evento por WebSocket al KDS (Kitchen Display System)
+              this.ordersGateway.emitNewOrder(restaurant.id, { ...newOrder, dailyNumber });
 
-            // Cobro: datos de pago del local (Nequi, etc.) para que el cliente sepa a dónde transferir
-            if (!isReservation(aiResult) && restaurant.paymentDetails?.trim()) {
-              finalResponse += `\n\n💳 *Datos de pago:*\n${restaurant.paymentDetails.trim()}`;
+              finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber)}`.trim();
+
+              // Cobro: efectivo sin cuentas; transferencia con los datos de pago del local y el comprobante
+              const paymentInstructions = buildPaymentInstructions(aiResult, restaurant.paymentDetails);
+              if (paymentInstructions) finalResponse += `\n\n${paymentInstructions}`;
             }
+          } else if (complete && aiResult.readyToConfirm) {
+            // 6.2. Datos completos: pedir confirmación con el total exacto (aún NO se crea el pedido)
+            finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines)}`.trim();
           }
-        } else if (complete && aiResult.readyToConfirm) {
-          // 6.2. Datos completos: pedir confirmación con el total exacto (aún NO se crea el pedido)
-          finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines)}`.trim();
+          // 6.3. Si faltan datos, la respuesta de la IA ya está pidiendo lo que falta
         }
-        // 6.3. Si faltan datos, la respuesta de la IA ya está pidiendo lo que falta
+      } catch (error: any) {
+        this.logger.error(`❌ Error armando el pedido de ${senderNumber}: ${error?.message || error}`, error?.stack);
+        finalResponse = aiResult.responseToUser?.trim() || AI_FALLBACK_REPLY;
       }
+      if (!finalResponse?.trim()) finalResponse = AI_FALLBACK_REPLY;
 
       // 7. Enviar la respuesta generada por IA al cliente vía Meta Graph API v22.0
       let pdfSent = false;
