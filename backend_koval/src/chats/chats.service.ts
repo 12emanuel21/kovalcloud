@@ -28,8 +28,11 @@ const chatMessageSelect = {
 /** Largo máximo del snippet del último mensaje en la bandeja */
 const SNIPPET_LENGTH = 160;
 
-/** customerPhone guarda solo dígitos (Meta wa_id / Baileys sin sufijo @s.whatsapp.net) */
-const PHONE_PATTERN = /^\d{3,32}$/;
+/**
+ * customerPhone guarda solo dígitos (Meta wa_id / Baileys sin sufijo @s.whatsapp.net), o
+ * "lid:<id>" para un contacto de WhatsApp Web sin número visible
+ */
+const PHONE_PATTERN = /^(lid:)?\d{3,32}$/;
 
 /** Meta solo permite mensajes libres hasta 24 h después del último mensaje del cliente */
 const META_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -66,7 +69,7 @@ export class ChatsService {
 
   private assertPhone(customerPhone: string) {
     if (!PHONE_PATTERN.test(customerPhone)) {
-      throw new BadRequestException('El teléfono debe contener solo dígitos');
+      throw new BadRequestException('El teléfono debe contener solo dígitos (o lid:<id>)');
     }
   }
 

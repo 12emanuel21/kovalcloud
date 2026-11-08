@@ -8,6 +8,7 @@ import { io, Socket } from 'socket.io-client';
 import PrepareActions from '@/components/orders/PrepareActions';
 import DispatchModal from '@/components/orders/DispatchModal';
 import PaymentProofModal from '@/components/orders/PaymentProofModal';
+import { formatCustomerPhone, isLidContact, waPhone } from '@/lib/customer-phone';
 import { orderNumberLabel } from '@/lib/order-number';
 
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'DELIVERED' | 'CANCELLED';
@@ -345,7 +346,7 @@ export default function OrdersPage() {
   const renderOrderCard = (order: Order) => {
     const isUpdating = updatingOrderId === order.id;
     const turn = orderNumberLabel(order);
-    const cleanPhone = order.customerPhone?.replace(/\D/g, '');
+    const cleanPhone = waPhone(order.customerPhone);
     const isWhatsApp = order.channel === 'WHATSAPP';
 
     return (
@@ -409,7 +410,9 @@ export default function OrdersPage() {
         <div className="space-y-1 text-xs">
           <div className="flex items-center justify-between">
             {order.customerPhone ? (
-              <p className="text-slate-400 font-mono text-[11px]">{order.customerPhone}</p>
+              <p className="text-slate-400 font-mono text-[11px]">
+                {isLidContact(order.customerPhone) ? formatCustomerPhone(order.customerPhone) : order.customerPhone}
+              </p>
             ) : (
               <span />
             )}

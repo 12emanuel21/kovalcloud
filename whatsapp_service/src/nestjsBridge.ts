@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { LID_PREFIX } from './lidResolver';
 
 // Tu backend NestJS debe estar corriendo en el puerto 4000
 const NESTJS_WEBHOOK_URL = process.env.NESTJS_WEBHOOK_URL || 'http://localhost:4000/meta/webhook';
@@ -50,15 +51,17 @@ export async function uploadMediaToNestjs(
 
 export async function sendToNestjs(
     restaurantId: string,
-    senderPhone: string,
+    /** Número del cliente o "lid:<id>" si WhatsApp no comparte el número */
+    senderId: string,
     messageText: string,
     messageId: string,
     pushName?: string,
     media?: IncomingMedia | null,
 ) {
     try {
-        // Limpiamos el sufijo @s.whatsapp.net
-        const cleanSender = senderPhone.replace(/\D/g, '');
+        const cleanSender = senderId.startsWith(LID_PREFIX)
+            ? `${LID_PREFIX}${senderId.slice(LID_PREFIX.length).replace(/\D/g, '')}`
+            : senderId.replace(/\D/g, '');
 
         // Construimos el payload imitando a Meta Graph API v22.0.
         // En sesiones Baileys no hay WABA ni phone_number_id reales: se usa el restaurantId.

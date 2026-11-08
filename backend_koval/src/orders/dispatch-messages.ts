@@ -1,3 +1,4 @@
+import { isLidContact } from './phone';
 import { formatDailyNumber } from './daily-number';
 
 /**
@@ -59,7 +60,10 @@ export function buildDriverDispatchMessage(order: DispatchOrder, driver: Dispatc
     `📦 *Domicilio · ${restaurantName} · Turno ${ref}*`,
     '',
     `👤 Cliente: ${order.customerName}`,
-    `💬 Escríbele: ${waLink(order.customerPhone, toCustomer)}`,
+    // Contacto con LID (sin número visible): no hay wa.me posible, el local hace de puente
+    isLidContact(order.customerPhone)
+      ? '💬 El cliente escribió sin número visible: coordina con el local.'
+      : `💬 Escríbele: ${waLink(order.customerPhone, toCustomer)}`,
     `📍 Dirección: ${address || 'Sin dirección (confirmar con el cliente)'}`,
     ...(address ? [`🗺️ ${`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`}`] : []),
     '',

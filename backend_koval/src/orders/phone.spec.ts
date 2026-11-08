@@ -17,4 +17,8 @@ describe('normalizeColombianPhone', () => {
   ])('%p -> %p', (input, expected) => {
     expect(normalizeColombianPhone(input)).toBe(expected);
   });
+
+  it('un contacto con LID se deja igual: no se convierte en un número falso', () => {
+    expect(normalizeColombianPhone('lid:238412345678901')).toBe('lid:238412345678901');
+  });
 });

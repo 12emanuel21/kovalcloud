@@ -57,6 +57,12 @@ describe('Mensajes del despacho', () => {
     expect(text).toContain('Notas: Timbre dañado, llamar');
     expect(buildDriverDispatchMessage({ ...o, paymentStatus: 'PAID' }, d, 'Burger BQ')).toContain('Pagado en línea');
   });
+
+  it('cliente con LID (sin número visible): sin wa.me falso al repartidor', () => {
+    const text = buildDriverDispatchMessage({ ...o, customerPhone: 'lid:238412345678901' }, d, 'Burger BQ');
+    expect(text).toContain('sin número visible');
+    expect(text).not.toContain('wa.me/238');
+  });
 });
 
 describe('OrdersService.dispatch', () => {

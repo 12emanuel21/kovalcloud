@@ -5,6 +5,7 @@ import { ArrowLeft, Bot, Headset, Loader2, MessagesSquare, RefreshCw, Send, User
 import { useAuth } from '@/context/AuthContext';
 import { RESTAURANT_TIMEZONE } from '@/lib/business-hours';
 import { ChatMediaAttachment, stripMediaLabel, type ChatMediaType } from '@/components/chats/ChatMedia';
+import { formatCustomerPhone } from '@/lib/customer-phone';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -57,11 +58,6 @@ async function apiErrorMessage(res: Response, fallback: string): Promise<string>
   return message || fallback;
 }
 
-/** "573001234567" -> "+57 300 123 4567" (números colombianos); otros: "+<dígitos>" */
-function formatPhone(phone: string): string {
-  const co = /^57(\d{3})(\d{3})(\d{4})$/.exec(phone);
-  return co ? `+57 ${co[1]} ${co[2]} ${co[3]}` : `+${phone}`;
-}
 
 const localDay = (date: Date) => date.toLocaleDateString('en-CA', { timeZone: RESTAURANT_TIMEZONE });
 
@@ -333,7 +329,7 @@ export default function ChatsPage() {
                   >
                     <div className="flex items-baseline justify-between gap-2">
                       <span className={`flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold ${active ? 'text-emerald-300' : 'text-white'}`}>
-                        {formatPhone(conversation.customerPhone)}
+                        {formatCustomerPhone(conversation.customerPhone)}
                         {conversation.botPaused && (
                           <span
                             className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-300"
@@ -387,7 +383,7 @@ export default function ChatsPage() {
                   <User className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-white">{formatPhone(selectedPhone)}</p>
+                  <p className="truncate text-sm font-bold text-white">{formatCustomerPhone(selectedPhone)}</p>
                   <p className="text-[11px] text-slate-500">
                     {selected ? `${selected.messageCount} mensajes` : 'Historial del chat'}
                     {status && ` · vía ${status.channel === 'META' ? 'Meta Cloud API' : 'WhatsApp Web'}`}

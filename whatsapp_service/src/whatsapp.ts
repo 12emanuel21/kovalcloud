@@ -12,6 +12,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { IncomingMedia, notifySessionNumber, sendToNestjs, uploadMediaToNestjs } from './nestjsBridge';
+import { isLidJid, LidStore, senderIdFor, type IncomingKey } from './lidResolver';
 
 dotenv.config();
 
@@ -30,10 +31,9 @@ interface Session {
   status: ConnectionStatus;
   qr: string | null;
   user: { id?: string; name?: string } | null;
-  // Mapa dígitos -> JID original. WhatsApp puede identificar contactos por LID (@lid)
-  // en vez de por número (@s.whatsapp.net); el backend solo recibe los dígitos,
-  // así que hay que recordar el sufijo real para poder responder.
-  knownJids: Map<string, string>;
+  // WhatsApp puede identificar contactos por LID (@lid) en vez de por número (@s.whatsapp.net):
+  // número real de cada LID y JID con el que responder a lo que el backend envía
+  lids: LidStore;
 }
 
 const sessions = new Map<string, Session>();
@@ -132,7 +132,7 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
     status: 'DISCONNECTED',
     qr: null,
     user: null,
-    knownJids: new Map(),
+    lids: new LidStore(authPathFor(restaurantId)),
   };
   session.status = 'CONNECTING';
   sessions.set(restaurantId, session);
@@ -209,6 +209,15 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
     }
   });
 
+  // Pares LID <-> número que comparte WhatsApp (contactos y chats que revelan el número)
+  sock.ev.on('contacts.upsert', (contacts) => {
+    for (const c of contacts) session.lids.learn(isLidJid(c.id) ? c.id : c.lid, c.jid ?? (isLidJid(c.id) ? undefined : c.id));
+  });
+  sock.ev.on('contacts.update', (contacts) => {
+    for (const c of contacts) session.lids.learn(isLidJid(c.id) ? c.id : c.lid, c.jid ?? (isLidJid(c.id) ? undefined : c.id));
+  });
+  sock.ev.on('chats.phoneNumberShare', ({ lid, jid }) => session.lids.learn(lid, jid));
+
   // Manejador de mensajes entrantes
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
@@ -241,11 +250,12 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
       // Antes se descartaba todo lo que no traía texto (fotos sin texto, comprobantes, notas de voz)
       if (!messageText.trim() && !hasMedia) continue;
 
-      const senderNumber = remoteJid.split('@')[0];
-      session.knownJids.set(senderNumber, remoteJid);
-      const pushName = msg.pushName || senderNumber;
+      // Número real del cliente; "lid:<id>" si WhatsApp no lo comparte (nunca los dígitos del LID
+      // como si fueran un teléfono)
+      const senderId = senderIdFor(msg.key as IncomingKey, session.lids);
+      const pushName = msg.pushName || 'Cliente WhatsApp';
 
-      console.log(`📩 ${tag} Mensaje recibido de ${pushName} (${senderNumber}): "${messageText}"`);
+      console.log(`📩 ${tag} Mensaje recibido de ${pushName} (${senderId}): "${messageText}"`);
 
       try {
         await sock.sendPresenceUpdate('composing', remoteJid);
@@ -253,7 +263,7 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
         const messageId = msg.key.id || `baileys_${Date.now()}`;
         const media = hasMedia ? await extractIncomingMedia(sock, restaurantId, msg) : null;
         // Reenvío al adaptador de NestJS emulando Meta Cloud API
-        await sendToNestjs(restaurantId, remoteJid, messageText, messageId, pushName, media);
+        await sendToNestjs(restaurantId, senderId, messageText, messageId, pushName, media);
 
         await sock.sendPresenceUpdate('paused', remoteJid);
       } catch (err) {
@@ -345,13 +355,10 @@ export async function sendWhatsAppMessage(
   if (!session?.sock || session.status !== 'CONNECTED') {
     throw new Error('El WhatsApp de este restaurante no está conectado actualmente.');
   }
-  const { sock, knownJids } = session;
+  const { sock, lids } = session;
 
-  let jid = target;
-  if (!jid.includes('@')) {
-    const cleanPhone = target.replace(/\D/g, '');
-    jid = knownJids.get(cleanPhone) || `${cleanPhone}@s.whatsapp.net`;
-  }
+  // Número o LID del cliente -> el chat donde escribió (los LID se responden en su chat @lid)
+  const jid = target.includes('@') ? target : lids.replyJidFor(target);
 
   if (document) {
     console.log(`📎 [${restaurantId}] Enviando documento a [${jid}]: ${document.filename} (${document.buffer.length} bytes)`);
