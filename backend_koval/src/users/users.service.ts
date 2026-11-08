@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { resolveTenantFilter, type TenantUser } from '../auth/tenant-access';
 import { TwoFactorAuthService } from '../auth/two-factor-auth.service';
+import { AuthService } from '../auth/auth.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 
 type Manager = TenantUser & { id: string; isTwoFactorEnabled?: boolean };
@@ -37,6 +38,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly ordersGateway: OrdersGateway,
     private readonly twoFactorAuth: TwoFactorAuthService,
+    private readonly authService: AuthService,
   ) {}
 
   private assertManager(user: Manager) {
@@ -150,5 +152,43 @@ export class UsersService {
     });
     this.ordersGateway.disconnectUser(targetId, 'Tu contraseña cambió: inicia sesión de nuevo');
     return updated;
+  }
+
+  /**
+   * Cualquier usuario cambia su propia contraseña. Exige la actual o, si la cuenta tiene 2FA,
+   * Sudo Mode. Cierra todas sus sesiones (otros dispositivos y el KDS) y devuelve un token nuevo
+   * para que la sesión desde la que se cambió siga abierta.
+   */
+  async changeOwnPassword(
+    userId: string,
+    dto: { currentPassword?: string; newPassword: string },
+    sudoToken?: string | string[],
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, restaurantId: true, password: true, isTwoFactorEnabled: true },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    if (dto.currentPassword) {
+      if (!(await bcrypt.compare(dto.currentPassword, user.password))) {
+        // 400 y no 401: el frontend cierra la sesión ante un 401
+        throw new BadRequestException('La contraseña actual no es correcta');
+      }
+    } else if (user.isTwoFactorEnabled) {
+      await this.twoFactorAuth.assertSudo({ user, sudoToken });
+    } else {
+      throw new BadRequestException('Ingresa tu contraseña actual');
+    }
+    if (await bcrypt.compare(dto.newPassword, user.password)) {
+      throw new BadRequestException('La nueva contraseña debe ser distinta de la actual');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { password: await bcrypt.hash(dto.newPassword, 10), passwordChangedAt: new Date() },
+    });
+    this.ordersGateway.disconnectUser(user.id, 'Tu contraseña cambió: inicia sesión de nuevo');
+    return { accessToken: await this.authService.issueAccessToken(user) };
   }
 }

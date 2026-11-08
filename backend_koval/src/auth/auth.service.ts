@@ -121,18 +121,23 @@ export class AuthService {
     }
 
     // 3. Generar JWT firmado (incluye el tenant para filtrar datos por restaurante)
+    const accessToken = await this.issueAccessToken(user);
+
+    return {
+      accessToken,
+      user: sanitizeUser(user),
+    };
+  }
+
+  /** JWT de sesión (incluye el tenant para filtrar datos por restaurante) */
+  issueAccessToken(user: Pick<User, 'id' | 'email' | 'role' | 'restaurantId'>): Promise<string> {
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
       restaurantId: user.restaurantId,
     };
-    const accessToken = await this.jwtService.signAsync(payload);
-
-    return {
-      accessToken,
-      user: sanitizeUser(user),
-    };
+    return this.jwtService.signAsync(payload);
   }
 
   /**

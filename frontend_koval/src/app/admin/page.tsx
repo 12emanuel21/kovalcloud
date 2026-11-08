@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Building2, CircleAlert, ExternalLink, LogIn, Plus, RefreshCw } from 'lucide-react';
+import { Building2, CircleAlert, ExternalLink, LogIn, Pencil, Plus, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import NewRestaurantModal from '@/components/admin/NewRestaurantModal';
-import type { AdminRestaurant } from '@/components/admin/types';
+import EditOwnerModal from '@/components/admin/EditOwnerModal';
+import type { AdminRestaurant, TenantUser } from '@/components/admin/types';
 
 const API_URL = '/api';
 
@@ -26,6 +27,9 @@ export default function AdminHomePage() {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
+  // Restaurante cuyo dueño se está editando (modal abierto)
+  const [editing, setEditing] = useState<(AdminRestaurant & { owner: TenantUser }) | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const loadRestaurants = useCallback(async () => {
     if (!token) return;
@@ -49,6 +53,17 @@ export default function AdminHomePage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial de datos remotos
     loadRestaurants();
   }, [loadRestaurants]);
+
+  const handleOwnerSaved = (owner: TenantUser) => {
+    if (!editing) return;
+    setRestaurants((prev) =>
+      prev.map((r) =>
+        r.id === editing.id ? { ...r, owner, users: r.users.map((u) => (u.id === owner.id ? { ...u, ...owner } : u)) } : r,
+      ),
+    );
+    setNotice(`Dueño de ${editing.name} actualizado.`);
+    setEditing(null);
+  };
 
   const handleCreated = (created: AdminRestaurant) => {
     setModalOpen(false);
@@ -85,6 +100,12 @@ export default function AdminHomePage() {
           </button>
         </div>
       </div>
+
+      {notice && (
+        <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">
+          {notice}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
@@ -157,6 +178,20 @@ export default function AdminHomePage() {
                     </td>
                     <td className="px-5 py-4 text-zinc-400">{formatDate(r.createdAt)}</td>
                     <td className="px-5 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (r.owner) setEditing({ ...r, owner: r.owner });
+                          setNotice(null);
+                        }}
+                        disabled={!r.owner}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 transition-colors hover:border-violet-500/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                        title={r.owner ? `Editar el dueño de ${r.name}` : 'Este restaurante no tiene dueño asignado'}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleEnterAsOwner(r)}
@@ -166,6 +201,7 @@ export default function AdminHomePage() {
                         <LogIn className="h-3.5 w-3.5" />
                         Entrar como Dueño
                       </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -174,6 +210,10 @@ export default function AdminHomePage() {
           </table>
         </div>
       </div>
+
+      {editing && (
+        <EditOwnerModal token={token} restaurant={editing} onClose={() => setEditing(null)} onSaved={handleOwnerSaved} />
+      )}
 
       {modalOpen && (
         <NewRestaurantModal token={token} onClose={() => setModalOpen(false)} onCreated={handleCreated} />

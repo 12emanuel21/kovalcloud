@@ -31,7 +31,7 @@ describe('UsersService (gestión de equipo)', () => {
     };
     gateway = { disconnectUser: jest.fn() };
     jwt = new JwtService({});
-    service = new UsersService(prisma, gateway as any, new TwoFactorAuthService(jwt));
+    service = new UsersService(prisma, gateway as any, new TwoFactorAuthService(jwt), { issueAccessToken: jest.fn() } as any);
   });
 
   describe('listEmployees', () => {

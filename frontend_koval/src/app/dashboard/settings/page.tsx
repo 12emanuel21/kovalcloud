@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { ArrowRight, ExternalLink, MessageCircle } from 'lucide-react';
 import { TwoFactorSection } from '@/components/security/TwoFactorSection';
 import { TeamSection } from './TeamSection';
+import { MyAccountSection } from './MyAccountSection';
 import { DriversSection } from './DriversSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
@@ -124,7 +125,8 @@ export default function SettingsPage() {
   // Cargar datos actuales del restaurante
   const fetchRestaurantSettings = useCallback(async () => {
     if (!restaurantId) return;
-    setLoading(true);
+    // Sin setLoading(true): el spinner es solo de la primera carga. Al recargar (p. ej. token nuevo
+    // tras cambiar la contraseña) las pestañas siguen montadas y conservan sus avisos.
     try {
       const res = await fetch(`${API_URL}/restaurants/${restaurantId}`, {
         cache: 'no-store',
@@ -512,6 +514,7 @@ export default function SettingsPage() {
         {activeTab === 'seguridad' && (
           <>
             <TwoFactorSection />
+            <MyAccountSection />
             <TeamSection />
             <section className={settingsCardClass}>
               <SettingsCardHeader title="Información de la cuenta" />

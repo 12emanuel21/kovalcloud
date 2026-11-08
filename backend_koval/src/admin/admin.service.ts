@@ -1,9 +1,12 @@
-import { ConflictException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 import { CreateTenantDto } from './dto/create-tenant.dto';
+import { UpdateOwnerDto } from './dto/update-owner.dto';
+import { OrdersGateway } from '../orders/orders.gateway';
+import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
 
 const BCRYPT_ROUNDS = 10;
 /** Plan por defecto para los restaurantes creados desde el panel (creado por el seed) */
@@ -20,7 +23,11 @@ const UNIQUE_MESSAGES: Record<string, string> = {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly ordersGateway: OrdersGateway,
+    private readonly twoFactorAuth: TwoFactorAuthService,
+  ) {}
 
   /** Todos los tickets de soporte de la plataforma con su restaurante, del más reciente al más antiguo */
   findAllTickets() {
@@ -45,6 +52,46 @@ export class AdminService {
         owner: restaurant.users.find((u) => u.role === Role.OWNER) ?? null,
       }),
     );
+  }
+
+  /**
+   * Edita el dueño (OWNER más antiguo) de un restaurante: nombre, email y/o una contraseña nueva.
+   * Forzar la contraseña cierra sus sesiones abiertas. Con 2FA activo en el SUPERADMIN exige Sudo Mode.
+   */
+  async updateOwner(restaurantId: string, dto: UpdateOwnerDto, sudo: SudoCredentials) {
+    const changes = {
+      ...(dto.name !== undefined && { name: dto.name }),
+      ...(dto.email !== undefined && { email: dto.email }),
+    };
+    if (!Object.keys(changes).length && !dto.password) {
+      throw new BadRequestException('Indica el nombre, el email o la nueva contraseña del dueño');
+    }
+    if (sudo.user.isTwoFactorEnabled) await this.twoFactorAuth.assertSudo(sudo);
+
+    const owner = await this.prisma.user.findFirst({
+      where: { restaurantId, role: Role.OWNER },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!owner) throw new NotFoundException('Este restaurante no tiene un dueño asignado');
+
+    try {
+      const updated = await this.prisma.user.update({
+        where: { id: owner.id },
+        data: {
+          ...changes,
+          ...(dto.password && { password: await bcrypt.hash(dto.password, BCRYPT_ROUNDS), passwordChangedAt: new Date() }),
+        },
+        select: userSelect,
+      });
+      if (dto.password) this.ordersGateway.disconnectUser(owner.id, 'Tu contraseña cambió: inicia sesión de nuevo');
+      return updated;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException(UNIQUE_MESSAGES.email);
+      }
+      throw error;
+    }
   }
 
   /** Crea restaurante + dueño (OWNER) de forma atómica: o se crean ambos o ninguno */

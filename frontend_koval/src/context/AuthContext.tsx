@@ -41,6 +41,8 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   syncAuth: () => boolean;
+  /** Reemplaza el token de sesión (p. ej. tras cambiar la contraseña, que invalida los anteriores) */
+  refreshSession: (accessToken: string) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -172,6 +174,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     router.push('/login');
   }, [router]);
 
+  const refreshSession = useCallback((accessToken: string) => {
+    setToken(accessToken);
+    localStorage.setItem('koval_token', accessToken);
+  }, []);
+
   const enterAsOwner = useCallback((target: ImpersonatedRestaurant) => {
     const value = { id: target.id, name: target.name, slug: target.slug };
     setImpersonation(value);
@@ -210,6 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         logout,
         syncAuth,
+        refreshSession,
       }}
     >
       {children}

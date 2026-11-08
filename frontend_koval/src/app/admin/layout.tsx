@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Building2, LifeBuoy, Loader2, LogOut, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { SudoProvider } from '@/context/SudoContext';
 import { homePathForRole } from '@/lib/roles';
 
 const ADMIN_TABS = [
@@ -47,6 +48,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
+    // Sudo Mode: editar al dueño de un restaurante pide el código 2FA si el SUPERADMIN lo tiene activo
+    <SudoProvider>
     <div className="min-h-screen bg-zinc-950 text-zinc-100 antialiased">
       <header className="border-b border-zinc-800 bg-zinc-900/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 md:px-6">
@@ -102,5 +105,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       <main className="mx-auto max-w-6xl px-4 py-8 md:px-6">{children}</main>
     </div>
+    </SudoProvider>
   );
 }

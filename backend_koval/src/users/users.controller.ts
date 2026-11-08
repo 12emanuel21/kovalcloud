@@ -6,10 +6,12 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { SUDO_HEADER } from '../auth/sudo';
+import { KitchenAccess } from '../auth/decorators/kitchen-access.decorator';
 import { UsersService } from './users.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UpdateEmployeePasswordDto } from './dto/update-employee-password.dto';
+import { UpdateOwnPasswordDto } from './dto/update-own-password.dto';
 
 /** Gestión del equipo del restaurante: solo OWNER y SUPERADMIN (KITCHEN queda fuera) */
 @Controller('users')
@@ -30,6 +32,19 @@ export class UsersController {
     @Body(new ValidationPipe({ whitelist: true, transform: true })) dto: CreateEmployeeDto,
   ) {
     return this.usersService.createEmployee(user, dto);
+  }
+
+  // Propia contraseña: cualquier usuario autenticado (cocina incluida). Va antes de :id/password,
+  // que con ParseUUIDPipe rechazaría "me".
+  @Patch('me/password')
+  @KitchenAccess()
+  @Roles(Role.OWNER, Role.SUPERADMIN, Role.KITCHEN)
+  changeOwnPassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateOwnPasswordDto,
+    @Headers(SUDO_HEADER) sudoToken?: string,
+  ) {
+    return this.usersService.changeOwnPassword(user.id, dto, sudoToken);
   }
 
   @Patch(':id/status')
