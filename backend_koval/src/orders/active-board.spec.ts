@@ -23,7 +23,7 @@ describe('Tablero activo del Kanban (GET /orders y PATCH /orders/:id/archive)', 
       },
     };
     const gateway: any = { emitOrderUpdated: jest.fn() };
-    return { prisma, gateway, service: new OrdersService(prisma, gateway, {} as any, {} as any) };
+    return { prisma, gateway, service: new OrdersService(prisma, gateway, {} as any, {} as any, {} as any, {} as any) };
   };
 
   beforeEach(() => jest.useFakeTimers({ now: at('2026-11-05T15:00:00Z'), doNotFake: ['nextTick', 'setImmediate'] }));

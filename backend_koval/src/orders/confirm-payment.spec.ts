@@ -14,7 +14,7 @@ describe('OrdersService.confirmManualPayment (POST /orders/:id/confirm-payment)'
       },
     };
     const gateway: any = { emitOrderUpdated: jest.fn() };
-    const service = new OrdersService(prisma, gateway, {} as any, {} as any);
+    const service = new OrdersService(prisma, gateway, {} as any, {} as any, {} as any, {} as any);
     const notify = jest.spyOn(service, 'notifyCustomer').mockResolvedValue(undefined);
     return { prisma, gateway, service, notify };
   };

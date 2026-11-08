@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -7,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -58,6 +60,17 @@ export class CreateOrderDto {
   @IsString()
   @IsOptional()
   deliveryAddress?: string;
+
+  /** Barrio del domicilio: define la zona de cobertura y el flete */
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  neighborhood?: string;
+
+  /** El cliente autorizó el tratamiento de sus datos (Ley 1581) en el checkout */
+  @IsBoolean()
+  @IsOptional()
+  acceptTerms?: boolean;
 
   @IsString()
   @IsOptional()

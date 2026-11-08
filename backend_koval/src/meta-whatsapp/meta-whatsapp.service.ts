@@ -19,6 +19,8 @@ import {
 } from '../chats/chat-history';
 import { BOT_PAUSED_MARKER, getHandoverState } from '../chats/handover';
 import { ChatQueue } from './chat-queue';
+import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
+import { CustomersService, PRIVACY_NOTICE, withPrivacyNotice } from '../customers/customers.service';
 import { activeSessionHistory } from './chat-session';
 import { isHttpUrl, menuLinkReply, menuWebUrl, withMenuLink } from './menu-link';
 import {
@@ -40,6 +42,8 @@ import {
   buildAddOnRegisteredMessage,
   buildConfirmationMessage,
   buildOrderStatusMessage,
+  buildOutOfCoverageMessage,
+  deliveryFeeOf,
   type OrderLine,
   buildPaymentInstructions,
   buildOrderLines,
@@ -139,6 +143,8 @@ export class MetaWhatsAppService {
     private readonly prisma: PrismaService,
     private readonly aiService: AiService,
     private readonly ordersGateway: OrdersGateway,
+    private readonly deliveryZones: DeliveryZonesService,
+    private readonly customers: CustomersService,
   ) { }
 
   /**
@@ -436,6 +442,30 @@ export class MetaWhatsAppService {
     }
   }
 
+  /**
+   * Habeas Data (Ley 1581): ¿hay que mostrar el aviso de tratamiento de datos? Si el aviso ya se
+   * envió y el cliente siguió escribiendo, se registra su autorización. Nunca bloquea el mensaje.
+   */
+  private async resolvePrivacyConsent(restaurantId: string, phone: string): Promise<{ needsNotice: boolean }> {
+    try {
+      const customer = await this.customers.findByPhone(restaurantId, phone);
+      if (customer?.termsAcceptedAt) {
+        await this.customers.safeTouch(restaurantId, phone);
+        return { needsNotice: false };
+      }
+      const noticeSent = await this.prisma.chatHistory.findFirst({
+        where: { restaurantId, customerPhone: phone, role: CHAT_ROLE_MODEL, message: { contains: PRIVACY_NOTICE } },
+        select: { id: true },
+      });
+      await this.customers.safeTouch(restaurantId, phone, { acceptTerms: Boolean(noticeSent) });
+      if (noticeSent) this.logger.log(`📋 Autorización de datos (Ley 1581) registrada para [${phone}]`);
+      return { needsNotice: !noticeSent };
+    } catch (error: any) {
+      this.logger.error(`❌ No se pudo verificar la autorización de datos de ${phone}: ${error?.message || error}`);
+      return { needsNotice: true };
+    }
+  }
+
   /** "¿Cómo va mi pedido?": último pedido del cliente (24 h) con su estado real */
   private async buildOrderStatusReply(restaurantId: string, customerPhone: string): Promise<string> {
     const order = await this.prisma.order.findFirst({
@@ -471,6 +501,7 @@ export class MetaWhatsAppService {
     const updated = await this.prisma.order.update({
       where: { id: order.id },
       data: {
+        subtotal: { increment: orderTotal(lines) },
         total: { increment: orderTotal(lines) },
         notes: [order.notes, `➕ Adición: ${lines.map((l) => `${l.quantity}x ${l.name}`).join(', ')}`, ...extraNotes]
           .filter(Boolean)
@@ -691,9 +722,18 @@ export class MetaWhatsAppService {
         return;
       }
 
+      // 2.42. Habeas Data (Ley 1581): la primera respuesta del bot lleva el aviso de tratamiento de
+      //       datos; si el cliente sigue escribiendo, queda su autorización (Customer.termsAcceptedAt)
+      let privacyNoticePending = (await this.resolvePrivacyConsent(restaurant.id, senderNumber)).needsNotice;
+      const withNotice = (text: string) => {
+        if (!privacyNoticePending) return text;
+        privacyNoticePending = false;
+        return withPrivacyNotice(text);
+      };
+
       // 2.45. Comprobante recibido: acuse inmediato, sin IA (también con el local ya cerrado)
       if (proofOrder) {
-        const ack = PAYMENT_PROOF_ACK(proofOrder.dailyNumber);
+        const ack = withNotice(PAYMENT_PROOF_ACK(proofOrder.dailyNumber));
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, ack, isBaileys);
         await this.recordChat(restaurant.id, senderNumber, [userEntry(incomingLabel), { role: CHAT_ROLE_MODEL, message: ack }]);
         return;
@@ -703,7 +743,7 @@ export class MetaWhatsAppService {
       //      no se transcribe audio ni se llama a la IA; se responde con el mensaje de cierre.
       if (isRestaurantClosed(restaurant)) {
         this.logger.log(`🌙 [${restaurant.name}] Local cerrado: respuesta estática a [${senderNumber}] sin IA`);
-        const closedMessage = buildClosedMessage(restaurant);
+        const closedMessage = withNotice(buildClosedMessage(restaurant));
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, closedMessage, isBaileys);
         // Auditoría del Inbox: el audio no se transcribe con el local cerrado
         await this.recordChat(restaurant.id, senderNumber, [
@@ -730,8 +770,9 @@ export class MetaWhatsAppService {
 
       // Foto o documento sin texto (y que no es comprobante): la IA no ve imágenes; se acusa recibo
       if (!messageText?.trim() && media && media.kind !== 'audio') {
-        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, IMAGE_RECEIVED_REPLY, isBaileys);
-        await this.recordChat(restaurant.id, senderNumber, [userEntry(incomingLabel), { role: CHAT_ROLE_MODEL, message: IMAGE_RECEIVED_REPLY }]);
+        const imageReply = withNotice(IMAGE_RECEIVED_REPLY);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, imageReply, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [userEntry(incomingLabel), { role: CHAT_ROLE_MODEL, message: imageReply }]);
         return;
       }
 
@@ -785,7 +826,7 @@ export class MetaWhatsAppService {
           finalResponse = menuLinkReply(menuWebUrl(restaurant));
         } else if (matchedReply.responseType === 'PDF_DOCUMENT') {
           const pdfUrl = matchedReply.responseBody!.trim();
-          const pdfCaption = '📄 Aquí tienes nuestro menú. ¡Dime qué te gustaría ordenar!';
+          const pdfCaption = withNotice('📄 Aquí tienes nuestro menú. ¡Dime qué te gustaría ordenar!');
           await this.sendDocumentMessage(targetPhoneId, targetToken, senderNumber, pdfUrl, "Menu.pdf", pdfCaption, isBaileys);
           await this.recordChat(restaurant.id, senderNumber, [
             userEntry(messageText.trim()),
@@ -801,6 +842,7 @@ export class MetaWhatsAppService {
           return; // Detiene la ejecución de IA
         }
 
+        finalResponse = withNotice(finalResponse);
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, finalResponse, isBaileys);
         await this.recordChat(restaurant.id, senderNumber, [
           userEntry(messageText.trim()),
@@ -861,8 +903,9 @@ export class MetaWhatsAppService {
         aiResult = await this.aiService.parseOrderIntent(messageText.trim(), menuString, chatHistory, restaurant.name);
       } catch (error: any) {
         this.logger.error(`❌ La IA no pudo procesar el mensaje de ${senderNumber}: ${error?.message || error}`);
-        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, AI_FALLBACK_REPLY, isBaileys);
-        await this.recordChat(restaurant.id, senderNumber, [{ role: CHAT_ROLE_MODEL, message: AI_FALLBACK_REPLY }]);
+        const fallbackReply = withNotice(AI_FALLBACK_REPLY);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, fallbackReply, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [{ role: CHAT_ROLE_MODEL, message: fallbackReply }]);
         return;
       }
 
@@ -873,9 +916,10 @@ export class MetaWhatsAppService {
       //      persona desde el Inbox; no se intenta vender ni responder con la IA
       if (aiResult.intent === 'COMPLAINT') {
         this.logger.warn(`🚨 [${restaurant.name}] Reclamo de [${senderNumber}]: bot pausado, pasa a un humano`);
-        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, COMPLAINT_HANDOVER_REPLY, isBaileys);
+        const complaintReply = withNotice(COMPLAINT_HANDOVER_REPLY);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, complaintReply, isBaileys);
         await this.recordChat(restaurant.id, senderNumber, [
-          { role: CHAT_ROLE_MODEL, message: COMPLAINT_HANDOVER_REPLY },
+          { role: CHAT_ROLE_MODEL, message: complaintReply },
           { role: CHAT_ROLE_SYSTEM, message: BOT_PAUSED_MARKER },
         ]);
         return;
@@ -883,7 +927,7 @@ export class MetaWhatsAppService {
 
       // 5.2. "¿Cómo va mi pedido?": estado real de la BD (la IA no lo conoce y tendería a vender)
       if (aiResult.intent === 'ORDER_STATUS') {
-        const statusReply = await this.buildOrderStatusReply(restaurant.id, senderNumber);
+        const statusReply = withNotice(await this.buildOrderStatusReply(restaurant.id, senderNumber));
         await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, statusReply, isBaileys);
         await this.recordChat(restaurant.id, senderNumber, [{ role: CHAT_ROLE_MODEL, message: statusReply }]);
         return;
@@ -916,13 +960,28 @@ export class MetaWhatsAppService {
           const complete = hasRequiredData(aiResult, lines);
           // Domicilio/recoger no se confirman sin saber si paga en efectivo o por transferencia
           const missingPaymentMethod = complete && needsPaymentMethod(aiResult) && !aiResult.paymentMethod;
+          // Domicilio: zona de cobertura y flete según el barrio (o la dirección); recoger y mesa: null
+          const quote =
+            complete && (aiResult.readyToConfirm || aiResult.customerConfirmed)
+              ? await this.deliveryZones.quoteForOrder(
+                  restaurant.id,
+                  toPrismaOrderType(aiResult),
+                  aiResult.neighborhood,
+                  aiResult.deliveryAddress,
+                )
+              : null;
 
-          if (missingPaymentMethod && (aiResult.readyToConfirm || aiResult.customerConfirmed)) {
+          if (quote && !quote.isCovered) {
+            // 6.00. Fuera de cobertura (o falta el barrio): no se confirma; se ofrece recoger
+            finalResponse = buildOutOfCoverageMessage(aiResult);
+          } else if (missingPaymentMethod && (aiResult.readyToConfirm || aiResult.customerConfirmed)) {
             // 6.0. La IA dio el pedido por listo sin el método de pago: se pregunta antes del resumen
             finalResponse = withPaymentMethodQuestion(aiResult, aiResult.responseToUser);
           } else if (complete && aiResult.customerConfirmed) {
-            // 6.1. El cliente aceptó la confirmación: registrar el pedido
-            const total = orderTotal(lines);
+            // 6.1. El cliente aceptó la confirmación: registrar el pedido (total = productos + domicilio)
+            const subtotal = orderTotal(lines);
+            const deliveryFee = deliveryFeeOf(quote);
+            const total = subtotal + deliveryFee;
             const duplicate = await this.prisma.order.findFirst({
               where: {
                 restaurantId: restaurant.id,
@@ -939,16 +998,27 @@ export class MetaWhatsAppService {
               const duplicateNumber = await dailyNumberOf(this.prisma, duplicate);
               finalResponse = `✅ Tu pedido ${formatDailyNumber(duplicateNumber)} ya está registrado. ¡No te preocupes, no lo duplicamos!`;
             } else {
+              const isDelivery = aiResult.orderType === 'DELIVERY';
+              const customer = await this.customers.safeTouch(restaurant.id, senderNumber, {
+                name: aiResult.customerName,
+                address: isDelivery ? aiResult.deliveryAddress : undefined,
+                neighborhood: isDelivery ? aiResult.neighborhood : undefined,
+              });
               const newOrder = await this.prisma.order.create({
                 data: {
                   restaurantId: restaurant.id,
                   customerName: aiResult.customerName?.trim() || 'Cliente WhatsApp',
                   customerPhone: incomingMsg.from,
+                  customerId: customer?.id,
                   channel: 'WHATSAPP',
                   orderType: toPrismaOrderType(aiResult),
-                  deliveryAddress: aiResult.orderType === 'DELIVERY' ? aiResult.deliveryAddress?.trim() : undefined,
+                  deliveryAddress: isDelivery ? aiResult.deliveryAddress?.trim() : undefined,
+                  neighborhood: isDelivery ? aiResult.neighborhood?.trim() || undefined : undefined,
                   notes: buildOrderNotes(aiResult, lines),
+                  subtotal,
+                  deliveryFee,
                   total,
+                  deliveryZoneId: quote?.isCovered ? quote.zoneId : null,
                   paymentMethod: toOrderPaymentMethod(aiResult),
                   status: OrderStatus.PENDING,
                   items: {
@@ -979,7 +1049,7 @@ export class MetaWhatsAppService {
             }
           } else if (complete && aiResult.readyToConfirm) {
             // 6.2. Datos completos: pedir confirmación con el total exacto (aún NO se crea el pedido)
-            finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines)}`.trim();
+            finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines, quote)}`.trim();
           }
           // 6.3. Si faltan datos, la respuesta de la IA ya está pidiendo lo que falta
         }
@@ -993,14 +1063,13 @@ export class MetaWhatsAppService {
       let pdfSent = false;
       // Carta: por defecto el enlace a la carta web en vivo. El PDF importado solo si el cliente lo
       // pide explícitamente y el local lo subió (si no, también el enlace)
-      const menuUrl = menuWebUrl(restaurant);
-      if (aiResult.sendMenuLink && !aiResult.sendMenuPdf) {
-        finalResponse = withMenuLink(finalResponse, menuUrl);
+      if (aiResult.sendMenuLink || aiResult.sendMenuPdf) {
+        finalResponse = withMenuLink(finalResponse, menuWebUrl(restaurant));
       }
+      finalResponse = withNotice(finalResponse);
       if (aiResult.sendMenuPdf) {
         const menuPdfPath = path.join(process.cwd(), 'uploads', 'menus', `${restaurant.id}.pdf`);
         if (fs.existsSync(menuPdfPath)) {
-          finalResponse = withMenuLink(finalResponse, menuUrl);
           try {
             const docRes = await this.sendDocumentMessage(
               targetPhoneId,
@@ -1018,7 +1087,6 @@ export class MetaWhatsAppService {
           }
         } else {
           this.logger.warn(`⚠️ PDF de menú no encontrado en ${menuPdfPath}, se envía el enlace al menú web.`);
-          finalResponse = withMenuLink(finalResponse, menuUrl);
         }
       }
 

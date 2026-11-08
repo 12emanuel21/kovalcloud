@@ -23,6 +23,8 @@ import { DispatchOrderDto } from './dto/dispatch-order.dto';
 import { buildCustomerDispatchMessage, buildDriverDispatchMessage } from './dispatch-messages';
 import { normalizeDriverPhone } from '../drivers/drivers.service';
 import { buildOrdersWorkbook, exportFilename, resolveExportRange } from './orders-export';
+import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
+import { CustomersService } from '../customers/customers.service';
 
 /**
  * Confirmación inicial por WhatsApp. Con `paymentUrl` adjunta el link de pago (plan B si el cliente
@@ -68,6 +70,8 @@ export class OrdersService {
     @Inject(forwardRef(() => MetaWhatsAppService))
     private readonly metaWhatsAppService: MetaWhatsAppService,
     private readonly wompiCheckout: WompiCheckoutService,
+    private readonly deliveryZones: DeliveryZonesService,
+    private readonly customers: CustomersService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto) {
@@ -79,6 +83,8 @@ export class OrdersService {
       customerName,
       customerPhone,
       deliveryAddress,
+      neighborhood,
+      acceptTerms,
       notes,
       items,
       paymentMethod,
@@ -164,6 +170,29 @@ export class OrdersService {
       };
     });
 
+    // 3.5. Domicilio: flete según la zona de cobertura del barrio (recoger y mesa no pagan envío).
+    //      Fuera de cobertura no se crea el pedido: la carta ofrece recoger en el local.
+    const quote = await this.deliveryZones.quoteForOrder(restaurantId, orderType, neighborhood, deliveryAddress);
+    if (quote && !quote.isCovered) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'OUT_OF_COVERAGE',
+        message: 'Todavía no llegamos a tu barrio con domicilio. Puedes pedirlo para recoger en el local.',
+        fallback: quote.fallback,
+      });
+    }
+    const deliveryFee = quote?.deliveryFee ?? 0;
+    const phone = normalizeColombianPhone(customerPhone);
+
+    // 3.6. Cliente del local (teléfono único por restaurante) y su autorización de datos (Ley 1581)
+    const customer = await this.customers.safeTouch(restaurantId, phone, {
+      name: customerName,
+      address: deliveryAddress,
+      neighborhood,
+      acceptTerms,
+    });
+
     // 4. Crear la orden y sus items dentro de una transacción de Prisma
     const createdOrder = await this.prisma.$transaction(async (tx) => {
       return await tx.order.create({
@@ -174,11 +203,17 @@ export class OrdersService {
           channel,
           customerName,
           // Formato internacional (573001234567): lo usan Baileys/Meta para el link de pago y los estados
-          customerPhone: normalizeColombianPhone(customerPhone),
+          customerPhone: phone,
+          customerId: customer?.id,
           deliveryAddress,
+          neighborhood: neighborhood?.trim() || undefined,
           notes,
           status: OrderStatus.PENDING,
-          total: calculatedTotal,
+          // total = productos + domicilio (el link de Wompi cobra el total)
+          subtotal: calculatedTotal,
+          deliveryFee,
+          total: calculatedTotal + deliveryFee,
+          deliveryZoneId: quote?.isCovered ? quote.zoneId : null,
           // WOMPI se reemplaza por el método real (NEQUI, CARD...) cuando llega el webhook
           paymentMethod: payOnline ? 'WOMPI' : 'CASH',
           items: {

@@ -49,6 +49,7 @@ const OrderIntentSchema = z.object({
     .describe('DELIVERY = domicilio, DINE_IN = reserva de mesa en el local, TAKEAWAY = recoger'),
   customerName: z.string().optional(),
   deliveryAddress: z.string().optional().describe('Dirección completa, solo para DELIVERY'),
+  neighborhood: z.string().optional().describe('Barrio o sector del domicilio (define la zona y el valor del envío), solo para DELIVERY'),
   reservation: z
     .object({
       // Opcionales: una reserva a medio pedir (solo personas) no debe romper la respuesta

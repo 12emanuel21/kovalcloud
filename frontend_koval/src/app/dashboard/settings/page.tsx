@@ -9,6 +9,7 @@ import { TwoFactorSection } from '@/components/security/TwoFactorSection';
 import { TeamSection } from './TeamSection';
 import { MyAccountSection } from './MyAccountSection';
 import { DriversSection } from './DriversSection';
+import { DeliveryZonesSection } from './DeliveryZonesSection';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
 import { MenuLayoutPicker } from './MenuLayoutPicker';
@@ -508,6 +509,7 @@ export default function SettingsPage() {
         <RestaurantProfileSection view={activeTab} />
 
         {/* REPARTIDORES: domiciliarios que ofrece el KDS al despachar */}
+        {activeTab === 'domicilios' && <DeliveryZonesSection />}
         {activeTab === 'repartidores' && <DriversSection />}
 
         {/* SEGURIDAD: 2FA, equipo de cocina e información de la cuenta */}

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useDeliveryQuote } from './useDeliveryQuote';
 import { useCart } from '@/context/CartContext';
 import { buildOrderWhatsAppMessage, toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
 import { orderNumberLabel } from '@/lib/order-number';
@@ -179,7 +180,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [neighborhood, setNeighborhood] = useState('');
   const [notes, setNotes] = useState('');
+  // Sin mesa: domicilio o recoger en el local (el flete solo aplica a domicilio)
+  const [fulfillment, setFulfillment] = useState<'DELIVERY' | 'TAKEAWAY'>('DELIVERY');
+  const isDelivery = !tableNumber && fulfillment === 'DELIVERY';
+  // Autorización de tratamiento de datos (Ley 1581): obligatoria para pedir
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const { coverage, quote, quoting, deliveryFee } = useDeliveryQuote(restaurantId, isOpen && isDelivery, neighborhood, deliveryAddress);
+  const coverageConfigured = Boolean(coverage?.coverageConfigured);
+  const outOfCoverage = isDelivery && quote?.isCovered === false;
+  const grandTotal = totalAmount + (isDelivery ? deliveryFee : 0);
 
   const formatCOP = (val: number) => {
     return `$${val.toLocaleString('es-CO')} COP`;
@@ -211,6 +222,18 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       setErrorMsg(`Quita ${joinNames(unavailableNames)} de tu pedido: ya no está disponible.`);
       return;
     }
+    if (isDelivery && coverageConfigured && !neighborhood.trim()) {
+      setErrorMsg('Escribe tu barrio para calcular el domicilio.');
+      return;
+    }
+    if (outOfCoverage) {
+      setErrorMsg('Todavía no llegamos a tu barrio con domicilio. Puedes pedirlo para recoger en el local.');
+      return;
+    }
+    if (!acceptTerms) {
+      setErrorMsg('Para hacer tu pedido debes autorizar el tratamiento de tus datos (Ley 1581).');
+      return;
+    }
 
     setIsSubmitting(true);
     setSubmittingMethod(paymentMethod);
@@ -221,12 +244,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       // 1. Enviar orden a la API de NestJS
       const payload = {
         restaurantId,
-        orderType: tableNumber ? 'DINE_IN' : 'DELIVERY',
+        orderType: tableNumber ? 'DINE_IN' : fulfillment,
         tableNumber: tableNumber || undefined,
         channel: 'WEB_MENU',
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim(),
-        deliveryAddress: tableNumber ? undefined : (deliveryAddress.trim() || undefined),
+        deliveryAddress: isDelivery ? deliveryAddress.trim() || undefined : undefined,
+        neighborhood: isDelivery ? neighborhood.trim() || undefined : undefined,
+        acceptTerms,
         notes: notes.trim() || undefined,
         paymentMethod,
         items: items.map((item) => ({
@@ -256,17 +281,29 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           );
           return;
         }
+        // El backend no encontró el barrio en las zonas del local: se ofrece recoger
+        if (errorData.code === 'OUT_OF_COVERAGE') {
+          setErrorMsg(errorData.message || 'Todavía no llegamos a tu barrio con domicilio. Puedes pedirlo para recoger en el local.');
+          return;
+        }
         const message = Array.isArray(errorData.message) ? errorData.message.join('. ') : errorData.message;
         throw new Error(message || `Error al procesar el pedido (${res.status})`);
       }
 
-      const createdOrder: { id: string; dailyNumber?: number; wompiCheckoutUrl?: string | null } = await res.json();
+      const createdOrder: {
+        id: string;
+        dailyNumber?: number;
+        total?: number;
+        deliveryFee?: number;
+        wompiCheckoutUrl?: string | null;
+      } = await res.json();
 
       const resetForm = () => {
         clearCart();
         setCustomerName('');
         setCustomerPhone('');
         setDeliveryAddress('');
+        setNeighborhood('');
         setNotes('');
       };
 
@@ -290,8 +327,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               restaurantName,
               customerName: payload.customerName,
               items: items.map(({ name, quantity, price }) => ({ name, quantity, price })),
-              total: totalAmount,
+              // El total del backend ya incluye el domicilio de la zona
+              total: createdOrder.total ?? grandTotal,
+              deliveryFee: createdOrder.deliveryFee,
               deliveryAddress: payload.deliveryAddress,
+              neighborhood: payload.neighborhood,
+              pickup: payload.orderType === 'TAKEAWAY',
               tableNumber: payload.tableNumber,
               notes: payload.notes,
             }),
@@ -618,18 +659,90 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </div>
 
                   {!tableNumber && (
-                    <div>
-                      <label className="block text-xs font-medium text-sf-body mb-1">
-                        Dirección de Entrega (Opcional)
-                      </label>
-                      <input
-                        type="text"
-                        value={deliveryAddress}
-                        onChange={(e) => setDeliveryAddress(e.target.value)}
-                        placeholder="Ej. Cra 45 # 26-85 Apto 401"
-                        className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
-                      />
+                    <div role="radiogroup" aria-label="¿Cómo quieres tu pedido?" className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          ['DELIVERY', '🛵 Domicilio'],
+                          ['TAKEAWAY', '🛍️ Recoger en el local'],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          role="radio"
+                          aria-checked={fulfillment === value}
+                          onClick={() => {
+                            setFulfillment(value);
+                            setErrorMsg(null);
+                          }}
+                          className={`rounded-sf border px-3 py-2.5 text-xs font-semibold transition ${
+                            fulfillment === value
+                              ? `border-sf-primary ${accent.text} bg-sf-bg`
+                              : 'border-sf-border text-sf-muted hover:border-sf-muted'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
+                  )}
+
+                  {isDelivery && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-sf-body mb-1">
+                          Dirección de Entrega {coverageConfigured ? <span className={accent.text}>*</span> : '(Opcional)'}
+                        </label>
+                        <input
+                          type="text"
+                          value={deliveryAddress}
+                          onChange={(e) => setDeliveryAddress(e.target.value)}
+                          placeholder="Ej. Cra 45 # 26-85 Apto 401"
+                          required={coverageConfigured}
+                          className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-sf-body mb-1">
+                          Barrio {coverageConfigured ? <span className={accent.text}>*</span> : '(Opcional)'}
+                        </label>
+                        <input
+                          type="text"
+                          value={neighborhood}
+                          onChange={(e) => setNeighborhood(e.target.value)}
+                          placeholder="Ej. Riomar"
+                          required={coverageConfigured}
+                          autoComplete="address-level3"
+                          className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
+                        />
+                        {coverageConfigured && (
+                          <p className="mt-1.5 text-[11px] text-sf-muted" aria-live="polite">
+                            {quoting
+                              ? 'Calculando el domicilio...'
+                              : quote?.isCovered
+                                ? `Domicilio ${quote.zoneName ? `(${quote.zoneName})` : ''}: ${formatCOP(quote.deliveryFee)}`
+                                : !outOfCoverage
+                                  ? `Llegamos a: ${coverage!.zones.map((z) => z.name).join(' · ')}`
+                                  : null}
+                          </p>
+                        )}
+                        {outOfCoverage && (
+                          <div className="mt-2 rounded-sf border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-sf-text">
+                            <p className="font-medium">Todavía no llegamos a {neighborhood.trim() || 'tu barrio'} con domicilio.</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFulfillment('TAKEAWAY');
+                                setErrorMsg(null);
+                              }}
+                              className="mt-2 font-bold underline underline-offset-2"
+                            >
+                              Cambiar a Recoger en el local
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
 
                   <div>
@@ -662,12 +775,43 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             )}
             {items.length > 0 && (
               <div className="shrink-0 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-sf-border bg-sf-card space-y-3">
+                {isDelivery && quote?.isCovered && quote.coverageConfigured && (
+                  <div className="space-y-1 text-xs text-sf-muted">
+                    <div className="flex justify-between">
+                      <span>Subtotal</span>
+                      <span className="font-mono">{formatCOP(totalAmount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Domicilio{quote.zoneName ? ` (${quote.zoneName})` : ''}</span>
+                      <span className="font-mono">{formatCOP(quote.deliveryFee)}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-sf-muted font-medium">Total a Pagar:</span>
                   <span className={`text-xl font-extrabold ${accent.text} font-mono`}>
-                    {formatCOP(totalAmount)}
+                    {formatCOP(grandTotal)}
                   </span>
                 </div>
+                {isDelivery && coverageConfigured && !quote?.isCovered && !outOfCoverage && (
+                  <p className="text-[11px] text-sf-muted">El domicilio se calcula con tu barrio.</p>
+                )}
+
+                {!isClosed && (
+                  <label className="flex items-start gap-2 text-[11px] leading-snug text-sf-muted">
+                    <input
+                      type="checkbox"
+                      form="checkout-form"
+                      checked={acceptTerms}
+                      onChange={(e) => {
+                        setAcceptTerms(e.target.checked);
+                        setErrorMsg(null);
+                      }}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-sf-primary"
+                    />
+                    <span>Al pedir, autorizas el tratamiento de tus datos según la Ley 1581 para gestionar y entregar tu pedido.</span>
+                  </label>
+                )}
 
                 {isClosed ? (
                   <button

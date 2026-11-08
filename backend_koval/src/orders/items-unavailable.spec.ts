@@ -11,7 +11,7 @@ describe('OrdersService.create · platos no disponibles', () => {
       menuItem: { findMany: jest.fn().mockResolvedValue(availableIds.map((id) => ({ id, price: 10000 }))) },
       $transaction: jest.fn(),
     };
-    const service = new OrdersService(prisma, { emitNewOrder: jest.fn() } as any, {} as any, new WompiCheckoutService(prisma));
+    const service = new OrdersService(prisma, { emitNewOrder: jest.fn() } as any, {} as any, new WompiCheckoutService(prisma), {} as any, {} as any);
     return { prisma, service };
   };
 

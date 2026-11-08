@@ -50,7 +50,7 @@ describe('MetaWhatsAppService · adjuntos entrantes y comprobantes', () => {
       parseOrderIntent: jest.fn().mockResolvedValue({ intent: 'QUESTION', responseToUser: '¡Claro!', items: [], sendMenuPdf: false }),
     };
     gateway = { emitOrderUpdated: jest.fn(), emitNewOrder: jest.fn() };
-    service = new MetaWhatsAppService(prisma, ai, gateway);
+    service = new MetaWhatsAppService(prisma, ai, gateway, { quoteForOrder: jest.fn().mockResolvedValue(null) } as any, { findByPhone: jest.fn().mockResolvedValue({ termsAcceptedAt: new Date() }), safeTouch: jest.fn() } as any);
     sent = jest.spyOn(service, 'sendTextMessage').mockResolvedValue({});
     jest.spyOn(service, 'downloadMedia').mockResolvedValue(JPEG);
     jest.spyOn(fs, 'mkdir').mockResolvedValue(undefined);

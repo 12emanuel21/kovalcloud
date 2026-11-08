@@ -44,7 +44,9 @@ describe('OrdersService.create · pago en línea', () => {
     };
     const gateway: any = { emitNewOrder: jest.fn() };
     const whatsapp: any = { sendTextMessage: jest.fn().mockResolvedValue({}) };
-    const service = new OrdersService(prisma, gateway, whatsapp, new WompiCheckoutService(prisma));
+    const zones = { quoteForOrder: jest.fn().mockResolvedValue(null) } as any;
+    const customers = { safeTouch: jest.fn().mockResolvedValue({ id: 'cust-1' }) } as any;
+    const service = new OrdersService(prisma, gateway, whatsapp, new WompiCheckoutService(prisma), zones, customers);
     const notify = jest.spyOn(service, 'notifyCustomer').mockResolvedValue(undefined);
     return { prisma, gateway, service, notify };
   };

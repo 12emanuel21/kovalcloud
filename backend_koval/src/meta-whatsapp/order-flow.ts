@@ -1,6 +1,7 @@
 import { formatDailyNumber } from '../orders/daily-number';
 import { OrderType } from '@prisma/client';
 import type { OrderIntent } from '../ai/ai.service';
+import type { DeliveryQuote } from '../delivery-zones/delivery-coverage';
 
 export interface MenuItemRef {
   id: string;
@@ -22,6 +23,16 @@ const money = (value: number) => `$${value.toLocaleString('es-CO')}`;
 
 /** El valor del domicilio depende de la zona y lo define el local: el bot nunca lo inventa */
 export const DELIVERY_FEE_NOTE = 'El valor del domicilio, si aplica, se suma según tu zona.';
+
+/** Flete que se cobra con el pedido (0 si no es domicilio o el local no configuró zonas) */
+export const deliveryFeeOf = (quote: DeliveryQuote | null | undefined) => (quote?.isCovered ? quote.deliveryFee : 0);
+
+/** Domicilio fuera de las zonas del local: se ofrece recoger (o se pide el barrio si no lo dijo) */
+export function buildOutOfCoverageMessage(ai: OrderIntent): string {
+  const place = ai.neighborhood?.trim();
+  if (!place) return '¿En qué barrio queda la dirección? Así te confirmo el valor del domicilio.';
+  return `Por ahora no tenemos cobertura de domicilio en ${place}. ¿Quieres pedirlo para recoger en el local?`;
+}
 
 /** "Limonada Cerezada " -> "limonada cerezada" (sin tildes ni mayúsculas) */
 const normalizeName = (value: string) =>
@@ -118,7 +129,7 @@ function paymentLine(ai: OrderIntent): string {
 }
 
 /** Mensaje de confirmación con el total exacto calculado por el backend y el método de pago elegido */
-export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[]): string {
+export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[], quote?: DeliveryQuote | null): string {
   const total = orderTotal(lines);
 
   if (isReservation(ai) && ai.reservation) {
@@ -135,7 +146,13 @@ export function buildConfirmationMessage(ai: OrderIntent, lines: OrderLine[]): s
     return `🛍️ *Para recoger*\n${itemsSummary(lines)}\n\nTu total es ${money(total)}.\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
   // Domicilio: el sistema no conoce el valor del envío por zona; nunca se presenta como total final
-  return `🛵 *Domicilio* a: ${ai.deliveryAddress}\n${itemsSummary(lines)}\n\nTu total en productos es ${money(total)}. ${DELIVERY_FEE_NOTE}\n${paymentLine(ai)}\n\n¿Confirmas?`;
+  const address = [ai.deliveryAddress, ai.neighborhood?.trim()].filter(Boolean).join(', ');
+  const header = `🛵 *Domicilio* a: ${address}\n${itemsSummary(lines)}`;
+  if (quote?.isCovered && quote.coverageConfigured) {
+    // Zona encontrada: desglose exacto de productos + domicilio
+    return `${header}\n\nSubtotal: ${money(total)}\nDomicilio (${quote.zoneName}): ${money(quote.deliveryFee)}\nTotal: ${money(total + quote.deliveryFee)}\n${paymentLine(ai)}\n\n¿Confirmas?`;
+  }
+  return `${header}\n\nTu total en productos es ${money(total)}. ${DELIVERY_FEE_NOTE}\n${paymentLine(ai)}\n\n¿Confirmas?`;
 }
 
 /**

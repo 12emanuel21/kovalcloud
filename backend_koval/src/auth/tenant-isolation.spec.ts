@@ -81,7 +81,7 @@ describe('Aislamiento multi-tenant · GET /orders/export/excel', () => {
       restaurant: { findUnique: jest.fn().mockResolvedValue({ name: 'Local A', slug: 'local-a' }) },
       order: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    const service = new OrdersService(prisma, {} as any, {} as any, {} as any);
+    const service = new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any);
     return { prisma, service };
   };
 

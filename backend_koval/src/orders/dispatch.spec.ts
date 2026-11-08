@@ -80,7 +80,7 @@ describe('OrdersService.dispatch', () => {
     };
     const gateway: any = { emitOrderStatusUpdated: jest.fn() };
     const whatsapp: any = { sendTextMessage: jest.fn().mockResolvedValue({ success: true }) };
-    const service = new OrdersService(prisma, gateway, whatsapp, {} as any);
+    const service = new OrdersService(prisma, gateway, whatsapp, {} as any, {} as any, {} as any);
     return { prisma, gateway, whatsapp, service };
   };
   const owner = { role: Role.OWNER, restaurantId: 'rest-1' };

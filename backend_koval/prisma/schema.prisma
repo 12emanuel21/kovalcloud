@@ -119,6 +119,8 @@ model Restaurant {
   // Relaciones del Módulo de Pedidos
   orders         Order[]
   drivers        DeliveryDriver[]
+  customers      Customer[]
+  deliveryZones  DeliveryZone[]
   autoReplies    AutoReply[]
   supportTickets SupportTicket[]
   chatHistories  ChatHistory[]
@@ -180,7 +182,16 @@ model Order {
   customerName    String
   customerPhone   String
   deliveryAddress String?
+  // total = subtotal (productos) + deliveryFee (domicilio según la zona)
+  subtotal        Float       @default(0)
+  deliveryFee     Float       @default(0)
   total           Float
+  // Barrio del domicilio y zona de cobertura con la que se cobró el envío
+  neighborhood    String?
+  deliveryZoneId  String?
+  deliveryZone    DeliveryZone? @relation(fields: [deliveryZoneId], references: [id], onDelete: SetNull)
+  customerId      String?
+  customer        Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
   orderType       OrderType   @default(DELIVERY)
   tableNumber     String?
   channel         String?     @default("WEB_MENU")
@@ -287,4 +298,40 @@ model SupportTicket {
   updatedAt    DateTime @updatedAt
 
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+}
+
+/// Cliente de un restaurante (web o WhatsApp), identificado por su teléfono en ese local.
+/// termsAcceptedAt: autorización de tratamiento de datos (Ley 1581 de 2012).
+model Customer {
+  id              String     @id @default(uuid())
+  restaurantId    String
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  phone           String
+  name            String?
+  address         String?
+  neighborhood    String?
+  termsAcceptedAt DateTime?
+  lastActivityAt  DateTime   @default(now())
+  orders          Order[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@unique([restaurantId, phone])
+  @@index([restaurantId, phone])
+}
+
+/// Zona de cobertura de domicilios con su tarifa. keywords: barrios o sectores que la identifican.
+model DeliveryZone {
+  id           String     @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  keywords     String[]
+  fee          Float
+  isActive     Boolean    @default(true)
+  orders       Order[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([restaurantId])
 }

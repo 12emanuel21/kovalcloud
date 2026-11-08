@@ -29,7 +29,12 @@ export interface OrderWhatsAppDetails {
   customerName: string;
   items: Array<{ name: string; quantity: number; price: number }>;
   total: number;
+  /** Valor del domicilio según la zona (incluido en total) */
+  deliveryFee?: number;
   deliveryAddress?: string;
+  neighborhood?: string;
+  /** Pasa a recoger en el local */
+  pickup?: boolean;
   tableNumber?: string;
   notes?: string;
 }
@@ -44,7 +49,11 @@ export function buildOrderWhatsAppMessage(order: OrderWhatsAppDetails): string {
     '',
   ];
   if (order.tableNumber) lines.push(`🍽️ Mesa: ${order.tableNumber}`);
-  else if (order.deliveryAddress) lines.push(`📍 Dirección: ${order.deliveryAddress}`);
+  else if (order.pickup) lines.push('🛍️ Para recoger en el local');
+  else if (order.deliveryAddress || order.neighborhood) {
+    lines.push(`📍 Dirección: ${[order.deliveryAddress, order.neighborhood].filter(Boolean).join(', ')}`);
+  }
+  if (order.deliveryFee) lines.push(`🛵 Domicilio: ${formatCOP(order.deliveryFee)}`);
   if (order.notes) lines.push(`📝 Notas: ${order.notes}`);
   lines.push(`💰 *Total a pagar: ${formatCOP(order.total)} COP* (efectivo / contra entrega)`);
   return lines.join('\n');
