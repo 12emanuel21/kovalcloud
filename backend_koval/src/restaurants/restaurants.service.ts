@@ -21,6 +21,7 @@ import {
   resolveMenuTheme,
 } from './menu-themes';
 import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
+import { assertUploadedImage, deleteMenuImage, writeMenuImage, type UploadedImageFile } from '../menu-items/menu-item-image';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
 
@@ -262,8 +263,11 @@ export class RestaurantsService {
 
   /** Identidad del local y credenciales de Meta; estas últimas solo en Sudo Mode */
   async update(id: string, updateRestaurantDto: UpdateRestaurantDto, sudo: SudoCredentials) {
-    const current = await this.prisma.restaurant.findUnique({ where: { id }, select: metaSelect });
+    const current = await this.prisma.restaurant.findUnique({ where: { id }, select: { ...metaSelect, bannerUrl: true } });
     if (!current) throw new NotFoundException('Restaurante no encontrado');
+    // undefined = no se toca; "" o null = quitar la portada
+    const bannerUrl =
+      updateRestaurantDto.bannerUrl === undefined ? undefined : updateRestaurantDto.bannerUrl?.trim() || null;
 
     const meta = {
       whatsappToken: updateRestaurantDto.whatsappToken,
@@ -303,7 +307,7 @@ export class RestaurantsService {
         description: updateRestaurantDto.description,
         phone: updateRestaurantDto.phone,
         logoUrl: updateRestaurantDto.logoUrl,
-        bannerUrl: updateRestaurantDto.bannerUrl,
+        bannerUrl,
         currency: updateRestaurantDto.currency,
         botpressBotId: updateRestaurantDto.botpressBotId,
         theme: updateRestaurantDto.theme,
@@ -320,7 +324,24 @@ export class RestaurantsService {
         plan: true,
       },
     });
+    // Portada reemplazada o quitada: se borra el archivo si era una foto subida aquí
+    if (bannerUrl !== undefined && bannerUrl !== current.bannerUrl) await deleteMenuImage(current.bannerUrl, this.logger);
     return toRestaurantResponse(updated);
+  }
+
+  /**
+   * Portada del hero de la carta: valida el tipo real (JPEG/PNG/WebP) y el tamaño, la guarda en
+   * uploads/menu/<uuid>.<ext> (lo que nginx publica) y la asigna de inmediato. Borra la anterior si era local.
+   */
+  async uploadBanner(id: string, file: UploadedImageFile) {
+    const extension = assertUploadedImage(file);
+    const current = await this.prisma.restaurant.findUnique({ where: { id }, select: { bannerUrl: true } });
+    if (!current) throw new NotFoundException('Restaurante no encontrado');
+
+    const bannerUrl = await writeMenuImage(file!.buffer, extension);
+    await this.prisma.restaurant.update({ where: { id }, data: { bannerUrl } });
+    await deleteMenuImage(current.bannerUrl, this.logger);
+    return { bannerUrl };
   }
 
   /**

@@ -15,6 +15,7 @@ import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { ExtendHoursDto } from './dto/extend-hours.dto';
 import { SPREADSHEET_EXTENSIONS } from './menu-spreadsheet';
+import { MAX_MENU_IMAGE_BYTES, type UploadedImageFile } from '../menu-items/menu-item-image';
 
 /** Tamaño máximo del archivo de importación (PDF o Excel) */
 const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024;
@@ -104,6 +105,16 @@ export class RestaurantsController {
     @Headers(SUDO_HEADER) sudoToken?: string,
   ) {
     return this.restaurantsService.update(id, updateRestaurantDto, { user, sudoToken });
+  }
+
+  // Portada del hero: multer corta en 5 MB (413); el tipo real se valida en el servicio
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(Role.OWNER, Role.SUPERADMIN)
+  @TenantParam('id')
+  @Post(':id/banner')
+  @UseInterceptors(FileInterceptor('image', { limits: { fileSize: MAX_MENU_IMAGE_BYTES, files: 1 } }))
+  uploadBanner(@Param('id') id: string, @UploadedFile() file: UploadedImageFile) {
+    return this.restaurantsService.uploadBanner(id, file);
   }
 
   @UseGuards(JwtAuthGuard, TenantGuard)

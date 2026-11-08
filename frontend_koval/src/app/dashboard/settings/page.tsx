@@ -12,6 +12,7 @@ import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
 import { MenuLayoutPicker } from './MenuLayoutPicker';
 import { AccentColorPicker, MenuFontSelect } from './BrandControls';
+import { BannerField } from './BannerField';
 import {
   DEFAULT_MENU_FONT,
   DEFAULT_MENU_LAYOUT,
@@ -198,7 +199,8 @@ export default function SettingsPage() {
         currency,
         description: description.trim() || undefined,
         logoUrl: logoUrl.trim() || undefined,
-        bannerUrl: bannerUrl.trim() || undefined,
+        // "" = quitar la portada (el backend la deja en null)
+        bannerUrl: bannerUrl.trim(),
         theme,
         menuColorMode,
         layout,
@@ -407,16 +409,14 @@ export default function SettingsPage() {
           />
         </div>
 
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-            URL del Banner
-          </label>
-          <input
-            type="text"
+        <div className="md:col-span-2">
+          <BannerField
+            restaurantId={restaurantId}
+            token={token}
             value={bannerUrl}
-            onChange={(e) => setBannerUrl(e.target.value)}
-            placeholder="https://ejemplo.com/banner.jpg"
-            className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-lg px-3.5 py-2.5 text-xs text-white outline-none transition"
+            onChange={setBannerUrl}
+            onUploaded={() => setFeedback({ type: 'success', text: 'Portada actualizada: ya se ve en tu carta.' })}
+            disabled={saving}
           />
         </div>
 

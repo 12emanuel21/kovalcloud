@@ -1,6 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRestaurantDto } from './create-restaurant.dto';
-import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { IsIn, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
 import {
   HEX_COLOR_PATTERN,
   MENU_COLOR_MODES,
@@ -26,9 +26,16 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @IsString()
   logoUrl?: string;
 
+  // Portada del hero de la carta: enlace http(s) o foto subida (POST /restaurants/:id/banner).
+  // null o "" la quita
   @IsOptional()
+  @ValidateIf((_, value) => value !== null && value !== '')
   @IsString()
-  bannerUrl?: string;
+  @MaxLength(2048)
+  @Matches(/^(https?:\/\/\S+|\/uploads\/menu\/[0-9a-f-]{36}\.(jpg|png|webp))$/i, {
+    message: 'La portada debe ser un enlace que empiece por http:// o https://',
+  })
+  bannerUrl?: string | null;
 
   @IsOptional()
   @IsString()

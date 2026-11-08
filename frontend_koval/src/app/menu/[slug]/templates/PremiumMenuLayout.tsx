@@ -38,6 +38,19 @@ const TORN_EDGE =
 
 const MENU_ANCHOR = 'menu';
 
+/**
+ * Tamaño del titular del hero según la palabra más larga del nombre (sin partir palabras):
+ * hasta ~15 letras cabe completa en una línea desde 320px y en la media columna de escritorio
+ * (lg: 48px, xl: 60px). Nombres más largos bajan de escala; solo uno larguísimo se parte
+ * como último recurso, para no provocar scroll horizontal en el móvil.
+ */
+function heroTitleSize(name: string): string {
+  const longestWord = Math.max(0, ...name.split(/\s+/).map((word) => word.length)) + 1; // + el punto final
+  if (longestWord <= 15) return 'break-normal text-3xl sm:text-4xl md:text-5xl xl:text-6xl';
+  if (longestWord <= 24) return 'break-normal text-xl sm:text-3xl md:text-4xl lg:text-3xl xl:text-4xl';
+  return '[overflow-wrap:anywhere] text-xl sm:text-3xl md:text-4xl lg:text-3xl xl:text-4xl';
+}
+
 interface PremiumMenuLayoutProps extends MenuTemplateProps {
   palette: MenuPalette;
   /** Plantilla estructural de los platos (cuadrícula visual, lista compacta…) */
@@ -66,6 +79,7 @@ export function PremiumMenuLayout({
   const [showPaymentReturn, setShowPaymentReturn] = useState(Boolean(returnedOrderId));
   // Disponibilidad de la carta: el carrito marca los platos que se agotaron desde que se agregaron
   const menuItems = useMemo(() => categories.flatMap((category) => category.items), [categories]);
+  const heroTitleClass = heroTitleSize(restaurant.name);
 
   const statusLabel = useMemo(() => {
     if (isClosed) return 'Cerrado ahora';
@@ -97,12 +111,12 @@ export function PremiumMenuLayout({
                 {initial}
               </span>
             )}
-            <span className={`truncate font-display text-lg font-black uppercase tracking-tight ${palette.heading}`}>
+            <span className={`min-w-0 truncate font-display text-lg font-black uppercase tracking-tight ${palette.heading}`}>
               {restaurant.name}
             </span>
           </a>
 
-          <nav className={`hidden items-center gap-6 text-sm font-semibold lg:flex ${palette.heading}`}>
+          <nav className={`hidden shrink-0 items-center gap-6 whitespace-nowrap text-sm font-semibold lg:flex ${palette.heading}`}>
             <a href={`#${MENU_ANCHOR}`} className="transition hover:text-sf-primary">
               Menú
             </a>
@@ -114,7 +128,7 @@ export function PremiumMenuLayout({
             </a>
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <label className="relative hidden md:block">
               <Search className={`pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${palette.muted}`} />
               <input
@@ -123,7 +137,7 @@ export function PremiumMenuLayout({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Buscar platos..."
                 aria-label="Buscar platos"
-                className={`h-10 w-56 rounded-sf border pl-9 pr-3 text-sm outline-none transition lg:w-72 ${palette.input}`}
+                className={`h-10 w-56 rounded-sf border pl-9 pr-3 text-sm outline-none transition xl:w-72 ${palette.input}`}
               />
             </label>
 
@@ -151,7 +165,7 @@ export function PremiumMenuLayout({
               type="button"
               onClick={scrollToMenu}
               disabled={isClosed}
-              className="hidden h-10 items-center rounded-sf bg-sf-primary px-4 text-sm font-bold text-sf-on-primary shadow-lg shadow-sf-primary/25 transition hover:bg-sf-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:flex"
+              className="hidden h-10 items-center whitespace-nowrap rounded-sf bg-sf-primary px-4 text-sm font-bold text-sf-on-primary shadow-lg shadow-sf-primary/25 transition hover:bg-sf-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:flex"
             >
               {isClosed ? 'Cerrado' : 'Pedir ahora'}
             </button>
@@ -198,8 +212,8 @@ export function PremiumMenuLayout({
               {statusLabel}
             </span>
 
-            <h1 className="font-display text-5xl font-black uppercase leading-[0.92] tracking-tight sm:text-6xl xl:text-7xl">
-              <span className={`block break-words ${palette.heading}`}>{restaurant.name}.</span>
+            <h1 className={`font-display font-black uppercase leading-tight tracking-tight ${heroTitleClass}`}>
+              <span className={`block ${palette.heading}`}>{restaurant.name}.</span>
               <span className="block text-sf-primary">Pide en línea.</span>
             </h1>
 
@@ -402,7 +416,7 @@ export function PremiumMenuLayout({
       <footer className={`border-t pb-28 pt-10 ${palette.border}`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 md:flex-row md:items-start md:justify-between md:px-6">
           <div className="max-w-sm space-y-2">
-            <p className={`font-display text-xl font-black uppercase ${palette.heading}`}>{restaurant.name}</p>
+            <p className={`font-display text-xl font-black uppercase [overflow-wrap:anywhere] ${palette.heading}`}>{restaurant.name}</p>
             {restaurant.description && <p className={`text-sm ${palette.muted}`}>{restaurant.description}</p>}
           </div>
           <div className={`space-y-1 text-sm ${palette.muted}`}>
