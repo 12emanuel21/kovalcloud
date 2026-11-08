@@ -64,9 +64,14 @@ export class OrdersController {
   @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Get()
-  async findAll(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
+  async findAll(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('restaurantId') restaurantId?: string,
+    // Por defecto la jornada activa sin archivados; ?scope=all trae el historial completo
+    @Query('scope') scope?: string,
+  ) {
     // KITCHEN recibe los pedidos sin importes (total, precios, subtotales)
-    return orderViewFor(user.role, await this.ordersService.findAll(user, restaurantId));
+    return orderViewFor(user.role, await this.ordersService.findAll(user, restaurantId, scope));
   }
 
   @KitchenAccess()
@@ -105,6 +110,14 @@ export class OrdersController {
   @HttpCode(HttpStatus.OK)
   async dispatch(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: DispatchOrderDto) {
     return orderViewFor(user.role, await this.ordersService.dispatch(id, dto, user));
+  }
+
+  // "Entregado / Archivar": saca del Kanban un pedido despachado o cancelado (no lo borra)
+  @KitchenAccess()
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/archive')
+  async archive(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return orderViewFor(user.role, await this.ordersService.archive(id, user));
   }
 
   // Pago validado por el local (comprobante de Nequi, transferencia...): solo OWNER o SUPERADMIN

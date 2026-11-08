@@ -53,6 +53,8 @@ interface Order {
   /** Comprobante enviado por WhatsApp (archivo del chat) y cuándo llegó */
   paymentProofUrl?: string | null;
   paymentProofAt?: string | null;
+  /** Entregado / archivado: ya no va en el tablero activo */
+  archivedAt?: string | null;
   items: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -205,7 +207,9 @@ export default function OrdersPage() {
     const handleOrderUpdated = (updatedOrder: Order) => {
       if (updatedOrder.restaurantId === restaurantId) {
         setOrders((prev) =>
-          prev.map((ord) => (ord.id === updatedOrder.id ? { ...ord, ...updatedOrder } : ord))
+          updatedOrder.archivedAt
+            ? prev.filter((ord) => ord.id !== updatedOrder.id)
+            : prev.map((ord) => (ord.id === updatedOrder.id ? { ...ord, ...updatedOrder } : ord))
         );
       }
     };
@@ -246,6 +250,27 @@ export default function OrdersPage() {
       );
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Error al cambiar estado del pedido');
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  // "Entregado / Archivar": el pedido despachado sale del tablero (sigue en la BD y en el Excel)
+  const handleArchive = async (orderId: string) => {
+    setUpdatingOrderId(orderId);
+    try {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
+      const res = await fetch(`${API_URL}/orders/${orderId}/archive`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + currentToken },
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `No se pudo archivar el pedido (${res.status})`);
+      }
+      setOrders((prev) => prev.filter((ord) => ord.id !== orderId));
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error al archivar el pedido');
     } finally {
       setUpdatingOrderId(null);
     }
@@ -485,8 +510,19 @@ export default function OrdersPage() {
           )}
 
           {(order.status === 'DELIVERED' || (order.status as string) === 'READY') && (
-            <div className="w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold py-2 px-3 rounded-lg text-xs text-center flex items-center justify-center gap-1.5">
-              <span>{order.driverName ? `✓ En camino con ${order.driverName}` : '✓ Pedido Despachado'}</span>
+            <div className="space-y-2">
+              <div className="w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold py-2 px-3 rounded-lg text-xs text-center flex items-center justify-center gap-1.5">
+                <span>{order.driverName ? `✓ En camino con ${order.driverName}` : '✓ Pedido Despachado'}</span>
+              </div>
+              <button
+                type="button"
+                disabled={isUpdating}
+                onClick={() => handleArchive(order.id)}
+                title="Saca el pedido del tablero. Sigue en el historial y en el reporte de Excel."
+                className="w-full border border-slate-600 hover:border-slate-400 hover:bg-slate-800 disabled:opacity-50 text-slate-200 font-bold py-2 px-3 rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {isUpdating ? 'Archivando...' : '📦 Entregado / Archivar'}
+              </button>
             </div>
           )}
         </div>

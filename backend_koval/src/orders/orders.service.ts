@@ -18,7 +18,7 @@ import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/ten
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 import { isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
 import { normalizeColombianPhone } from './phone';
-import { dailyNumberOf, formatDailyNumber, withDailyNumbers } from './daily-number';
+import { businessDayStart, dailyNumberOf, formatDailyNumber, withDailyNumbers } from './daily-number';
 import { DispatchOrderDto } from './dto/dispatch-order.dto';
 import { buildCustomerDispatchMessage, buildDriverDispatchMessage } from './dispatch-messages';
 import { normalizeDriverPhone } from '../drivers/drivers.service';
@@ -50,6 +50,13 @@ type RestaurantChannelOrder = {
   restaurantId?: string | null;
   restaurant?: { whatsappPhoneId?: string | null; whatsappToken?: string | null } | null;
 };
+
+/** today (por defecto) = tablero activo de la jornada; all = historial completo */
+export const ORDER_LIST_SCOPES = ['today', 'all'] as const;
+type OrderListScope = (typeof ORDER_LIST_SCOPES)[number];
+
+/** Solo salen del tablero los pedidos que ya terminaron su recorrido */
+const ARCHIVABLE_STATUSES: OrderStatus[] = [OrderStatus.DELIVERED, OrderStatus.CANCELLED];
 
 @Injectable()
 export class OrdersService {
@@ -231,10 +238,21 @@ export class OrdersService {
   }
 
   /** Todos los pedidos del local (o de todos, para el SUPERADMIN), con su turno del día */
-  async findAll(user: TenantUser, requestedRestaurantId?: string) {
+  /**
+   * Por defecto, el tablero activo (Kanban / KDS): pedidos de la jornada en curso (desde las 5:00,
+   * hora del local) que no se archivaron. scope=all: todo el historial (KPIs del Centro de Mando).
+   */
+  async findAll(user: TenantUser, requestedRestaurantId?: string, scope?: string) {
+    if (scope !== undefined && !ORDER_LIST_SCOPES.includes(scope as OrderListScope)) {
+      throw new BadRequestException(`scope inválido. Valores permitidos: ${ORDER_LIST_SCOPES.join(', ')}`);
+    }
     const restaurantId = resolveTenantFilter(user, requestedRestaurantId);
+    const activeBoard = scope !== 'all';
     const orders = await this.prisma.order.findMany({
-      where: restaurantId ? { restaurantId } : {},
+      where: {
+        ...(restaurantId ? { restaurantId } : {}),
+        ...(activeBoard ? { createdAt: { gte: businessDayStart(new Date()) } } : {}),
+      },
       include: {
         items: {
           include: {
@@ -244,8 +262,10 @@ export class OrdersService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    // La lista trae todos los pedidos de cada jornada: se numeran en memoria
-    return withDailyNumbers(orders);
+    // La lista trae todos los pedidos de cada jornada: se numeran en memoria. Los archivados se
+    // cuentan para el turno (no corren la numeración) pero no salen en el tablero activo.
+    const numbered = withDailyNumbers(orders);
+    return activeBoard ? numbered.filter((order) => !order.archivedAt) : numbered;
   }
 
   /**
@@ -531,6 +551,27 @@ export class OrdersService {
       updatedOrder,
       `✅ ¡Confirmamos tu pago del pedido ${formatDailyNumber(response.dailyNumber)}! Gracias 🙌`,
     );
+    return response;
+  }
+
+  /**
+   * "Entregado / Archivar": el pedido despachado (o cancelado) sale del Kanban activo. No se borra:
+   * sigue en la BD, en el historial y en el reporte de Excel.
+   */
+  async archive(orderId: string, user: TenantUser) {
+    const order = await this.findOne(orderId, user);
+    if (!ARCHIVABLE_STATUSES.includes(order.status)) {
+      throw new ConflictException('Solo se archivan pedidos despachados o cancelados');
+    }
+    if (order.archivedAt) return order;
+
+    const updatedOrder = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { archivedAt: new Date() },
+      include: { restaurant: true, items: { include: { menuItem: true } } },
+    });
+    const response = await this.toOrderResponse(updatedOrder);
+    this.ordersGateway.emitOrderUpdated(updatedOrder.restaurantId, response);
     return response;
   }
 

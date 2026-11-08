@@ -138,7 +138,7 @@ export default function CommandCenterPage() {
   /** Petición pura (sin estado): la usan el efecto y el botón de actualizar */
   const loadOrders = useCallback(async (): Promise<DashboardOrder[]> => {
     const currentToken = token || localStorage.getItem('koval_token');
-    const res = await fetch(`${API_URL}/orders?restaurantId=${restaurantId}`, {
+    const res = await fetch(`${API_URL}/orders?restaurantId=${restaurantId}&scope=all`, {
       cache: 'no-store',
       headers: { Authorization: `Bearer ${currentToken}` },
     });

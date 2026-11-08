@@ -194,6 +194,8 @@ model Order {
   // Comprobante enviado por WhatsApp (archivo de uploads/chat/<restaurantId>/) y cuándo llegó
   paymentProofUrl  String?
   paymentProofAt   DateTime?
+  // Entregado / archivado desde el Kanban: sale del tablero activo, sigue en la BD y en el Excel
+  archivedAt       DateTime?
 
   items OrderItem[]
 
