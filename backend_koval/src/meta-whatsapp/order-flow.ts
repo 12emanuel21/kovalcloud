@@ -246,7 +246,10 @@ export function buildOrderStatusMessage(order: StatusOrder | null, dailyNumber: 
       if (order.archivedAt) {
         text = `${ref} ya fue entregado.`;
       } else if (order.orderType === 'DELIVERY') {
-        text = order.driverName ? `${ref} va en camino con ${order.driverName}.` : `${ref} ya salió y va en camino.`;
+        // "En camino" solo si se despachó con repartidor (POST /orders/:id/dispatch)
+        text = order.driverName
+          ? `${ref} va en camino con ${order.driverName}.`
+          : `${ref} está listo. Te avisamos por aquí cuando salga con el repartidor.`;
       } else if (order.orderType === 'TAKEAWAY') {
         text = `${ref} está listo para recoger.`;
       } else {
@@ -260,6 +263,60 @@ export function buildOrderStatusMessage(order: StatusOrder | null, dailyNumber: 
   }
   if (order.paymentMethod === 'TRANSFERENCIA' && order.paymentStatus !== 'PAID') {
     text += ' Tu pago está pendiente de validar: si aún no envías el comprobante, puedes mandarlo por aquí.';
+  }
+  return text;
+}
+
+// ── "Acabo de hacer el pedido #07": mensaje que la carta web prepara para WhatsApp ──
+
+/** Referencia del pedido en el mensaje de la carta: turno del día ("#07") o código corto ("#0F8FAD5B") */
+export type WebOrderReference = { dailyNumber: number } | { idPrefix: string };
+
+export function parseWebOrderReference(text: string): WebOrderReference | null {
+  const match = /acabo de hacer el pedido\s*\*?\s*#\s*([0-9a-f]+)\b/i.exec(text);
+  if (!match) return null;
+  const ref = match[1];
+  if (/^\d{1,4}$/.test(ref)) return Number(ref) >= 1 ? { dailyNumber: Number(ref) } : null;
+  return /^[0-9a-f]{8}$/i.test(ref) ? { idPrefix: ref.toLowerCase() } : null;
+}
+
+/** "Soy Ana Pérez 👋" en el mensaje de la carta */
+export function nameFromWebOrderMessage(text: string): string | null {
+  return /\bsoy\s+([^\n👋!.,]+)/i.exec(text)?.[1]?.trim() || null;
+}
+
+/** Pagos que se validan con comprobante por WhatsApp (no Wompi ni efectivo) */
+const TRANSFER_METHODS = ['TRANSFERENCIA', 'NEQUI', 'DAVIPLATA'];
+
+export interface ReceivedOrder {
+  orderType: string;
+  paymentMethod?: string | null;
+  paymentStatus?: string | null;
+}
+
+/**
+ * Acuse del pedido hecho en la carta web: recibido y en preparación. Nunca "en camino": eso solo
+ * lo avisa el despacho desde el KDS (POST /orders/:id/dispatch), con el repartidor.
+ */
+export function buildWebOrderReceivedMessage(
+  order: ReceivedOrder,
+  dailyNumber: number,
+  name: string | null,
+  paymentDetails?: string | null,
+): string {
+  const greeting = name ? `¡Hola ${name}!` : '¡Hola!';
+  const next =
+    order.orderType === 'TAKEAWAY'
+      ? 'Te avisamos por aquí cuando esté listo para recoger.'
+      : order.orderType === 'DINE_IN'
+        ? 'Te avisamos por aquí cuando esté listo.'
+        : 'Te notificaremos por aquí cuando salga con el repartidor.';
+  let text = `${greeting} Recibimos tu pedido *${formatDailyNumber(dailyNumber)}*. 👨‍🍳 El equipo ya lo está preparando en cocina. ${next}`;
+  if (order.paymentStatus !== 'PAID' && TRANSFER_METHODS.includes(order.paymentMethod ?? '')) {
+    const details = paymentDetails?.trim();
+    text += details
+      ? `\n\n💳 *Datos de pago:*\n${details}\n\nPor favor envíanos la captura del comprobante por aquí.`
+      : '\n\nEn un momento te compartimos los datos para la transferencia.';
   }
   return text;
 }

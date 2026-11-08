@@ -711,6 +711,70 @@ describe('MetaWhatsAppService', () => {
       expect(events).toEqual(['start:uno', 'end:uno', 'start:dos']);
     });
 
+    describe('mensaje "Acabo de hacer el pedido" de la carta web', () => {
+      const webMessage = '¡Hola Pizzería Nápoles! Soy Ana Gómez 👋\nAcabo de hacer el pedido *#07*:\n\n• 1x Pizza — $25.000';
+      const webOrder = (extra: Record<string, unknown> = {}) => ({
+        id: 'o-7',
+        restaurantId: 'rest-1',
+        createdAt: new Date(),
+        customerName: 'Ana Gómez',
+        customerPhone: '573009876543',
+        orderType: 'DELIVERY',
+        status: 'PENDING',
+        paymentMethod: 'CASH',
+        paymentStatus: 'PENDING',
+        ...extra,
+      });
+
+      it('responde el acuse fijo (recibido y en preparación) sin pasar por la IA', async () => {
+        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+        (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(webOrder());
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+        await service.processIncomingWebhook(textPayload(webMessage), 'napoles-verify-token');
+
+        expect(sendSpy.mock.calls[0][3]).toBe(
+          '¡Hola Ana! Recibimos tu pedido *#07*. 👨‍🍳 El equipo ya lo está preparando en cocina. Te notificaremos por aquí cuando salga con el repartidor.',
+        );
+        expect(aiService.parseOrderIntent).not.toHaveBeenCalled();
+        // El turno #07 es el séptimo pedido de la jornada
+        expect((prismaService.order as any).findFirst.mock.calls[0][0]).toMatchObject({ skip: 6, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+      });
+
+      it('transferencia: agrega los datos de pago del local', async () => {
+        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce({ ...baseRestaurant, paymentDetails: 'Nequi 300 123 4567' } as any);
+        (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(webOrder({ paymentMethod: 'TRANSFERENCIA' }));
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+        await service.processIncomingWebhook(textPayload(webMessage), 'napoles-verify-token');
+
+        expect(sendSpy.mock.calls[0][3]).toContain('💳 *Datos de pago:*\nNequi 300 123 4567');
+      });
+
+      it('desde otro número no muestra el nombre del pedido: usa el que escribió el cliente', async () => {
+        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+        (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(webOrder({ customerName: 'Otra Persona', customerPhone: '573110000000' }));
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+
+        await service.processIncomingWebhook(textPayload(webMessage), 'napoles-verify-token');
+
+        expect(sendSpy.mock.calls[0][3]).toMatch(/^¡Hola Ana! Recibimos tu pedido/);
+      });
+
+      it('si ya se despachó, responde su estado real; si no existe, sigue la IA', async () => {
+        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+        (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(webOrder({ status: 'DELIVERED', driverName: 'Juan' }));
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValue({});
+        await service.processIncomingWebhook(textPayload(webMessage), 'napoles-verify-token');
+        expect(sendSpy.mock.calls[0][3]).toBe('Tu pedido #07 va en camino con Juan.');
+
+        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+        (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(null);
+        await service.processIncomingWebhook(textPayload(webMessage), 'napoles-verify-token');
+        expect(aiService.parseOrderIntent).toHaveBeenCalledTimes(1);
+      });
+    });
+
     describe('Habeas Data (Ley 1581) y domicilio por zonas', () => {
       let customers: { findByPhone: jest.Mock; safeTouch: jest.Mock };
       let zones: { quoteForOrder: jest.Mock };

@@ -398,7 +398,7 @@ export class OrdersService {
     this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, response);
 
     // 3. Notificar al cliente por WhatsApp según el nuevo estado (en segundo plano: no frena al KDS)
-    const mensajeCliente = this.buildStatusMessage(status as OrderStatus, minutes);
+    const mensajeCliente = this.buildStatusMessage(status as OrderStatus, minutes, updatedOrder.orderType);
     if (mensajeCliente) {
       void this.notifyCustomer(updatedOrder, mensajeCliente);
     }
@@ -438,7 +438,7 @@ export class OrdersService {
 
     // 2. Notificar al cliente vía WhatsApp si el estado cambió
     if (updateOrderDto.status && updateOrderDto.status !== existingOrder.status) {
-      const mensajeCliente = this.buildStatusMessage(updateOrderDto.status);
+      const mensajeCliente = this.buildStatusMessage(updateOrderDto.status, undefined, updatedOrder.orderType);
       if (mensajeCliente) {
         void this.notifyCustomer(updatedOrder, mensajeCliente);
       }
@@ -463,15 +463,20 @@ export class OrdersService {
     };
   }
 
-  /** Mensaje de WhatsApp para el cliente según el nuevo estado (vacío = no se notifica) */
-  private buildStatusMessage(status: OrderStatus, estimatedMinutes?: number): string {
+  /**
+   * Mensaje de WhatsApp para el cliente según el nuevo estado (vacío = no se notifica).
+   * "En camino" no sale de aquí: lo avisa el despacho (POST /orders/:id/dispatch) con el repartidor.
+   */
+  private buildStatusMessage(status: OrderStatus, estimatedMinutes?: number, orderType?: OrderType | string): string {
     switch (status) {
       case OrderStatus.PREPARING:
         return estimatedMinutes
           ? `¡Tu pedido ya está en preparación! 👨‍🍳 Estará listo en aprox. ${estimatedMinutes} minutos.`
           : '👨‍🍳 ¡Buenas noticias! Tu pedido ya está en la cocina y lo estamos preparando con mucho cariño.';
       case OrderStatus.DELIVERED:
-        return '🛵 ¡Tu pedido está listo y va en camino! Disfruta tu comida.';
+        if (orderType === OrderType.TAKEAWAY) return '✅ ¡Tu pedido está listo para recoger! Te esperamos.';
+        if (orderType === OrderType.DINE_IN) return '✅ ¡Tu pedido está listo! Disfruta tu comida.';
+        return '✅ ¡Tu pedido está listo! Te avisamos por aquí cuando salga con el repartidor.';
       case OrderStatus.CANCELLED:
         return 'Hola, lamentamos informarte que tu pedido ha sido cancelado por el restaurante (posiblemente por falta de inventario). Te pedimos disculpas por los inconvenientes. 🙏';
       default:

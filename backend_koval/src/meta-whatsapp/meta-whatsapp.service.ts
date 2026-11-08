@@ -4,7 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { syncWhatsAppBotNumber } from '../restaurants/whatsapp-bot-number';
 import { AiService, type OrderIntent } from '../ai/ai.service';
-import { isLidContact } from '../orders/phone';
+import { isLidContact, normalizeColombianPhone } from '../orders/phone';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { OrderStatus } from '@prisma/client';
 import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
@@ -34,7 +34,7 @@ import {
   type ChatMediaKind,
   type StoredChatMedia,
 } from '../chats/chat-media';
-import { dailyNumberOf, formatDailyNumber } from '../orders/daily-number';
+import { businessDayStart, dailyNumberOf, formatDailyNumber } from '../orders/daily-number';
 import {
   ADD_ON_STATUSES,
   ADD_ON_WINDOW_MS,
@@ -43,6 +43,10 @@ import {
   buildConfirmationMessage,
   buildOrderStatusMessage,
   buildOutOfCoverageMessage,
+  buildWebOrderReceivedMessage,
+  nameFromWebOrderMessage,
+  parseWebOrderReference,
+  type WebOrderReference,
   deliveryFeeOf,
   type OrderLine,
   buildPaymentInstructions,
@@ -466,6 +470,29 @@ export class MetaWhatsAppService {
     }
   }
 
+  /**
+   * Pedido de la carta web citado en "Acabo de hacer el pedido #07": por turno de la jornada en
+   * curso o por el código corto del id (pedidos de las últimas 24 h).
+   */
+  private async findWebOrder(restaurantId: string, ref: WebOrderReference) {
+    const order =
+      'dailyNumber' in ref
+        ? await this.prisma.order.findFirst({
+            where: { restaurantId, createdAt: { gte: businessDayStart(new Date()) } },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            skip: ref.dailyNumber - 1,
+          })
+        : await this.prisma.order.findFirst({
+            where: {
+              restaurantId,
+              id: { startsWith: ref.idPrefix },
+              createdAt: { gte: new Date(Date.now() - ORDER_STATUS_LOOKBACK_MS) },
+            },
+          });
+    if (!order) return null;
+    return { order, dailyNumber: 'dailyNumber' in ref ? ref.dailyNumber : await dailyNumberOf(this.prisma, order) };
+  }
+
   /** "¿Cómo va mi pedido?": último pedido del cliente (24 h) con su estado real */
   private async buildOrderStatusReply(restaurantId: string, customerPhone: string): Promise<string> {
     const order = await this.prisma.order.findFirst({
@@ -786,6 +813,27 @@ export class MetaWhatsAppService {
       this.logger.log(
         `📩 [${restaurant.name}] Mensaje entrante de [${senderNumber}] (PhoneID: ${targetPhoneId}): "${messageText}"`,
       );
+
+      // 3.9. "Acabo de hacer el pedido #07" (mensaje que arma la carta web): acuse fijo de recibido y
+      //      en preparación, sin IA (la IA llegó a responder que ya iba "en camino")
+      const webOrderRef = parseWebOrderReference(messageText);
+      const webOrder = webOrderRef ? await this.findWebOrder(restaurant.id, webOrderRef) : null;
+      if (webOrder) {
+        const { order, dailyNumber } = webOrder;
+        const isSameCustomer = normalizeColombianPhone(order.customerPhone) === normalizeColombianPhone(senderNumber);
+        // Si escribe desde otro número, no se le muestran datos del pedido: solo el nombre que puso
+        const name = (isSameCustomer ? order.customerName : nameFromWebOrderMessage(messageText))?.split(/\s+/)[0] ?? null;
+        const alreadyOut = order.status === OrderStatus.DELIVERED || order.status === OrderStatus.CANCELLED;
+        const reply = withNotice(
+          alreadyOut
+            ? buildOrderStatusMessage(order, dailyNumber)
+            : buildWebOrderReceivedMessage(order, dailyNumber, name, restaurant.paymentDetails),
+        );
+        this.logger.log(`🧾 [${restaurant.name}] Acuse del pedido web ${order.id} (turno ${formatDailyNumber(dailyNumber)}) a [${senderNumber}]`);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, reply, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [userEntry(messageText.trim()), { role: CHAT_ROLE_MODEL, message: reply }]);
+        return;
+      }
 
       // 4. Obtener el menú disponible del restaurante desde Prisma
       const menuItems = await this.prisma.menuItem.findMany({

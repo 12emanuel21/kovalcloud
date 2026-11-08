@@ -5,7 +5,10 @@ import {
   buildConfirmationMessage,
   buildOrderLines,
   buildOrderStatusMessage,
+  buildWebOrderReceivedMessage,
+  nameFromWebOrderMessage,
   NO_RECENT_ORDER_REPLY,
+  parseWebOrderReference,
   buildOrderNotes,
   buildPaymentInstructions,
   buildRegisteredMessage,
@@ -185,5 +188,37 @@ describe('order-flow', () => {
     expect(buildOrderStatusMessage({ ...base, status: 'CANCELLED' }, 3)).toContain('fue cancelado');
     expect(buildOrderStatusMessage({ ...base, status: 'PREPARING', paymentMethod: 'TRANSFERENCIA' }, 3)).toContain('pendiente de validar');
     expect(buildOrderStatusMessage(null, null)).toBe(NO_RECENT_ORDER_REPLY);
+  });
+
+  it('pedido web: reconoce "Acabo de hacer el pedido *#07*" (turno o código corto) y el nombre', () => {
+    const message = '¡Hola Betania! Soy Ana Pérez 👋\nAcabo de hacer el pedido *#07*:\n\n• 1x Perro — $20.000';
+    expect(parseWebOrderReference(message)).toEqual({ dailyNumber: 7 });
+    expect(parseWebOrderReference('Acabo de hacer el pedido *#0F8FAD5B*:')).toEqual({ idPrefix: '0f8fad5b' });
+    expect(parseWebOrderReference('Acabo de hacer el pedido #00')).toBeNull();
+    expect(parseWebOrderReference('quiero hacer un pedido')).toBeNull();
+    expect(nameFromWebOrderMessage(message)).toBe('Ana Pérez');
+  });
+
+  it('pedido web recibido: texto fijo de preparación, nunca "en camino"', () => {
+    const delivery = buildWebOrderReceivedMessage({ orderType: 'DELIVERY', paymentMethod: 'CASH' }, 1, 'Ana');
+    expect(delivery).toBe(
+      '¡Hola Ana! Recibimos tu pedido *#01*. 👨‍🍳 El equipo ya lo está preparando en cocina. Te notificaremos por aquí cuando salga con el repartidor.',
+    );
+    expect(delivery).not.toContain('en camino');
+    expect(buildWebOrderReceivedMessage({ orderType: 'TAKEAWAY' }, 2, null)).toBe(
+      '¡Hola! Recibimos tu pedido *#02*. 👨‍🍳 El equipo ya lo está preparando en cocina. Te avisamos por aquí cuando esté listo para recoger.',
+    );
+  });
+
+  it('pedido web por transferencia/Nequi: agrega los datos de pago (solo si no está pagado)', () => {
+    const transfer = buildWebOrderReceivedMessage({ orderType: 'DELIVERY', paymentMethod: 'NEQUI', paymentStatus: 'PENDING' }, 3, 'Ana', 'Nequi 300 123 4567');
+    expect(transfer).toContain('💳 *Datos de pago:*\nNequi 300 123 4567\n\nPor favor envíanos la captura del comprobante por aquí.');
+    expect(buildWebOrderReceivedMessage({ orderType: 'DELIVERY', paymentMethod: 'TRANSFERENCIA', paymentStatus: 'PAID' }, 3, 'Ana', 'Nequi')).not.toContain('Datos de pago');
+    expect(buildWebOrderReceivedMessage({ orderType: 'DELIVERY', paymentMethod: 'WOMPI' }, 3, 'Ana', 'Nequi')).not.toContain('Datos de pago');
+  });
+
+  it('domicilio listo sin despacho: no dice "en camino" (eso solo con repartidor)', () => {
+    const msg = buildOrderStatusMessage({ status: 'DELIVERED', orderType: 'DELIVERY', archivedAt: null, driverName: null }, 4);
+    expect(msg).toBe('Tu pedido #04 está listo. Te avisamos por aquí cuando salga con el repartidor.');
   });
 });

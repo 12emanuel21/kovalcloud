@@ -1,9 +1,9 @@
 import { orderNumberLabel } from './order-number';
 
 /**
- * WhatsApp del local en la carta pública (wa.me/<número>).
- * wa.me exige el número internacional solo con dígitos: sin indicativo ("3001234567") o vacío
- * ("wa.me/?text=…") el enlace no llega al local (WhatsApp abre el selector de chats).
+ * WhatsApp del local en la carta pública.
+ * WhatsApp exige el número internacional solo con dígitos: sin indicativo ("3001234567") o vacío
+ * el enlace no llega al local (WhatsApp abre el selector de chats).
  */
 
 /** Igual que el backend (toWhatsAppNumber): celular colombiano de 10 dígitos -> 57XXXXXXXXXX */
@@ -14,8 +14,16 @@ export function toWhatsAppNumber(phone: string | null | undefined): string | nul
   return /^\d{10,15}$/.test(normalized) ? normalized : null;
 }
 
+/**
+ * Enlace para abrir el chat con el texto precargado. Va directo a api.whatsapp.com/send: wa.me
+ * redirige ahí y en esa redirección algunos clientes (WhatsApp Web / escritorio) vuelven a
+ * codificar el texto y los emojis de 4 bytes (🛵 📍 💰) llegan como "�". El texto se normaliza
+ * (NFC) y se codifica una sola vez en UTF-8.
+ */
 export function whatsappLink(number: string, text?: string): string {
-  return `https://wa.me/${number}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
+  const params = [`phone=${number}`];
+  if (text) params.push(`text=${encodeURIComponent(text.normalize('NFC'))}`);
+  return `https://api.whatsapp.com/send?${params.join('&')}`;
 }
 
 
