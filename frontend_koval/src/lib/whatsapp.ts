@@ -14,18 +14,30 @@ export function toWhatsAppNumber(phone: string | null | undefined): string | nul
   return /^\d{10,15}$/.test(normalized) ? normalized : null;
 }
 
-/**
- * Enlace para abrir el chat con el texto precargado. Va directo a api.whatsapp.com/send: wa.me
- * redirige ahí y en esa redirección algunos clientes (WhatsApp Web / escritorio) vuelven a
- * codificar el texto y los emojis de 4 bytes (🛵 📍 💰) llegan como "�". El texto se normaliza
- * (NFC) y se codifica una sola vez en UTF-8.
- */
-export function whatsappLink(number: string, text?: string): string {
-  const params = [`phone=${number}`];
-  if (text) params.push(`text=${encodeURIComponent(text.normalize('NFC'))}`);
-  return `https://api.whatsapp.com/send?${params.join('&')}`;
+/** Teléfono o tablet (iPadOS se presenta como "Macintosh": se reconoce por la pantalla táctil) */
+export function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+  );
 }
 
+/**
+ * Enlace para abrir el chat con el texto precargado.
+ * - Móvil: api.whatsapp.com/send abre la app.
+ * - Escritorio: directo a web.whatsapp.com/send. api.whatsapp.com redirige ahí en escritorio y en
+ *   esa redirección del servidor los emojis de 4 bytes (🛵 📍 💰) se truncan y llegan como "�".
+ * El texto se normaliza (NFC) y se codifica una sola vez (encodeURIComponent = UTF-8).
+ * `mobile` se calcula en el navegador al llamar; los enlaces renderizados en servidor deben
+ * pasarlo explícitamente (useIsMobileDevice) para no desajustar la hidratación.
+ */
+export function whatsappLink(number: string, text?: string, mobile: boolean = isMobileDevice()): string {
+  const params = [`phone=${number}`];
+  if (text) params.push(`text=${encodeURIComponent(text.normalize('NFC'))}`);
+  const host = mobile ? 'https://api.whatsapp.com' : 'https://web.whatsapp.com';
+  return `${host}/send?${params.join('&')}`;
+}
 
 const formatCOP = (value: number) => `$${value.toLocaleString('es-CO')}`;
 

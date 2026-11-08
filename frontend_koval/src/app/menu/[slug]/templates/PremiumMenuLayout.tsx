@@ -18,6 +18,7 @@ import { useCart } from '@/context/CartContext';
 import { CartDrawer } from '@/components/cart/CartDrawer';
 import { StorefrontModeToggle } from '@/components/theme/StorefrontModeToggle';
 import { toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
+import { useIsMobileDevice } from '@/lib/useIsMobileDevice';
 import {
   DAY_NAMES,
   WEEK_DAYS,
@@ -95,6 +96,7 @@ export function PremiumMenuLayout({
   const initial = restaurant.name.trim().charAt(0).toUpperCase() || 'K';
   // Dígitos con indicativo (wa.me lo exige); lo calcula el backend, con respaldo local
   const whatsappNumber = restaurant.whatsappNumber ?? toWhatsAppNumber(restaurant.phone);
+  const isMobile = useIsMobileDevice();
   const today = getLocalWeekDay();
 
   return (
@@ -239,7 +241,7 @@ export function PremiumMenuLayout({
               </a>
               {whatsappNumber && (
                 <a
-                  href={whatsappLink(whatsappNumber, `¡Hola ${restaurant.name}! Tengo una consulta.`)}
+                  href={whatsappLink(whatsappNumber, `¡Hola ${restaurant.name}! Tengo una consulta.`, isMobile)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex h-12 items-center gap-2 rounded-sf bg-[#25D366] px-6 text-base font-bold text-white shadow-lg shadow-[#25D366]/25 transition hover:brightness-95 active:scale-[0.98]"
@@ -357,7 +359,7 @@ export function PremiumMenuLayout({
                 )}
                 {whatsappNumber && (
                   <InfoRow icon={Phone} title="WhatsApp" palette={palette}>
-                    <a href={whatsappLink(whatsappNumber)} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                    <a href={whatsappLink(whatsappNumber, undefined, isMobile)} target="_blank" rel="noopener noreferrer" className="hover:underline">
                       {restaurant.phone}
                     </a>
                   </InfoRow>
