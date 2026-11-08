@@ -197,6 +197,9 @@ describe('order-flow', () => {
     expect(parseWebOrderReference('Acabo de hacer el pedido #00')).toBeNull();
     expect(parseWebOrderReference('quiero hacer un pedido')).toBeNull();
     expect(nameFromWebOrderMessage(message)).toBe('Ana Pérez');
+    // Mensaje nuevo sin emojis y el viejo con el emoji dañado por WhatsApp ("�")
+    expect(nameFromWebOrderMessage('¡Hola Betania! Soy Ana Pérez.\nAcabo de hacer el pedido *#07*:')).toBe('Ana Pérez');
+    expect(nameFromWebOrderMessage('¡Hola Betania! Soy Ana Pérez \uFFFD\nAcabo de hacer el pedido *#07*:')).toBe('Ana Pérez');
   });
 
   it('pedido web recibido: texto fijo de preparación, nunca "en camino"', () => {

@@ -14,6 +14,23 @@ export function toWhatsAppNumber(phone: string | null | undefined): string | nul
   return /^\d{10,15}$/.test(normalized) ? normalized : null;
 }
 
+/**
+ * Texto apto para el parámetro text de WhatsApp. Los servidores de Meta (api.whatsapp.com, wa.me y
+ * la carga del texto en WhatsApp Web / escritorio) dañan los caracteres fuera del plano básico
+ * (emojis de 4 bytes como 🛵 📍 💰 👋) y llegan como "�"; los de 3 bytes (• — ñ) llegan bien.
+ * Se quitan esos caracteres junto con sus uniones (ZWJ) y selectores de variante, y se ordenan
+ * los espacios que dejan.
+ */
+export function toWhatsAppSafeText(text: string): string {
+  return text
+    .normalize('NFC')
+    .replace(/[\u{10000}-\u{10FFFF}]/gu, '')
+    .replace(/[\u200D\uFE0F]/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/^[ \t]+/gm, '');
+}
+
 /** Teléfono o tablet (iPadOS se presenta como "Macintosh": se reconoce por la pantalla táctil) */
 export function isMobileDevice(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -28,13 +45,14 @@ export function isMobileDevice(): boolean {
  * - Móvil: api.whatsapp.com/send abre la app.
  * - Escritorio: directo a web.whatsapp.com/send. api.whatsapp.com redirige ahí en escritorio y en
  *   esa redirección del servidor los emojis de 4 bytes (🛵 📍 💰) se truncan y llegan como "�".
- * El texto se normaliza (NFC) y se codifica una sola vez (encodeURIComponent = UTF-8).
+ * El texto pasa por toWhatsAppSafeText y se codifica una sola vez (encodeURIComponent = UTF-8).
  * `mobile` se calcula en el navegador al llamar; los enlaces renderizados en servidor deben
  * pasarlo explícitamente (useIsMobileDevice) para no desajustar la hidratación.
  */
 export function whatsappLink(number: string, text?: string, mobile: boolean = isMobileDevice()): string {
   const params = [`phone=${number}`];
-  if (text) params.push(`text=${encodeURIComponent(text.normalize('NFC'))}`);
+  const safeText = text ? toWhatsAppSafeText(text) : '';
+  if (safeText) params.push(`text=${encodeURIComponent(safeText)}`);
   const host = mobile ? 'https://api.whatsapp.com' : 'https://web.whatsapp.com';
   return `${host}/send?${params.join('&')}`;
 }
@@ -62,19 +80,19 @@ export interface OrderWhatsAppDetails {
 /** Mensaje que el cliente envía al local al confirmar un pedido en efectivo / contra entrega */
 export function buildOrderWhatsAppMessage(order: OrderWhatsAppDetails): string {
   const lines = [
-    `¡Hola${order.restaurantName ? ` ${order.restaurantName}` : ''}! Soy ${order.customerName} 👋`,
+    `¡Hola${order.restaurantName ? ` ${order.restaurantName}` : ''}! Soy ${order.customerName}.`,
     `Acabo de hacer el pedido *${orderNumberLabel({ id: order.orderId, dailyNumber: order.dailyNumber })}*:`,
     '',
     ...order.items.map((item) => `• ${item.quantity}x ${item.name} — ${formatCOP(item.price * item.quantity)}`),
     '',
   ];
-  if (order.tableNumber) lines.push(`🍽️ Mesa: ${order.tableNumber}`);
-  else if (order.pickup) lines.push('🛍️ Para recoger en el local');
+  if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
+  else if (order.pickup) lines.push('Para recoger en el local');
   else if (order.deliveryAddress || order.neighborhood) {
-    lines.push(`📍 Dirección: ${[order.deliveryAddress, order.neighborhood].filter(Boolean).join(', ')}`);
+    lines.push(`Dirección: ${[order.deliveryAddress, order.neighborhood].filter(Boolean).join(', ')}`);
   }
-  if (order.deliveryFee) lines.push(`🛵 Domicilio: ${formatCOP(order.deliveryFee)}`);
-  if (order.notes) lines.push(`📝 Notas: ${order.notes}`);
-  lines.push(`💰 *Total a pagar: ${formatCOP(order.total)} COP* (efectivo / contra entrega)`);
+  if (order.deliveryFee) lines.push(`Domicilio: ${formatCOP(order.deliveryFee)}`);
+  if (order.notes) lines.push(`Notas: ${order.notes}`);
+  lines.push(`*Total a pagar: ${formatCOP(order.total)} COP* (efectivo / contra entrega)`);
   return lines.join('\n');
 }

@@ -282,7 +282,7 @@ export function parseWebOrderReference(text: string): WebOrderReference | null {
 
 /** "Soy Ana Pérez 👋" en el mensaje de la carta */
 export function nameFromWebOrderMessage(text: string): string | null {
-  return /\bsoy\s+([^\n👋!.,]+)/i.exec(text)?.[1]?.trim() || null;
+  return /\bsoy\s+([^\n👋\uFFFD!.,]+)/i.exec(text)?.[1]?.trim() || null;
 }
 
 /** Pagos que se validan con comprobante por WhatsApp (no Wompi ni efectivo) */
