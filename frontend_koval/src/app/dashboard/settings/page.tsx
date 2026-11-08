@@ -13,6 +13,7 @@ import { MenuThemePicker } from './MenuThemePicker';
 import { MenuLayoutPicker } from './MenuLayoutPicker';
 import { AccentColorPicker, MenuFontSelect } from './BrandControls';
 import { BannerField } from './BannerField';
+import { ShiftExtensionPanel } from '@/components/orders/ShiftExtensionPanel';
 import {
   DEFAULT_MENU_FONT,
   DEFAULT_MENU_LAYOUT,
@@ -497,6 +498,9 @@ export default function SettingsPage() {
             </SettingsCardFooter>
           </form>
         )}
+
+        {/* HORARIOS: tiempo extra del turno (+30 min, +1 h, Cerrar ahora), fuera del formulario */}
+        {activeTab === 'horarios' && <ShiftExtensionPanel />}
 
         {/* Perfil (ubicación y tema), Horarios y Pagos: un solo formulario que queda montado entre pestañas */}
         <RestaurantProfileSection view={activeTab} />

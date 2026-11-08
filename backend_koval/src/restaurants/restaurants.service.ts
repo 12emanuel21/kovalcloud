@@ -9,7 +9,7 @@ import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { maskSecret, sanitizeRestaurant } from './sanitize-restaurant';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
-import { parseBusinessHours } from './business-hours';
+import { isRestaurantClosed, parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 import { isOnlinePaymentEnabled, isWompiReady } from '../payments/wompi-checkout.service';
 import { publicWhatsAppNumber } from './whatsapp-bot-number';
@@ -126,6 +126,19 @@ export class RestaurantsService {
     private aiService: AiService,
     private twoFactorAuth: TwoFactorAuthService,
   ) {}
+
+  /**
+   * Estado de apertura para la carta pública, sin el menú: la carta lo consulta periódicamente
+   * para reflejar al momento una prórroga, su cancelación o el cierre de emergencia.
+   */
+  async findStatusBySlug(slug: string) {
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { slug },
+      select: { isTemporarilyClosed: true, closedMessage: true, businessHours: true, extendedUntil: true },
+    });
+    if (!restaurant) throw new NotFoundException('Restaurante no encontrado');
+    return { ...restaurant, isOpen: !isRestaurantClosed(restaurant) };
+  }
 
   async findBySlug(slug: string) {
     const restaurant = await this.prisma.restaurant.findUnique({

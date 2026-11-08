@@ -70,7 +70,7 @@ export function PremiumMenuLayout({
   palette,
   renderMenu,
 }: PremiumMenuLayoutProps) {
-  const { isClosed, closedNotice, scheduleGroups, handleAddItem, getItemCartQuantity, isJustAdded } =
+  const { isClosed, opening, closedNotice, scheduleGroups, handleAddItem, getItemCartQuantity, isJustAdded } =
     useMenuLogic(restaurant);
   const { totalCount } = useCart();
 
@@ -83,12 +83,12 @@ export function PremiumMenuLayout({
 
   const statusLabel = useMemo(() => {
     if (isClosed) return 'Cerrado ahora';
-    if (hasActiveExtension(restaurant.extendedUntil)) {
-      return `Abierto hasta las ${formatLocalTime(restaurant.extendedUntil!)}`;
+    if (hasActiveExtension(opening.extendedUntil)) {
+      return `Abierto hasta las ${formatLocalTime(opening.extendedUntil!)}`;
     }
-    const closing = currentClosingTime(restaurant.businessHours);
+    const closing = currentClosingTime(opening.businessHours);
     return closing ? `Abierto hasta las ${formatClock12h(closing)}` : 'Abierto ahora';
-  }, [isClosed, restaurant.extendedUntil, restaurant.businessHours]);
+  }, [isClosed, opening.extendedUntil, opening.businessHours]);
 
   const scrollToMenu = () => document.getElementById(MENU_ANCHOR)?.scrollIntoView({ behavior: 'smooth' });
 
@@ -375,10 +375,10 @@ export function PremiumMenuLayout({
 
             <div className={`rounded-sf-lg border p-6 md:p-8 ${palette.surface}`}>
               <h3 className={`text-sm font-bold uppercase tracking-widest ${palette.muted}`}>Horario de atención</h3>
-              {restaurant.businessHours ? (
+              {opening.businessHours ? (
                 <ul className="mt-4 space-y-1">
                   {WEEK_DAYS.map((day) => {
-                    const ranges = restaurant.businessHours?.[day] ?? [];
+                    const ranges = opening.businessHours?.[day] ?? [];
                     const isToday = day === today;
                     return (
                       <li

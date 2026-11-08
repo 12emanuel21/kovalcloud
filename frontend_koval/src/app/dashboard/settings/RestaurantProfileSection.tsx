@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { CreditCard, Lock } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useSudoMode } from '@/context/SudoContext';
+import { SHIFT_CHANGED_EVENT } from '@/components/orders/ShiftExtensionPanel';
 import {
   SettingsCardFooter,
   SettingsCardHeader,
@@ -320,6 +321,8 @@ export function RestaurantProfileSection({ view }: { view: SettingsTab }) {
         : saved.wompiReady && saved.isWompiEnabled === false
           ? ' Ojo: las llaves de Wompi están completas pero los cobros en línea siguen apagados (actívalos en Pagos).'
           : '';
+      // El panel de tiempo extra relee horarios y cierre de emergencia
+      window.dispatchEvent(new Event(SHIFT_CHANGED_EVENT));
       setFeedback({ type: 'success', text: `Perfil del local guardado correctamente.${wompiNote}` });
       setTimeout(() => setFeedback(null), 4000);
     } catch (err) {

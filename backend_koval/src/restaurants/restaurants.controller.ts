@@ -40,6 +40,12 @@ export class RestaurantsController {
     return this.restaurantsService.findAll();
   }
 
+  // Público: estado de apertura de la carta (la carta lo consulta cada pocos segundos)
+  @Get('slug/:slug/status')
+  findStatusBySlug(@Param('slug') slug: string) {
+    return this.restaurantsService.findStatusBySlug(slug);
+  }
+
   // Público: menú digital para clientes
   @Get('slug/:slug')
   findBySlug(@Param('slug') slug: string) {

@@ -92,11 +92,15 @@ export function isRestaurantClosed(
 
 /** Hora en la zona del local, ej. "12:30 a. m." */
 export function formatLocalTime(date: string | Date): string {
-  return new Date(date).toLocaleTimeString('es-CO', {
-    timeZone: RESTAURANT_TIMEZONE,
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  return new Date(date)
+    .toLocaleTimeString('es-CO', {
+      timeZone: RESTAURANT_TIMEZONE,
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+    // Node y los navegadores separan "p. m." con espacios distintos (normal / no separable):
+    // se unifica para que el HTML del servidor coincida al hidratar (React #418)
+    .replace(/[  ]/g, ' ');
 }
 
 /** Horario en texto ("Lun 11:00–22:00 · Mar cerrado · ...") */

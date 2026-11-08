@@ -14,6 +14,9 @@ const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4
 /** Debe coincidir con el máximo del backend (ExtendHoursDto) */
 const MAX_EXTENSION_MINUTES = 720;
 
+/** Se emite al guardar horarios o el cierre de emergencia en Ajustes: el panel vuelve a leer el estado */
+export const SHIFT_CHANGED_EVENT = 'koval:shift-changed';
+
 interface ShiftState {
   extendedUntil: string | null;
   isTemporarilyClosed: boolean;
@@ -27,8 +30,9 @@ async function apiErrorMessage(res: Response, fallback: string): Promise<string>
 }
 
 /**
- * Panel "Turno / Horario" del Kanban: muestra si el local recibe pedidos y permite
- * prorrogar el horario (+30 min, +1 h o minutos a medida) o cancelar la prórroga.
+ * Panel "Turno / Horario" (Kanban de pedidos y Ajustes > Horarios): muestra si el local recibe pedidos,
+ * permite prorrogar el horario (+30 min, +1 h o minutos a medida) y, con tiempo extra activo,
+ * terminarlo al instante ("Cerrar ahora"). La carta pública lo refleja en segundos.
  * Para el OWNER y el SUPERADMIN (en Modo Dios); el backend también lo exige.
  */
 export function ShiftExtensionPanel() {
@@ -48,7 +52,15 @@ export function ShiftExtensionPanel() {
     return () => clearInterval(interval);
   }, []);
 
-  // Carga inicial: setState solo en callbacks de la promesa (nunca síncrono en el efecto)
+  // Recarga cuando Ajustes guarda horarios o el cierre de emergencia
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    const onChanged = () => setReloadKey((key) => key + 1);
+    window.addEventListener(SHIFT_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(SHIFT_CHANGED_EVENT, onChanged);
+  }, []);
+
+  // Carga del estado: setState solo en callbacks de la promesa (nunca síncrono en el efecto)
   useEffect(() => {
     if (!canManage || !restaurantId || !token) return;
     let cancelled = false;
@@ -64,6 +76,7 @@ export function ShiftExtensionPanel() {
           isTemporarilyClosed: Boolean(data.isTemporarilyClosed),
           businessHours: data.businessHours ?? null,
         });
+        setNow(new Date());
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'No se pudo cargar el estado del turno');
@@ -71,7 +84,7 @@ export function ShiftExtensionPanel() {
     return () => {
       cancelled = true;
     };
-  }, [canManage, restaurantId, token]);
+  }, [canManage, restaurantId, token, reloadKey]);
 
   if (!canManage) return null;
 
@@ -109,13 +122,15 @@ export function ShiftExtensionPanel() {
   // Kill switch: con la emergencia activa no hay prórroga posible (el backend la borra y rechaza nuevas)
   const emergency = Boolean(shift?.isTemporarilyClosed);
   const extensionActive = shift && !emergency ? hasActiveExtension(shift.extendedUntil, now) : false;
+  // Terminar el tiempo extra cierra el local solo si ya pasó el horario regular
+  const openBySchedule = shift ? isWithinBusinessHours(shift.businessHours, now) : false;
   const status = !shift
     ? { tone: 'muted', text: 'Cargando estado del turno...' }
     : emergency
       ? { tone: 'closed', text: '🔴 Cierre de emergencia activo: no se reciben pedidos' }
       : extensionActive
         ? { tone: 'extended', text: `🟢 Prórroga activa hasta las ${formatLocalTime(shift.extendedUntil!)}` }
-        : isWithinBusinessHours(shift.businessHours, now)
+        : openBySchedule
           ? { tone: 'open', text: '🟢 Abierto según el horario' }
           : { tone: 'closed', text: '🌙 Fuera de horario: no se reciben pedidos' };
 
@@ -196,9 +211,15 @@ export function ShiftExtensionPanel() {
               type="button"
               onClick={() => extend(null)}
               disabled={busy}
-              className={`${quickButton} bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20`}
+              title={
+                openBySchedule
+                  ? 'Termina el tiempo extra; el local sigue abierto según su horario'
+                  : 'Termina el tiempo extra y deja de recibir pedidos de inmediato'
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-400 bg-rose-600 px-3.5 py-1.5 text-[11px] font-bold text-white shadow-md shadow-rose-950/40 transition hover:bg-rose-500 disabled:opacity-60 disabled:cursor-wait cursor-pointer"
             >
-              Cancelar Prórroga
+              <span aria-hidden>⏹</span>
+              {busy ? 'Cerrando...' : openBySchedule ? 'Finalizar tiempo extra' : 'Cerrar ahora'}
             </button>
           )}
         </div>
