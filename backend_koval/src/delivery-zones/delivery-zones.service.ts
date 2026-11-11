@@ -1,9 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { OrderType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDeliveryZoneDto, UpdateDeliveryZoneDto } from './dto/delivery-zone.dto';
 import { normalizePlace, quoteFor, usableDefaultFee, type DeliveryQuote } from './delivery-coverage';
 import { assertBranchOf, branchData } from '../branches/branch-ownership';
+import { DeliveryPricingService } from './distance/delivery-pricing.service';
+import { isValidGeoPoint, type GeoPoint } from './distance/distance-calculator.interface';
 
 const zoneSelect = { id: true, name: true, keywords: true, fee: true, isActive: true, branchId: true, createdAt: true } as const;
 
@@ -30,7 +32,14 @@ const cleanFee = (fee: number | undefined) => (fee === undefined ? undefined : M
  */
 @Injectable()
 export class DeliveryZonesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly pricing: DeliveryPricingService;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() pricing?: DeliveryPricingService,
+  ) {
+    this.pricing = pricing ?? new DeliveryPricingService(prisma);
+  }
 
   list(restaurantId: string) {
     return this.prisma.deliveryZone.findMany({
@@ -112,15 +121,34 @@ export class DeliveryZonesService {
     return quoteFor(zones, restaurant?.defaultDeliveryFee, ...places);
   }
 
+  /**
+   * Cotización completa: con pin GPS del cliente y el local (o una sede) ubicado, por distancia
+   * (Haversine x 1.30, tarifa escalonada). Sin pin o sin coordenadas del local: zonas y tarifa
+   * estándar, como siempre.
+   */
+  async quote(
+    restaurantId: string,
+    places: { neighborhood?: string | null; address?: string | null },
+    customerCoords?: GeoPoint | null,
+    targetBranchId?: string | null,
+  ): Promise<DeliveryQuote> {
+    if (isValidGeoPoint(customerCoords)) {
+      const byDistance = await this.pricing.calculateFee(restaurantId, customerCoords, targetBranchId);
+      if (byDistance) return byDistance;
+    }
+    return this.calculateDeliveryFee(restaurantId, places.neighborhood, places.address);
+  }
+
   /** Flete de un pedido: solo los domicilios pagan envío (recoger y mesa: 0) */
   async quoteForOrder(
     restaurantId: string,
     orderType: OrderType | string | null | undefined,
     neighborhood?: string | null,
     address?: string | null,
+    customerCoords?: GeoPoint | null,
   ): Promise<DeliveryQuote | null> {
     if ((orderType ?? OrderType.DELIVERY) !== OrderType.DELIVERY) return null;
-    return this.calculateDeliveryFee(restaurantId, neighborhood, address);
+    return this.quote(restaurantId, { neighborhood, address }, customerCoords);
   }
 
   private async assertOwned(restaurantId: string, zoneId: string) {

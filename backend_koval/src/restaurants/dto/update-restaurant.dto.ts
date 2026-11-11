@@ -1,6 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateRestaurantDto } from './create-restaurant.dto';
-import { IsIn, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsIn, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import {
   HEX_COLOR_PATTERN,
   MENU_COLOR_MODES,
@@ -48,6 +48,41 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @Min(0, { message: 'La tarifa estándar no puede ser negativa' })
   @Max(1_000_000, { message: 'La tarifa estándar es demasiado alta' })
   defaultDeliveryFee?: number | null;
+
+  // Domicilio por distancia: coordenadas del local (null las quita y se apaga el cálculo por distancia)
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsLatitude({ message: 'La latitud no es válida (entre -90 y 90)' })
+  latitude?: number | null;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsLongitude({ message: 'La longitud no es válida (entre -180 y 180)' })
+  longitude?: number | null;
+
+  @IsOptional()
+  @IsNumber({}, { message: 'La tarifa base debe ser un número' })
+  @Min(0, { message: 'La tarifa base no puede ser negativa' })
+  @Max(1_000_000, { message: 'La tarifa base es demasiado alta' })
+  baseDeliveryFee?: number;
+
+  @IsOptional()
+  @IsNumber({}, { message: 'La distancia base debe ser un número' })
+  @Min(0, { message: 'La distancia base no puede ser negativa' })
+  @Max(100, { message: 'La distancia base es demasiado alta' })
+  baseDeliveryKm?: number;
+
+  @IsOptional()
+  @IsNumber({}, { message: 'El valor del km adicional debe ser un número' })
+  @Min(0, { message: 'El valor del km adicional no puede ser negativo' })
+  @Max(1_000_000, { message: 'El valor del km adicional es demasiado alto' })
+  extraKmFee?: number;
+
+  @IsOptional()
+  @IsNumber({}, { message: 'El radio máximo debe ser un número' })
+  @Min(0.5, { message: 'El radio máximo debe ser de al menos 0,5 km' })
+  @Max(100, { message: 'El radio máximo es demasiado alto' })
+  maxDeliveryRadiusKm?: number;
 
   @IsOptional()
   @IsString()

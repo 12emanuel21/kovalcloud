@@ -10,9 +10,14 @@ interface BranchForm {
   address: string;
   phone: string;
   isMain: boolean;
+  latitude: string;
+  longitude: string;
 }
 
-const EMPTY_FORM: BranchForm = { name: '', address: '', phone: '', isMain: false };
+const EMPTY_FORM: BranchForm = { name: '', address: '', phone: '', isMain: false, latitude: '', longitude: '' };
+
+/** "10,98" o "10.98" -> 10.98; vacío -> null */
+const parseCoord = (value: string) => (value.trim() ? Number(value.trim().replace(',', '.')) : null);
 
 const inputClass =
   'w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition placeholder-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20';
@@ -43,7 +48,14 @@ export function BranchesSection() {
     setEditing(branch ? branch.id : 'new');
     setForm(
       branch
-        ? { name: branch.name, address: branch.address, phone: branch.phone ?? '', isMain: branch.isMain }
+        ? {
+            name: branch.name,
+            address: branch.address,
+            phone: branch.phone ?? '',
+            isMain: branch.isMain,
+            latitude: branch.latitude == null ? '' : String(branch.latitude),
+            longitude: branch.longitude == null ? '' : String(branch.longitude),
+          }
         : { ...EMPTY_FORM, isMain: branches.length === 0 },
     );
     setFeedback(null);
@@ -61,6 +73,13 @@ export function BranchesSection() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!base || !editing) return;
+    const latitude = parseCoord(form.latitude);
+    const longitude = parseCoord(form.longitude);
+    const badCoord = (v: number | null, max: number) => v !== null && (!Number.isFinite(v) || Math.abs(v) > max);
+    if ((latitude === null) !== (longitude === null) || badCoord(latitude, 90) || badCoord(longitude, 180)) {
+      setFeedback({ type: 'error', text: 'Escribe la latitud y la longitud de la sede (o deja ambas vacías).' });
+      return;
+    }
     setSaving(true);
     try {
       const isNew = editing === 'new';
@@ -72,6 +91,8 @@ export function BranchesSection() {
           address: form.address.trim(),
           phone: form.phone.trim() || null,
           isMain: form.isMain,
+          latitude,
+          longitude,
         }),
       });
       if (!res.ok) throw new Error(await branchApiError(res, 'No se pudo guardar la sede'));
@@ -188,6 +209,35 @@ export function BranchesSection() {
                 />
               </label>
             </div>
+            <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-400">Latitud (opcional)</span>
+                <input
+                  inputMode="decimal"
+                  value={form.latitude}
+                  onChange={(e) => {
+                    // Pegar "10.98, -74.80" de Google Maps llena los dos campos
+                    const pair = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(e.target.value);
+                    setForm(pair ? { ...form, latitude: pair[1], longitude: pair[2] } : { ...form, latitude: e.target.value });
+                  }}
+                  placeholder="Ej. 10.9878"
+                  className={inputClass}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-400">Longitud (opcional)</span>
+                <input
+                  inputMode="decimal"
+                  value={form.longitude}
+                  onChange={(e) => setForm({ ...form, longitude: e.target.value })}
+                  placeholder="Ej. -74.7889"
+                  className={inputClass}
+                />
+              </label>
+              <p className="col-span-2 text-[11px] text-slate-500">
+                Con coordenadas, los domicilios con ubicación del cliente salen de la sede más cercana y se cobran por distancia.
+              </p>
+            </div>
             <label className="flex items-start gap-2 text-sm text-slate-300">
               <input
                 type="checkbox"
@@ -255,6 +305,7 @@ export function BranchesSection() {
                   <p className="truncate text-xs text-slate-400">
                     {branch.address}
                     {branch.phone ? ` · ${branch.phone}` : ''}
+                    {branch.latitude != null && branch.longitude != null ? ' · 📍 Ubicada' : ''}
                   </p>
                 </div>
                 {!branch.isMain && branch.isActive && (

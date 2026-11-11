@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useDeliveryQuote } from './useDeliveryQuote';
+import { useDeliveryQuote, type CustomerCoords } from './useDeliveryQuote';
 import { usePickupBranches } from './usePickupBranches';
 import { useCart } from '@/context/CartContext';
 import { buildOrderWhatsAppMessage, toWhatsAppNumber, whatsappLink } from '@/lib/whatsapp';
@@ -188,13 +188,48 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const isDelivery = !tableNumber && fulfillment === 'DELIVERY';
   // Autorización de tratamiento de datos (Ley 1581): obligatoria para pedir
   const [acceptTerms, setAcceptTerms] = useState(false);
+  // Pin GPS del navegador ("Usar mi ubicación actual"): el envío se cobra por distancia
+  const [coords, setCoords] = useState<CustomerCoords | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   // Con zonas el barrio es obligatorio (define la tarifa); solo con tarifa estándar no hace falta
-  const { coverage, hasZones, quote, quoting, deliveryFee } = useDeliveryQuote(
+  const { coverage, hasZones, quote, quoting, deliveryFee, byDistance } = useDeliveryQuote(
     restaurantId,
     isOpen && isDelivery,
     neighborhood,
     deliveryAddress,
+    coords,
   );
+  // Con el pin cotizado por distancia, dirección y barrio pasan a ser opcionales
+  const needsNeighborhood = hasZones && !byDistance;
+
+  const requestMyLocation = () => {
+    setLocationError(null);
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocationError('Tu navegador no permite compartir la ubicación. Escribe tu dirección y barrio.');
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocating(false);
+        setCoords({
+          lat: Number(position.coords.latitude.toFixed(6)),
+          lng: Number(position.coords.longitude.toFixed(6)),
+        });
+        setErrorMsg(null);
+      },
+      (error) => {
+        setLocating(false);
+        setLocationError(
+          error.code === error.PERMISSION_DENIED
+            ? 'No diste permiso para usar tu ubicación. Escribe tu dirección y barrio.'
+            : 'No pudimos obtener tu ubicación. Inténtalo de nuevo o escribe tu dirección y barrio.',
+        );
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 },
+    );
+  };
   const outOfCoverage = isDelivery && quote?.isCovered === false;
   // Multisede: quien recoge elige la sede (por defecto la principal); con una sola no se pregunta
   const isPickup = !tableNumber && fulfillment === 'TAKEAWAY';
@@ -238,7 +273,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       setErrorMsg(`Quita ${joinNames(unavailableNames)} de tu pedido: ya no está disponible.`);
       return;
     }
-    if (isDelivery && hasZones && !neighborhood.trim()) {
+    if (isDelivery && needsNeighborhood && !neighborhood.trim()) {
       setErrorMsg('Escribe tu barrio para calcular el domicilio.');
       return;
     }
@@ -267,6 +302,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         customerPhone: customerPhone.trim(),
         deliveryAddress: isDelivery ? deliveryAddress.trim() || undefined : undefined,
         neighborhood: isDelivery ? neighborhood.trim() || undefined : undefined,
+        // Pin GPS: el backend cobra el envío por distancia (y el repartidor recibe el mapa exacto)
+        customerLat: isDelivery && coords ? coords.lat : undefined,
+        customerLng: isDelivery && coords ? coords.lng : undefined,
         acceptTerms,
         // Sede donde recoge; los domicilios los enruta el backend por la zona del barrio
         branchId: isPickup && pickupBranch ? pickupBranch.id : undefined,
@@ -329,6 +367,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         setDeliveryAddress('');
         setNeighborhood('');
         setNotes('');
+        setCoords(null);
       };
 
       // Pago en línea: a la pasarela de Wompi (vuelve a la carta con ?pedido=<id>).
@@ -356,6 +395,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               deliveryFee: createdOrder.deliveryFee,
               deliveryAddress: payload.deliveryAddress,
               neighborhood: payload.neighborhood,
+              coords: payload.customerLat !== undefined && payload.customerLng !== undefined ? { lat: payload.customerLat, lng: payload.customerLng } : undefined,
               pickup: payload.orderType === 'TAKEAWAY',
               pickupBranch: payload.orderType === 'TAKEAWAY' && pickupBranches.length > 1 ? pickupBranch?.name : undefined,
               tableNumber: payload.tableNumber,
@@ -746,32 +786,66 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   {isDelivery && (
                     <>
                       <div>
+                        <button
+                          type="button"
+                          onClick={requestMyLocation}
+                          disabled={locating}
+                          className={`w-full rounded-sf border px-3.5 py-2.5 text-sm font-semibold transition disabled:opacity-60 ${
+                            coords ? `border-sf-primary ${accent.text} bg-sf-bg` : 'border-sf-border text-sf-text hover:border-sf-muted'
+                          }`}
+                        >
+                          {locating ? 'Obteniendo tu ubicación...' : coords ? '📍 Ubicación lista · Actualizar' : '📍 Usar mi ubicación actual'}
+                        </button>
+                        <p className="mt-1.5 text-[11px] text-sf-muted" aria-live="polite">
+                          {locationError
+                            ? locationError
+                            : coords
+                              ? quoting
+                                ? 'Calculando el envío por distancia...'
+                                : quote?.isCovered && byDistance
+                                  ? `Distancia: ${quote.distanceKm!.toLocaleString('es-CO')} km · Envío: ${formatCOP(quote.deliveryFee)}`
+                                  : quote?.isCovered
+                                    ? 'Ubicación guardada para el repartidor.'
+                                    : null
+                              : 'Calculamos el envío exacto con tu ubicación. También puedes escribir tu dirección.'}
+                          {coords && (
+                            <button
+                              type="button"
+                              onClick={() => setCoords(null)}
+                              className="ml-2 font-semibold underline underline-offset-2"
+                            >
+                              Quitar
+                            </button>
+                          )}
+                        </p>
+                      </div>
+                      <div>
                         <label className="block text-xs font-medium text-sf-body mb-1">
-                          Dirección de Entrega {hasZones ? <span className={accent.text}>*</span> : '(Opcional)'}
+                          Dirección de Entrega {needsNeighborhood ? <span className={accent.text}>*</span> : '(Opcional)'}
                         </label>
                         <input
                           type="text"
                           value={deliveryAddress}
                           onChange={(e) => setDeliveryAddress(e.target.value)}
-                          placeholder="Ej. Cra 45 # 26-85 Apto 401"
-                          required={hasZones}
+                          placeholder={coords ? 'Ej. Apto 401, casa azul (referencia)' : 'Ej. Cra 45 # 26-85 Apto 401'}
+                          required={needsNeighborhood}
                           className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-sf-body mb-1">
-                          Barrio {hasZones ? <span className={accent.text}>*</span> : '(Opcional)'}
+                          Barrio {needsNeighborhood ? <span className={accent.text}>*</span> : '(Opcional)'}
                         </label>
                         <input
                           type="text"
                           value={neighborhood}
                           onChange={(e) => setNeighborhood(e.target.value)}
                           placeholder="Ej. Riomar"
-                          required={hasZones}
+                          required={needsNeighborhood}
                           autoComplete="address-level3"
                           className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                         />
-                        {hasZones && (
+                        {hasZones && !byDistance && (
                           <p className="mt-1.5 text-[11px] text-sf-muted" aria-live="polite">
                             {quoting
                               ? 'Calculando el domicilio...'
@@ -786,7 +860,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         )}
                         {outOfCoverage && (
                           <div className="mt-2 rounded-sf border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-sf-text">
-                            <p className="font-medium">Todavía no llegamos a {neighborhood.trim() || 'tu barrio'} con domicilio.</p>
+                            <p className="font-medium">
+                              {quote?.isCovered === false && quote.distanceKm !== undefined
+                                ? `Tu ubicación está a ${quote.distanceKm.toLocaleString('es-CO')} km y supera nuestro rango de domicilio${quote.maxRadius !== undefined ? ` (${quote.maxRadius.toLocaleString('es-CO')} km)` : ''}.`
+                                : `Todavía no llegamos a ${neighborhood.trim() || 'tu barrio'} con domicilio.`}
+                            </p>
                             <button
                               type="button"
                               onClick={() => {
@@ -851,7 +929,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     {formatCOP(grandTotal)}
                   </span>
                 </div>
-                {isDelivery && hasZones && !quote?.isCovered && !outOfCoverage && (
+                {isDelivery && needsNeighborhood && !quote?.isCovered && !outOfCoverage && (
                   <p className="text-[11px] text-sf-muted">El domicilio se calcula con tu barrio.</p>
                 )}
 

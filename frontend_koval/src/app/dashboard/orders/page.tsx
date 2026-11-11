@@ -60,6 +60,10 @@ interface Order {
   /** Sede que lo prepara (multisede); los eventos en vivo traen solo el id */
   branchId?: string | null;
   branch?: { name: string } | null;
+  /** Pin GPS del cliente y distancia con la que se cobró el envío */
+  customerLat?: number | null;
+  customerLng?: number | null;
+  deliveryDistanceKm?: number | null;
   items: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -456,6 +460,18 @@ export default function OrdersPage() {
               📍 {order.deliveryAddress}
             </p>
           ) : null}
+          {order.orderType !== 'DINE_IN' && order.customerLat != null && order.customerLng != null && (
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${order.customerLat},${order.customerLng}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-400 hover:text-sky-300"
+              title="Abrir el pin del cliente en Google Maps"
+            >
+              🗺️ Ver ubicación GPS
+              {order.deliveryDistanceKm != null ? ` · ${order.deliveryDistanceKm.toLocaleString('es-CO')} km` : ''}
+            </a>
+          )}
         </div>
 
         {/* Notas especiales */}

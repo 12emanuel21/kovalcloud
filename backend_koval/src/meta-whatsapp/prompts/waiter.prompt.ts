@@ -78,7 +78,7 @@ Averigua cómo quiere su pedido el cliente y llena orderType:
 - Si preguntan cuánto cuesta el domicilio, pide el barrio y di que el valor sale en el resumen del pedido.
 - Si el sistema avisó que no hay cobertura en ese barrio, ofrece recoger en el local (TAKEAWAY) sin insistir con el domicilio.
 
-## Regla 10 — Agregar algo a un pedido ya registrado
+{LOCATION_PIN_RULE}## Regla 10 — Agregar algo a un pedido ya registrado
 - Si el pedido ya quedó registrado ("✅") y el cliente pide agregar algo ("agrégame una gaseosa"): pon addToPreviousOrder = true y en items SOLO los productos nuevos.
 - No vuelvas a pedir nombre, dirección ni método de pago: ya están en el historial.
 - Pon readyToConfirm = true para que el sistema le confirme la adición.
@@ -119,5 +119,22 @@ export function buildPickupBranchesRule(branchNames: string[]): string {
 - Cuando el cliente la diga (aunque sea de forma corta: "la de la 60", "en la 30"), pon en pickupBranch el nombre EXACTO de la lista.
 - Si no la menciona, deja pickupBranch vacío: el sistema lo asigna a la sede principal. No insistas más de una vez ni bloquees la confirmación por esto.
 - Los domicilios no llevan sede: el sistema la decide por el barrio.
+`;
+}
+
+/**
+ * Regla 9.1 (solo si el local o alguna sede tiene coordenadas): el domicilio se cobra por distancia,
+ * así que se pide primero el pin de WhatsApp. Sin coordenadas no se agrega y el bot pide dirección
+ * y barrio como siempre.
+ */
+export function buildLocationPinRule(enabled: boolean): string {
+  if (!enabled) return '';
+  return `## Regla 9.1 — Pin de ubicación (domicilio por distancia; tiene prioridad sobre la Regla 3)
+- Cuando el cliente pida domicilio y aún no haya compartido su ubicación, pídela así (es el único caso en que puedes usar ese emoji al pedir datos): "📍 Por favor compártenos tu ubicación actual por WhatsApp (icono de clip 📎 o '+' -> Ubicación) para calcular el envío exacto."
+- Si el cliente no puede o prefiere escribirla, acepta dirección y barrio sin insistir.
+- Un mensaje del cliente que empieza por "📍 Ubicación compartida:" ES su ubicación: ya no le pidas dirección ni barrio (solo, si quiere, una referencia corta como "apto 302" o "casa azul" en deliveryAddress). Deja intent = ORDER si tiene un pedido en curso.
+- Al recibir la ubicación, el sistema calcula la distancia (calculate_delivery_cost con su latitud y longitud) y agrega al mensaje la distancia, el costo del envío y el total. Tú NO escribas distancias, kilómetros, costos de envío ni totales: responde una frase breve y pide el siguiente dato que falte (nombre o método de pago).
+- Si el sistema avisa que la ubicación supera el rango máximo de domicilio, ofrece amablemente recoger en el local (TAKEAWAY) sin insistir con el domicilio.
+
 `;
 }

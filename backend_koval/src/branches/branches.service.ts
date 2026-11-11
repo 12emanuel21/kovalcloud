@@ -9,8 +9,33 @@ const branchSelect = {
   phone: true,
   isMain: true,
   isActive: true,
+  latitude: true,
+  longitude: true,
+  baseDeliveryFee: true,
+  baseDeliveryKm: true,
+  extraKmFee: true,
+  maxDeliveryRadiusKm: true,
   createdAt: true,
 } as const;
+
+type BranchGeoInput = Pick<
+  CreateBranchDto,
+  'latitude' | 'longitude' | 'baseDeliveryFee' | 'baseDeliveryKm' | 'extraKmFee' | 'maxDeliveryRadiusKm'
+>;
+
+/** Coordenadas y tarifa propia de la sede: solo los campos enviados (null = quitar) */
+function branchGeoData(dto: BranchGeoInput) {
+  const km = (value: number | null) => (value === null ? null : Math.round(value * 10) / 10);
+  const pesos = (value: number | null) => (value === null ? null : Math.round(value));
+  return {
+    ...(dto.latitude !== undefined ? { latitude: dto.latitude } : {}),
+    ...(dto.longitude !== undefined ? { longitude: dto.longitude } : {}),
+    ...(dto.baseDeliveryFee !== undefined ? { baseDeliveryFee: pesos(dto.baseDeliveryFee) } : {}),
+    ...(dto.baseDeliveryKm !== undefined ? { baseDeliveryKm: km(dto.baseDeliveryKm) } : {}),
+    ...(dto.extraKmFee !== undefined ? { extraKmFee: pesos(dto.extraKmFee) } : {}),
+    ...(dto.maxDeliveryRadiusKm !== undefined ? { maxDeliveryRadiusKm: km(dto.maxDeliveryRadiusKm) } : {}),
+  };
+}
 
 const cleanPhone = (phone: string | null | undefined) => (phone === undefined ? undefined : phone?.trim() || null);
 
@@ -51,7 +76,7 @@ export class BranchesService {
     return this.prisma.$transaction(async (tx) => {
       if (isMain) await tx.branch.updateMany({ where: { restaurantId, isMain: true }, data: { isMain: false } });
       return tx.branch.create({
-        data: { restaurantId, name, address, phone: cleanPhone(dto.phone) ?? null, isMain },
+        data: { restaurantId, name, address, phone: cleanPhone(dto.phone) ?? null, isMain, ...branchGeoData(dto) },
         select: branchSelect,
       });
     });
@@ -76,7 +101,14 @@ export class BranchesService {
       }
       return tx.branch.update({
         where: { id: branchId },
-        data: { name, address, phone: cleanPhone(dto.phone), isActive: dto.isActive, isMain: willBeMain },
+        data: {
+          name,
+          address,
+          phone: cleanPhone(dto.phone),
+          isActive: dto.isActive,
+          isMain: willBeMain,
+          ...branchGeoData(dto),
+        },
         select: branchSelect,
       });
     });

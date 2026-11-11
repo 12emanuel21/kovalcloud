@@ -23,6 +23,14 @@ export interface IncomingMedia {
  * Sube un adjunto entrante al backend (POST /internal/whatsapp/media). Devuelve la referencia que
  * viaja en el webhook (así el webhook sigue siendo un JSON pequeño), o null si se rechazó.
  */
+/** Ubicación compartida por WhatsApp (locationMessage / liveLocationMessage) */
+export interface IncomingLocation {
+    latitude: number;
+    longitude: number;
+    name?: string;
+    address?: string;
+}
+
 export async function uploadMediaToNestjs(
     restaurantId: string,
     buffer: Buffer,
@@ -57,6 +65,8 @@ export async function sendToNestjs(
     messageId: string,
     pushName?: string,
     media?: IncomingMedia | null,
+    /** Pin de ubicación compartido por el cliente */
+    location?: IncomingLocation | null,
 ) {
     try {
         const cleanSender = senderId.startsWith(LID_PREFIX)
@@ -84,7 +94,13 @@ export async function sendToNestjs(
                             from: cleanSender,
                             id: messageId,
                             timestamp: Math.floor(Date.now() / 1000).toString(),
-                            ...(media
+                            ...(location
+                                ? {
+                                    // Igual que Meta: { type: "location", location: { latitude, longitude, name, address } }
+                                    type: "location",
+                                    location,
+                                }
+                                : media
                                 ? {
                                     // Igual que Meta: { type: "image", image: { id, mime_type, caption } }
                                     type: media.type,

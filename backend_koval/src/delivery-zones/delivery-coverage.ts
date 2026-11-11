@@ -29,8 +29,20 @@ export type DeliveryQuote =
       coverageConfigured: boolean;
       /** Sede de la zona encontrada (solo si la zona tiene sede asignada) */
       branchId?: string | null;
+      /** Cotización por distancia (pin GPS): km viales estimados y sede de origen */
+      distanceKm?: number;
+      branchName?: string | null;
     }
-  | { isCovered: false; deliveryFee: 0; fallback: 'TAKEAWAY'; coverageConfigured: true };
+  | {
+      isCovered: false;
+      deliveryFee: 0;
+      fallback: 'TAKEAWAY';
+      coverageConfigured: true;
+      /** Por distancia: km al local más cercano y radio máximo que se superó */
+      distanceKm?: number;
+      maxRadius?: number;
+      branchId?: string | null;
+    };
 
 export const DEFAULT_FEE_ZONE_NAME = 'Tarifa general';
 

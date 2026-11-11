@@ -21,6 +21,7 @@ import { BOT_PAUSED_MARKER, getHandoverState } from '../chats/handover';
 import { ChatQueue } from './chat-queue';
 import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService, PRIVACY_NOTICE, withPrivacyNotice } from '../customers/customers.service';
+import { isValidGeoPoint } from '../delivery-zones/distance/distance-calculator.interface';
 import { activeBranchesOf, mainBranchOf, matchBranchByName, resolveOrderBranchId } from '../branches/branch-routing';
 import { activeSessionHistory } from './chat-session';
 import { isHttpUrl, menuLinkReply, menuWebUrl, withMenuLink } from './menu-link';
@@ -42,6 +43,10 @@ import {
   buildAddOnConfirmationMessage,
   buildAddOnRegisteredMessage,
   buildConfirmationMessage,
+  buildDistanceQuoteMessage,
+  formatSharedLocation,
+  latestSharedLocation,
+  parseSharedLocation,
   buildOrderStatusMessage,
   buildOutOfCoverageMessage,
   buildWebOrderReceivedMessage,
@@ -71,8 +76,12 @@ function baileysSendUrl(restaurantId: string): string {
   return `${base}/sessions/${encodeURIComponent(restaurantId)}/send`;
 }
 
-/** Texto de un mensaje entrante sin transcribir audio (texto, captions o botones) */
+/** Texto de un mensaje entrante sin transcribir audio (texto, captions, botones o ubicación) */
 function extractPlainText(msg: any): string {
+  // Pin de ubicación (Meta: type "location"; Baileys lo reenvía igual): texto legible con coordenadas
+  const lat = Number(msg?.location?.latitude);
+  const lng = Number(msg?.location?.longitude);
+  if (msg?.location && Number.isFinite(lat) && Number.isFinite(lng)) return formatSharedLocation(lat, lng);
   return (
     msg?.text?.body ||
     msg?.image?.caption ||
@@ -950,8 +959,16 @@ export class MetaWhatsAppService {
       // Multisede: con más de una sede activa la IA pregunta en cuál recoge (TAKEAWAY)
       const branches = await activeBranchesOf(this.prisma, restaurant.id);
       const pickupBranchNames = branches.length > 1 ? branches.map((b) => b.name ?? '').filter(Boolean) : [];
-      const aiOptions: [] | [{ pickupBranches: string[] }] =
-        pickupBranchNames.length > 1 ? [{ pickupBranches: pickupBranchNames }] : [];
+      // Domicilio por distancia: el local o alguna sede tiene coordenadas -> se pide el pin de WhatsApp
+      const distancePricing = [restaurant, ...branches].some((place) =>
+        isValidGeoPoint({ lat: place.latitude ?? undefined, lng: place.longitude ?? undefined }),
+      );
+      const aiExtras = {
+        ...(pickupBranchNames.length > 1 ? { pickupBranches: pickupBranchNames } : {}),
+        ...(distancePricing ? { distancePricing } : {}),
+      };
+      // Sin sedes ni motor por distancia la IA se llama exactamente como antes
+      const aiOptions: [] | [typeof aiExtras] = Object.keys(aiExtras).length > 0 ? [aiExtras] : [];
 
       let aiResult: OrderIntent;
       try {
@@ -1017,7 +1034,11 @@ export class MetaWhatsAppService {
             toPrismaOrderType(aiResult) === OrderType.TAKEAWAY && branches.length > 1
               ? (matchBranchByName(branches, aiResult.pickupBranch) ?? mainBranchOf(branches))
               : null;
-          const complete = hasRequiredData(aiResult, lines);
+          // Pin de WhatsApp (en este mensaje o antes en la sesión): el envío se cobra por distancia
+          const customerCoords = latestSharedLocation(messageText, chatHistory);
+          const isLocationMessage = Boolean(parseSharedLocation(messageText));
+          const coordsArg: [] | [{ lat: number; lng: number }] = customerCoords ? [customerCoords] : [];
+          const complete = hasRequiredData(aiResult, lines, Boolean(customerCoords));
           // Domicilio/recoger no se confirman sin saber si paga en efectivo o por transferencia
           const missingPaymentMethod = complete && needsPaymentMethod(aiResult) && !aiResult.paymentMethod;
           // Domicilio: zona de cobertura y flete según el barrio (o la dirección); recoger y mesa: null
@@ -1028,12 +1049,13 @@ export class MetaWhatsAppService {
                   toPrismaOrderType(aiResult),
                   aiResult.neighborhood,
                   aiResult.deliveryAddress,
+                  ...coordsArg,
                 )
               : null;
 
           if (quote && !quote.isCovered) {
-            // 6.00. Fuera de cobertura (o falta el barrio): no se confirma; se ofrece recoger
-            finalResponse = buildOutOfCoverageMessage(aiResult);
+            // 6.00. Fuera de cobertura o del radio máximo (o falta el barrio): no se confirma; se ofrece recoger
+            finalResponse = buildOutOfCoverageMessage(aiResult, quote);
           } else if (missingPaymentMethod && (aiResult.readyToConfirm || aiResult.customerConfirmed)) {
             // 6.0. La IA dio el pedido por listo sin el método de pago: se pregunta antes del resumen
             finalResponse = withPaymentMethodQuestion(aiResult, aiResult.responseToUser);
@@ -1080,7 +1102,12 @@ export class MetaWhatsAppService {
                   customerId: customer?.id,
                   channel: 'WHATSAPP',
                   orderType: toPrismaOrderType(aiResult),
-                  deliveryAddress: isDelivery ? aiResult.deliveryAddress?.trim() : undefined,
+                  deliveryAddress: isDelivery
+                    ? aiResult.deliveryAddress?.trim() || (customerCoords ? 'Ubicación compartida por WhatsApp' : undefined)
+                    : undefined,
+                  // Pin del cliente y distancia con la que se cobró el envío (el repartidor va con el mapa)
+                  ...(isDelivery && customerCoords ? { customerLat: customerCoords.lat, customerLng: customerCoords.lng } : {}),
+                  ...(quote?.isCovered && quote.distanceKm !== undefined ? { deliveryDistanceKm: quote.distanceKm } : {}),
                   neighborhood: isDelivery ? aiResult.neighborhood?.trim() || undefined : undefined,
                   notes: buildOrderNotes(aiResult, lines),
                   subtotal,
@@ -1118,6 +1145,17 @@ export class MetaWhatsAppService {
           } else if (complete && aiResult.readyToConfirm) {
             // 6.2. Datos completos: pedir confirmación con el total exacto (aún NO se crea el pedido)
             finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines, quote, pickupBranch?.name)}`.trim();
+          } else if (isLocationMessage && customerCoords && toPrismaOrderType(aiResult) === OrderType.DELIVERY) {
+            // 6.25. Acaba de compartir su ubicación: distancia y costo del envío de una vez
+            const pinQuote = await this.deliveryZones.quoteForOrder(
+              restaurant.id,
+              OrderType.DELIVERY,
+              aiResult.neighborhood,
+              aiResult.deliveryAddress,
+              customerCoords,
+            );
+            const pinMessage = pinQuote ? buildDistanceQuoteMessage(pinQuote, orderTotal(lines)) : null;
+            if (pinMessage) finalResponse = `${aiResult.responseToUser}\n\n${pinMessage}`.trim();
           }
           // 6.3. Si faltan datos, la respuesta de la IA ya está pidiendo lo que falta
         }

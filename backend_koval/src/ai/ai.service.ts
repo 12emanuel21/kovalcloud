@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { generateObject, generateText, ModelMessage } from 'ai';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
-import { buildPickupBranchesRule, WAITER_SYSTEM_PROMPT } from '../meta-whatsapp/prompts/waiter.prompt';
+import { buildLocationPinRule, buildPickupBranchesRule, WAITER_SYSTEM_PROMPT } from '../meta-whatsapp/prompts/waiter.prompt';
 import { RESTAURANT_TIMEZONE } from '../restaurants/business-hours';
 
 
@@ -136,8 +136,11 @@ export class AiService {
     menuContext: string,
     chatHistory: Array<{ role: string; message: string }> = [],
     restaurantName: string = 'nuestro restaurante',
-    /** Marcas con varias sedes: nombres de las sedes activas (para preguntar dónde recoge) */
-    options: { pickupBranches?: string[] } = {},
+    /**
+     * pickupBranches: marcas con varias sedes (para preguntar dónde recoge).
+     * distancePricing: el local está ubicado y cobra el domicilio por distancia (se pide el pin).
+     */
+    options: { pickupBranches?: string[]; distancePricing?: boolean } = {},
   ): Promise<OrderIntent> {
     this.logger.log('Parsing order intent for message: ' + userMessage);
 
@@ -157,6 +160,7 @@ export class AiService {
         .replace('{RESTAURANT_NAME}', restaurantName)
         .replace('{DAY_PART}', dayPart)
         .replace('{PICKUP_BRANCHES_RULE}', buildPickupBranchesRule(options.pickupBranches ?? []))
+        .replace('{LOCATION_PIN_RULE}', buildLocationPinRule(Boolean(options.distancePricing)))
         .replace('{MENU}', menuContext),
       messages: [
         ...historyMessages,

@@ -13,6 +13,9 @@ export interface Branch {
   phone: string | null;
   isMain: boolean;
   isActive: boolean;
+  /** Coordenadas: el domicilio por distancia sale de la sede más cercana al cliente */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 /** Mensaje legible de un error de la API (ValidationPipe devuelve message como arreglo) */

@@ -26,6 +26,7 @@ import { buildOrdersWorkbook, exportFilename, resolveExportRange } from './order
 import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService } from '../customers/customers.service';
 import { resolveOrderBranchId } from '../branches/branch-routing';
+import { formatKm } from '../delivery-zones/distance/delivery-pricing.service';
 
 /**
  * Confirmación inicial por WhatsApp. Con `paymentUrl` adjunta el link de pago (plan B si el cliente
@@ -90,6 +91,8 @@ export class OrdersService {
       items,
       paymentMethod,
       branchId: requestedBranchId,
+      customerLat,
+      customerLng,
     } = createOrderDto;
     // Endpoint público: `status` y `unitPrice` del cliente se ignoran.
     // El pedido nace PENDING y los precios salen siempre de la base de datos.
@@ -175,14 +178,21 @@ export class OrdersService {
 
     // 3.5. Domicilio: flete según la zona de cobertura del barrio (recoger y mesa no pagan envío).
     //      Fuera de cobertura no se crea el pedido: la carta ofrece recoger en el local.
-    const quote = await this.deliveryZones.quoteForOrder(restaurantId, orderType, neighborhood, deliveryAddress);
+    //      Con pin GPS del cliente y el local ubicado, por distancia (la sede más cercana).
+    const coords =
+      typeof customerLat === 'number' && typeof customerLng === 'number' ? { lat: customerLat, lng: customerLng } : null;
+    const quote = await this.deliveryZones.quoteForOrder(restaurantId, orderType, neighborhood, deliveryAddress, coords);
     if (quote && !quote.isCovered) {
       throw new BadRequestException({
         statusCode: 400,
         error: 'Bad Request',
         code: 'OUT_OF_COVERAGE',
-        message: 'Todavía no llegamos a tu barrio con domicilio. Puedes pedirlo para recoger en el local.',
+        message:
+          quote.distanceKm !== undefined && quote.maxRadius !== undefined
+            ? `Tu ubicación está a ${formatKm(quote.distanceKm)} km y supera nuestro rango de domicilio (${formatKm(quote.maxRadius)} km). Puedes pedirlo para recoger en el local.`
+            : 'Todavía no llegamos a tu barrio con domicilio. Puedes pedirlo para recoger en el local.',
         fallback: quote.fallback,
+        ...(quote.distanceKm !== undefined ? { distanceKm: quote.distanceKm, maxRadius: quote.maxRadius } : {}),
       });
     }
     const deliveryFee = quote?.deliveryFee ?? 0;
@@ -231,6 +241,11 @@ export class OrdersService {
           total: calculatedTotal + deliveryFee,
           deliveryZoneId: quote?.isCovered ? quote.zoneId : null,
           ...(branchId ? { branchId } : {}),
+          // Pin del cliente (solo domicilios) y distancia con la que se cobró el envío
+          ...(coords && orderType !== OrderType.TAKEAWAY && orderType !== OrderType.DINE_IN
+            ? { customerLat: coords.lat, customerLng: coords.lng }
+            : {}),
+          ...(quote?.isCovered && quote.distanceKm !== undefined ? { deliveryDistanceKm: quote.distanceKm } : {}),
           // WOMPI se reemplaza por el método real (NEQUI, CARD...) cuando llega el webhook
           paymentMethod: payOnline ? 'WOMPI' : 'CASH',
           items: {

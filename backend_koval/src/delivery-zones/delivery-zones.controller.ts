@@ -53,13 +53,19 @@ export class DeliveryCoverageController {
     return this.zones.publicCoverage(restaurantId);
   }
 
-  /** ?neighborhood=Riomar&address=Cra 52 # 76-10 */
+  /**
+   * ?neighborhood=Riomar&address=Cra 52 # 76-10
+   * ?lat=10.98&lng=-74.80 (botón "Usar mi ubicación actual"): por distancia si el local tiene coordenadas
+   */
   @Get('quote')
   quote(
     @Param('id') restaurantId: string,
     @Query('neighborhood') neighborhood?: string,
     @Query('address') address?: string,
+    @Query('lat') lat?: string,
+    @Query('lng') lng?: string,
   ) {
-    return this.zones.calculateDeliveryFee(restaurantId, neighborhood?.slice(0, 200), address?.slice(0, 300));
+    const coords = lat !== undefined && lng !== undefined ? { lat: Number(lat), lng: Number(lng) } : null;
+    return this.zones.quote(restaurantId, { neighborhood: neighborhood?.slice(0, 200), address: address?.slice(0, 300) }, coords);
   }
 }

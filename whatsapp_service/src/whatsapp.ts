@@ -238,6 +238,17 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
         content?.documentMessage?.caption ||
         content?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
         '';
+      // Pin de ubicación (fija o en tiempo real): se reenvía como el type "location" de Meta
+      const pin = content?.locationMessage ?? content?.liveLocationMessage;
+      const location =
+        pin && Number.isFinite(Number(pin.degreesLatitude)) && Number.isFinite(Number(pin.degreesLongitude))
+          ? {
+              latitude: Number(pin.degreesLatitude),
+              longitude: Number(pin.degreesLongitude),
+              name: (content?.locationMessage?.name as string | undefined) || undefined,
+              address: (content?.locationMessage?.address as string | undefined) || undefined,
+            }
+          : null;
       const hasMedia = Boolean(
         content?.imageMessage ||
           content?.documentMessage ||
@@ -248,14 +259,16 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
       );
 
       // Antes se descartaba todo lo que no traía texto (fotos sin texto, comprobantes, notas de voz)
-      if (!messageText.trim() && !hasMedia) continue;
+      if (!messageText.trim() && !hasMedia && !location) continue;
 
       // Número real del cliente; "lid:<id>" si WhatsApp no lo comparte (nunca los dígitos del LID
       // como si fueran un teléfono)
       const senderId = senderIdFor(msg.key as IncomingKey, session.lids);
       const pushName = msg.pushName || 'Cliente WhatsApp';
 
-      console.log(`📩 ${tag} Mensaje recibido de ${pushName} (${senderId}): "${messageText}"`);
+      console.log(
+        `📩 ${tag} Mensaje recibido de ${pushName} (${senderId}): ${location ? `📍 (${location.latitude}, ${location.longitude})` : `"${messageText}"`}`,
+      );
 
       try {
         await sock.sendPresenceUpdate('composing', remoteJid);
@@ -263,7 +276,7 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
         const messageId = msg.key.id || `baileys_${Date.now()}`;
         const media = hasMedia ? await extractIncomingMedia(sock, restaurantId, msg) : null;
         // Reenvío al adaptador de NestJS emulando Meta Cloud API
-        await sendToNestjs(restaurantId, senderId, messageText, messageId, pushName, media);
+        await sendToNestjs(restaurantId, senderId, messageText, messageId, pushName, media, location);
 
         await sock.sendPresenceUpdate('paused', remoteJid);
       } catch (err) {

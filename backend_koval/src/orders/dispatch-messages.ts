@@ -22,6 +22,9 @@ export interface DispatchOrder {
   total: number;
   paymentStatus: string;
   items: Array<{ quantity: number; menuItem: { name: string } | null }>;
+  /** Pin GPS del cliente (carta web o ubicación de WhatsApp): mapa exacto para el repartidor */
+  customerLat?: number | null;
+  customerLng?: number | null;
 }
 
 /** Sin minutos: la franja típica de un domicilio */
@@ -65,7 +68,12 @@ export function buildDriverDispatchMessage(order: DispatchOrder, driver: Dispatc
       ? '💬 El cliente escribió sin número visible: coordina con el local.'
       : `💬 Escríbele: ${waLink(order.customerPhone, toCustomer)}`,
     `📍 Dirección: ${address || 'Sin dirección (confirmar con el cliente)'}`,
-    ...(address ? [`🗺️ ${`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`}`] : []),
+    // Con pin GPS, el mapa va a las coordenadas exactas; si no, a la búsqueda de la dirección
+    ...(typeof order.customerLat === 'number' && typeof order.customerLng === 'number'
+      ? [`🗺️ https://www.google.com/maps/search/?api=1&query=${order.customerLat},${order.customerLng}`]
+      : address
+        ? [`🗺️ ${`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`}`]
+        : []),
     '',
     '🧾 Pedido:',
     ...order.items.map((item) => `• ${item.quantity}x ${item.menuItem?.name ?? 'Producto'}`),

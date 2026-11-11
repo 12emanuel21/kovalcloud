@@ -71,6 +71,8 @@ export interface OrderWhatsAppDetails {
   deliveryFee?: number;
   deliveryAddress?: string;
   neighborhood?: string;
+  /** Pin GPS del cliente: enlace al mapa para el local */
+  coords?: { lat: number; lng: number };
   /** Pasa a recoger en el local */
   pickup?: boolean;
   /** Sede donde recoge (marcas con varias sedes) */
@@ -92,6 +94,9 @@ export function buildOrderWhatsAppMessage(order: OrderWhatsAppDetails): string {
   else if (order.pickup) lines.push(order.pickupBranch ? `Para recoger en la sede ${order.pickupBranch}` : 'Para recoger en el local');
   else if (order.deliveryAddress || order.neighborhood) {
     lines.push(`Dirección: ${[order.deliveryAddress, order.neighborhood].filter(Boolean).join(', ')}`);
+  }
+  if (!order.tableNumber && !order.pickup && order.coords) {
+    lines.push(`Ubicación: https://www.google.com/maps?q=${order.coords.lat},${order.coords.lng}`);
   }
   if (order.deliveryFee) lines.push(`Domicilio: ${formatCOP(order.deliveryFee)}`);
   if (order.notes) lines.push(`Notas: ${order.notes}`);

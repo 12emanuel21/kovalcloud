@@ -4,6 +4,8 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsLatitude,
+  IsLongitude,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -67,6 +69,15 @@ export class CreateOrderDto {
   @IsOptional()
   @MaxLength(120)
   neighborhood?: string;
+
+  /** Pin GPS del cliente ("Usar mi ubicación actual"): el envío se cobra por distancia */
+  @IsOptional()
+  @IsLatitude({ message: 'La latitud no es válida' })
+  customerLat?: number;
+
+  @IsOptional()
+  @IsLongitude({ message: 'La longitud no es válida' })
+  customerLng?: number;
 
   /** Sede elegida para recoger (o la mesa); los domicilios se enrutan por la zona del barrio */
   @IsOptional()

@@ -76,6 +76,14 @@ model Restaurant {
   paymentDetails      String?
   // Tarifa plana de domicilio en COP (ej. 15000): se cobra cuando el barrio no está en ninguna zona
   defaultDeliveryFee  Float?
+  // Domicilio por distancia (pin GPS): coordenadas del local y tarifa escalonada por km.
+  // Sin coordenadas el motor no se usa y aplican las zonas / la tarifa estándar.
+  latitude            Float?
+  longitude           Float?
+  baseDeliveryFee     Float     @default(4000)
+  baseDeliveryKm      Float     @default(2.0)
+  extraKmFee          Float     @default(1500)
+  maxDeliveryRadiusKm Float     @default(8.0)
   businessHours       Json?
   isTemporarilyClosed Boolean   @default(false)
   closedMessage       String?
@@ -194,6 +202,10 @@ model Order {
   total           Float
   // Barrio del domicilio y zona de cobertura con la que se cobró el envío
   neighborhood    String?
+  // Pin GPS del cliente (carta web o ubicación de WhatsApp) y distancia vial estimada al local
+  customerLat        Float?
+  customerLng        Float?
+  deliveryDistanceKm Float?
   deliveryZoneId  String?
   deliveryZone    DeliveryZone? @relation(fields: [deliveryZoneId], references: [id], onDelete: SetNull)
   customerId      String?
@@ -363,6 +375,14 @@ model Branch {
   phone        String?
   isMain       Boolean    @default(false)
   isActive     Boolean    @default(true)
+  // Domicilio por distancia: el pedido sale de la sede más cercana con coordenadas.
+  // Tarifa propia opcional: null = la tarifa por distancia de la marca (Restaurant)
+  latitude            Float?
+  longitude           Float?
+  baseDeliveryFee     Float?
+  baseDeliveryKm      Float?
+  extraKmFee          Float?
+  maxDeliveryRadiusKm Float?
 
   orders        Order[]
   deliveryZones DeliveryZone[]

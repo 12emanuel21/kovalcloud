@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { SettingsCardHeader, SettingsFeedback, primaryButtonClass, settingsCardClass } from './settings-ui';
 import { branchNameOf, useBranches } from './useBranches';
 import { BranchSelect } from './BranchSelect';
+import { DistancePricingCard } from './DistancePricingCard';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
 
@@ -166,6 +167,7 @@ export function DeliveryZonesSection() {
 
   return (
     <div className="space-y-6">
+      <DistancePricingCard />
       <DefaultDeliveryFeeCard onChange={setDefaultFee} />
       <section className={settingsCardClass}>
         <SettingsCardHeader

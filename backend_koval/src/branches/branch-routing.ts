@@ -8,6 +8,9 @@ export interface RoutableBranch {
   isMain: boolean;
   /** Para emparejar la sede que dice el cliente por WhatsApp */
   name?: string;
+  /** Coordenadas (domicilio por distancia) */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface BranchRoutingInput {
@@ -48,7 +51,7 @@ type BranchFinder = {
   branch: {
     findMany(args: {
       where: { restaurantId: string; isActive: true };
-      select: { id: true; isMain: true; name: true };
+      select: { id: true; isMain: true; name: true; latitude: true; longitude: true };
     }): Promise<RoutableBranch[]>;
   };
 };
@@ -64,7 +67,7 @@ export async function activeBranchesOf(prisma: BranchFinder, restaurantId: strin
     return (
       (await prisma.branch.findMany({
         where: { restaurantId, isActive: true },
-        select: { id: true, isMain: true, name: true },
+        select: { id: true, isMain: true, name: true, latitude: true, longitude: true },
       })) ?? []
     );
   } catch (error: any) {

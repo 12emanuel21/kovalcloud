@@ -117,6 +117,22 @@ function toRestaurantResponse<T extends { users: { role: Role }[] }>(restaurant:
   });
 }
 
+/** Tarifa por distancia limpia: pesos enteros y km a 1 decimal (solo los campos enviados) */
+export function distancePricingData(dto: {
+  baseDeliveryFee?: number;
+  baseDeliveryKm?: number;
+  extraKmFee?: number;
+  maxDeliveryRadiusKm?: number;
+}) {
+  const km = (value: number) => Math.round(value * 10) / 10;
+  return {
+    ...(dto.baseDeliveryFee !== undefined ? { baseDeliveryFee: Math.round(dto.baseDeliveryFee) } : {}),
+    ...(dto.baseDeliveryKm !== undefined ? { baseDeliveryKm: km(dto.baseDeliveryKm) } : {}),
+    ...(dto.extraKmFee !== undefined ? { extraKmFee: Math.round(dto.extraKmFee) } : {}),
+    ...(dto.maxDeliveryRadiusKm !== undefined ? { maxDeliveryRadiusKm: km(dto.maxDeliveryRadiusKm) } : {}),
+  };
+}
+
 @Injectable()
 export class RestaurantsService {
   private readonly logger = new Logger(RestaurantsService.name);
@@ -327,6 +343,10 @@ export class RestaurantsService {
           updateRestaurantDto.defaultDeliveryFee === undefined
             ? undefined
             : Math.round(updateRestaurantDto.defaultDeliveryFee ?? 0) || null,
+        // Domicilio por distancia: undefined = no se toca; coordenadas null = se apaga el motor
+        latitude: updateRestaurantDto.latitude,
+        longitude: updateRestaurantDto.longitude,
+        ...distancePricingData(updateRestaurantDto),
         botpressBotId: updateRestaurantDto.botpressBotId,
         theme: updateRestaurantDto.theme,
         menuColorMode: updateRestaurantDto.menuColorMode,

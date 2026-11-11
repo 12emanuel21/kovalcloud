@@ -2,6 +2,8 @@ import { formatDailyNumber } from '../orders/daily-number';
 import { OrderType } from '@prisma/client';
 import type { OrderIntent } from '../ai/ai.service';
 import type { DeliveryQuote } from '../delivery-zones/delivery-coverage';
+import { formatKm } from '../delivery-zones/distance/delivery-pricing.service';
+import { isValidGeoPoint, type GeoPoint } from '../delivery-zones/distance/distance-calculator.interface';
 
 export interface MenuItemRef {
   id: string;
@@ -27,8 +29,61 @@ export const DELIVERY_FEE_NOTE = 'El valor del domicilio, si aplica, se suma seg
 /** Flete que se cobra con el pedido (0 si no es domicilio o el local no configuró zonas) */
 export const deliveryFeeOf = (quote: DeliveryQuote | null | undefined) => (quote?.isCovered ? quote.deliveryFee : 0);
 
+/**
+ * Ubicación compartida por WhatsApp (pin nativo, Meta o Baileys): se guarda en el chat con este
+ * texto legible y de ahí se recuperan las coordenadas al cotizar y al registrar el pedido.
+ */
+export const SHARED_LOCATION_PREFIX = '📍 Ubicación compartida:';
+
+export function formatSharedLocation(lat: number, lng: number): string {
+  return `${SHARED_LOCATION_PREFIX} (${Number(lat.toFixed(6))}, ${Number(lng.toFixed(6))})`;
+}
+
+/** Coordenadas de un mensaje "📍 Ubicación compartida: (lat, lng)"; null si no lo es */
+export function parseSharedLocation(text: string | null | undefined): GeoPoint | null {
+  const match = /📍 Ubicación compartida: \((-?\d+(?:\.\d+)?), (-?\d+(?:\.\d+)?)\)/.exec(text ?? '');
+  if (!match) return null;
+  const point = { lat: Number(match[1]), lng: Number(match[2]) };
+  return isValidGeoPoint(point) ? point : null;
+}
+
+/** Última ubicación que el cliente compartió en la sesión (el mensaje actual primero) */
+export function latestSharedLocation(
+  currentMessage: string,
+  history: Array<{ role: string; message: string }>,
+): GeoPoint | null {
+  const current = parseSharedLocation(currentMessage);
+  if (current) return current;
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role !== 'user') continue;
+    const point = parseSharedLocation(history[i].message);
+    if (point) return point;
+  }
+  return null;
+}
+
+/**
+ * Envío calculado al recibir el pin (antes del resumen final):
+ * distancia, costo y, si ya hay productos, subtotal + envío = total.
+ */
+export function buildDistanceQuoteMessage(quote: DeliveryQuote, subtotal: number): string | null {
+  if (quote.distanceKm === undefined) return null;
+  if (!quote.isCovered) {
+    const radius = quote.maxRadius !== undefined ? ` (${formatKm(quote.maxRadius)} km)` : '';
+    return `Tu ubicación está a ${formatKm(quote.distanceKm)} km y supera nuestro rango máximo de domicilio${radius}. ¿Quieres pedirlo para recoger en el local?`;
+  }
+  const lines = [`🛵 Distancia calculada: ${formatKm(quote.distanceKm)} km`, `💵 Costo de envío: ${money(quote.deliveryFee)} COP`];
+  if (subtotal > 0) {
+    lines.push(`Subtotal: ${money(subtotal)} + Envío: ${money(quote.deliveryFee)} = Total: ${money(subtotal + quote.deliveryFee)}`);
+  }
+  return lines.join('\n');
+}
+
 /** Domicilio fuera de las zonas del local: se ofrece recoger (o se pide el barrio si no lo dijo) */
-export function buildOutOfCoverageMessage(ai: OrderIntent): string {
+export function buildOutOfCoverageMessage(ai: OrderIntent, quote?: DeliveryQuote | null): string {
+  // Por distancia (pin GPS): se dice cuánto supera el rango
+  const byDistance = quote && !quote.isCovered ? buildDistanceQuoteMessage(quote, 0) : null;
+  if (byDistance) return byDistance;
   const place = ai.neighborhood?.trim();
   if (!place) return '¿En qué barrio queda la dirección? Así te confirmo el valor del domicilio.';
   return `Por ahora no tenemos cobertura de domicilio en ${place}. ¿Quieres pedirlo para recoger en el local?`;
@@ -82,10 +137,11 @@ export function isReservation(ai: OrderIntent): boolean {
  * ¿Están todos los datos para pedir confirmación (o crear el pedido)?
  * Lo decide el backend además del flag de la IA, para no confirmar pedidos incompletos.
  */
-export function hasRequiredData(ai: OrderIntent, lines: OrderLine[]): boolean {
+export function hasRequiredData(ai: OrderIntent, lines: OrderLine[], hasSharedLocation = false): boolean {
   switch (ai.orderType) {
     case 'DELIVERY':
-      return lines.length > 0 && !!ai.deliveryAddress?.trim();
+      // Con el pin de WhatsApp la dirección escrita es opcional (el repartidor va con el mapa)
+      return lines.length > 0 && (!!ai.deliveryAddress?.trim() || hasSharedLocation);
     case 'TAKEAWAY':
       return lines.length > 0;
     case 'DINE_IN':
@@ -153,8 +209,12 @@ export function buildConfirmationMessage(
     return `🛍️ *Para recoger*${where}\n${itemsSummary(lines)}\n\nTu total es ${money(total)}.\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
   // Domicilio: el sistema no conoce el valor del envío por zona; nunca se presenta como total final
-  const address = [ai.deliveryAddress, ai.neighborhood?.trim()].filter(Boolean).join(', ');
+  const address = [ai.deliveryAddress, ai.neighborhood?.trim()].filter(Boolean).join(', ') || 'tu ubicación compartida';
   const header = `🛵 *Domicilio* a: ${address}\n${itemsSummary(lines)}`;
+  if (quote?.isCovered && quote.distanceKm !== undefined) {
+    // Por distancia (pin GPS): distancia, envío y total exactos
+    return `${header}\n\n${buildDistanceQuoteMessage(quote, total)}\n${paymentLine(ai)}\n\n¿Confirmas?`;
+  }
   if (quote?.isCovered && quote.coverageConfigured) {
     // Zona encontrada: desglose exacto de productos + domicilio
     return `${header}\n\nSubtotal: ${money(total)}\nDomicilio (${quote.zoneName}): ${money(quote.deliveryFee)}\nTotal: ${money(total + quote.deliveryFee)}\n${paymentLine(ai)}\n\n¿Confirmas?`;
