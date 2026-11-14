@@ -29,3 +29,17 @@ export function maskSecret(secret: string | null | undefined): string | null {
   if (!secret) return null;
   return `••••${secret.slice(-4)}`;
 }
+
+/** Datos internos del local que no salen en la carta pública (solo los usa el asistente) */
+const RESTAURANT_INTERNAL_FIELDS = ['customInstructions'] as const;
+
+type RestaurantInternalField = (typeof RESTAURANT_INTERNAL_FIELDS)[number];
+
+/** Quita los datos internos antes de devolver el restaurante en un endpoint público */
+export function stripInternalRestaurantFields<T extends object>(restaurant: T): Omit<T, RestaurantInternalField> {
+  const publicRestaurant = { ...restaurant };
+  for (const field of RESTAURANT_INTERNAL_FIELDS) {
+    delete (publicRestaurant as Record<string, unknown>)[field];
+  }
+  return publicRestaurant;
+}

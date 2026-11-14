@@ -1,4 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
+import { Transform } from 'class-transformer';
+import { CUSTOM_INSTRUCTIONS_MAX_LENGTH } from '../custom-instructions';
 import { CreateRestaurantDto } from './create-restaurant.dto';
 import { IsIn, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import {
@@ -48,6 +50,16 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @Min(0, { message: 'La tarifa estándar no puede ser negativa' })
   @Max(1_000_000, { message: 'La tarifa estándar es demasiado alta' })
   defaultDeliveryFee?: number | null;
+
+  // Instrucciones especiales del local (reglas en español para el asistente). Se recortan los
+  // espacios antes de validar el máximo; "" o null las borran
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString({ message: 'Las instrucciones deben ser texto' })
+  @MaxLength(CUSTOM_INSTRUCTIONS_MAX_LENGTH, {
+    message: `Las instrucciones pueden tener máximo ${CUSTOM_INSTRUCTIONS_MAX_LENGTH} caracteres`,
+  })
+  customInstructions?: string | null;
 
   // Domicilio por distancia: coordenadas del local (null las quita y se apaga el cálculo por distancia)
   @IsOptional()

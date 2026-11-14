@@ -7,7 +7,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { maskSecret, sanitizeRestaurant } from './sanitize-restaurant';
+import { maskSecret, sanitizeRestaurant, stripInternalRestaurantFields } from './sanitize-restaurant';
+import { cleanCustomInstructions } from './custom-instructions';
 import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { isRestaurantClosed, parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
@@ -179,7 +180,8 @@ export class RestaurantsService {
     // isWompiEnabled es el interruptor del dueño; onlinePaymentsEnabled (interruptor + llaves completas)
     // indica si el carrito debe ofrecer "Pagar en línea".
     return {
-      ...sanitizeRestaurant(restaurant),
+      // Sin secretos ni datos internos (las instrucciones del local son solo para el asistente)
+      ...stripInternalRestaurantFields(sanitizeRestaurant(restaurant)),
       isWompiEnabled: restaurant.isWompiEnabled,
       onlinePaymentsEnabled: isOnlinePaymentEnabled(restaurant),
       // Número para wa.me (solo dígitos, con indicativo): la SIM/línea conectada al bot y, si no hay
@@ -343,6 +345,8 @@ export class RestaurantsService {
           updateRestaurantDto.defaultDeliveryFee === undefined
             ? undefined
             : Math.round(updateRestaurantDto.defaultDeliveryFee ?? 0) || null,
+        // Instrucciones especiales: undefined = no se toca; "" o null = se borran
+        customInstructions: cleanCustomInstructions(updateRestaurantDto.customInstructions),
         // Domicilio por distancia: undefined = no se toca; coordenadas null = se apaga el motor
         latitude: updateRestaurantDto.latitude,
         longitude: updateRestaurantDto.longitude,

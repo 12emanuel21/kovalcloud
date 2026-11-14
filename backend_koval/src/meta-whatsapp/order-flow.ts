@@ -365,6 +365,15 @@ export interface ReceivedOrder {
  * Acuse del pedido hecho en la carta web: recibido y en preparación. Nunca "en camino": eso solo
  * lo avisa el despacho desde el KDS (POST /orders/:id/dispatch), con el repartidor.
  */
+/**
+ * Pedido web que choca con las instrucciones del local: se avisa ANTES de prepararlo, con la
+ * alternativa, y una persona del equipo ajusta el pedido según lo que responda el cliente.
+ */
+export function buildWebOrderConflictMessage(dailyNumber: number, name: string | null, notice: string): string {
+  const greeting = name ? `¡Hola ${name}!` : '¡Hola!';
+  return `${greeting} Recibimos tu pedido *${formatDailyNumber(dailyNumber)}*. Antes de prepararlo, una aclaración: ${notice.trim()}\n\nRespóndenos por aquí y una persona del equipo ajusta tu pedido.`;
+}
+
 export function buildWebOrderReceivedMessage(
   order: ReceivedOrder,
   dailyNumber: number,

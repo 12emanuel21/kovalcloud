@@ -76,6 +76,8 @@ model Restaurant {
   paymentDetails      String?
   // Tarifa plana de domicilio en COP (ej. 15000): se cobra cuando el barrio no está en ninguna zona
   defaultDeliveryFee  Float?
+  // Reglas del negocio escritas por el dueño (Ajustes > Perfil); el asistente de WhatsApp las aplica
+  customInstructions  String?   @db.VarChar(800)
   // Domicilio por distancia (pin GPS): coordenadas del local y tarifa escalonada por km.
   // Sin coordenadas el motor no se usa y aplican las zonas / la tarifa estándar.
   latitude            Float?

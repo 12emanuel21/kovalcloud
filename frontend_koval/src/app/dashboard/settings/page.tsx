@@ -11,6 +11,7 @@ import { MyAccountSection } from './MyAccountSection';
 import { DriversSection } from './DriversSection';
 import { DeliveryZonesSection } from './DeliveryZonesSection';
 import { BranchesSection } from './BranchesSection';
+import { CustomInstructionsCard } from './CustomInstructionsCard';
 import { RestaurantProfileSection } from './RestaurantProfileSection';
 import { MenuThemePicker } from './MenuThemePicker';
 import { MenuLayoutPicker } from './MenuLayoutPicker';
@@ -508,6 +509,9 @@ export default function SettingsPage() {
 
         {/* Perfil (ubicación y tema), Horarios y Pagos: un solo formulario que queda montado entre pestañas */}
         <RestaurantProfileSection view={activeTab} />
+
+        {/* PERFIL: reglas del negocio que el asistente de WhatsApp aplica al atender */}
+        {activeTab === 'perfil' && <CustomInstructionsCard />}
 
         {/* REPARTIDORES: domiciliarios que ofrece el KDS al despachar */}
         {/* SEDES: cocinas de la marca; los domicilios se enrutan por la sede de cada zona */}

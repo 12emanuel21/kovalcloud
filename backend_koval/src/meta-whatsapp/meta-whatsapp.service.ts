@@ -50,6 +50,7 @@ import {
   buildOrderStatusMessage,
   buildOutOfCoverageMessage,
   buildWebOrderReceivedMessage,
+  buildWebOrderConflictMessage,
   nameFromWebOrderMessage,
   parseWebOrderReference,
   type WebOrderReference,
@@ -503,6 +504,51 @@ export class MetaWhatsAppService {
     return { order, dailyNumber: 'dailyNumber' in ref ? ref.dailyNumber : await dailyNumberOf(this.prisma, order) };
   }
 
+  /**
+   * ¿El pedido web incumple las instrucciones del local? Si la IA falla, se responde el acuse
+   * normal: la revisión nunca bloquea un pedido.
+   */
+  private async reviewWebOrderRules(
+    customInstructions: string,
+    order: { id: string; orderType: string | null; paymentMethod?: string | null },
+  ): Promise<{ reason: string; customerMessage: string } | null> {
+    try {
+      const items = await this.prisma.orderItem.findMany({
+        where: { orderId: order.id },
+        select: { quantity: true, menuItem: { select: { name: true } } },
+      });
+      const review = await this.aiService.reviewWebOrder(
+        {
+          orderType: order.orderType,
+          paymentMethod: order.paymentMethod,
+          items: items.map((item) => ({ name: item.menuItem?.name ?? 'Producto', quantity: item.quantity })),
+        },
+        customInstructions,
+      );
+      const customerMessage = review.customerMessage?.trim();
+      if (!review.hasConflict || !customerMessage) return null;
+      return { reason: review.reason?.trim().slice(0, 160) || 'Revisar con el cliente', customerMessage };
+    } catch (error: any) {
+      this.logger.warn(`No se pudo revisar el pedido web ${order.id} con las instrucciones del local: ${error?.message || error}`);
+      return null;
+    }
+  }
+
+  /** Deja la alerta en las notas del pedido (Kanban y KDS la ven en vivo) */
+  private async flagWebOrderConflict(restaurantId: string, order: { id: string; notes: string | null }, dailyNumber: number, reason: string) {
+    try {
+      const note = `⚠️ Revisar con el cliente: ${reason}`;
+      const updated = await this.prisma.order.update({
+        where: { id: order.id },
+        data: { notes: order.notes?.trim() ? `${order.notes.trim()}\n${note}` : note },
+        include: { items: { include: { menuItem: true } } },
+      });
+      this.ordersGateway.emitOrderUpdated(restaurantId, { ...updated, dailyNumber });
+    } catch (error: any) {
+      this.logger.warn(`No se pudo marcar el pedido ${order.id}: ${error?.message || error}`);
+    }
+  }
+
   /** "¿Cómo va mi pedido?": último pedido del cliente (24 h) con su estado real */
   private async buildOrderStatusReply(restaurantId: string, customerPhone: string): Promise<string> {
     const order = await this.prisma.order.findFirst({
@@ -834,6 +880,27 @@ export class MetaWhatsAppService {
         // Si escribe desde otro número, no se le muestran datos del pedido: solo el nombre que puso
         const name = (isSameCustomer ? order.customerName : nameFromWebOrderMessage(messageText))?.split(/\s+/)[0] ?? null;
         const alreadyOut = order.status === OrderStatus.DELIVERED || order.status === OrderStatus.CANCELLED;
+
+        // Con instrucciones especiales, el pedido armado en la carta se revisa contra ellas antes de
+        // darlo por cerrado (ej. jugo natural a domicilio). Sin instrucciones: acuse fijo, sin IA.
+        const conflict =
+          !alreadyOut && isSameCustomer && restaurant.customInstructions?.trim()
+            ? await this.reviewWebOrderRules(restaurant.customInstructions, order)
+            : null;
+        if (conflict) {
+          const conflictReply = withNotice(buildWebOrderConflictMessage(dailyNumber, name, conflict.customerMessage));
+          this.logger.warn(`⚠️ [${restaurant.name}] Pedido web ${order.id} choca con las instrucciones del local: ${conflict.reason}`);
+          await this.flagWebOrderConflict(restaurant.id, order, dailyNumber, conflict.reason);
+          await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, conflictReply, isBaileys);
+          // Una persona del equipo ajusta el pedido (el bot no edita productos de un pedido ya creado)
+          await this.recordChat(restaurant.id, senderNumber, [
+            userEntry(messageText.trim()),
+            { role: CHAT_ROLE_MODEL, message: conflictReply },
+            { role: CHAT_ROLE_SYSTEM, message: BOT_PAUSED_MARKER },
+          ]);
+          return;
+        }
+
         const reply = withNotice(
           alreadyOut
             ? buildOrderStatusMessage(order, dailyNumber)
@@ -963,9 +1030,12 @@ export class MetaWhatsAppService {
       const distancePricing = [restaurant, ...branches].some((place) =>
         isValidGeoPoint({ lat: place.latitude ?? undefined, lng: place.longitude ?? undefined }),
       );
+      // Instrucciones especiales del local (Ajustes > Perfil): van al final del prompt
+      const customInstructions = restaurant.customInstructions?.trim() || null;
       const aiExtras = {
         ...(pickupBranchNames.length > 1 ? { pickupBranches: pickupBranchNames } : {}),
         ...(distancePricing ? { distancePricing } : {}),
+        ...(customInstructions ? { customInstructions } : {}),
       };
       // Sin sedes ni motor por distancia la IA se llama exactamente como antes
       const aiOptions: [] | [typeof aiExtras] = Object.keys(aiExtras).length > 0 ? [aiExtras] : [];
