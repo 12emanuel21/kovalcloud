@@ -47,17 +47,45 @@ export function parseSharedLocation(text: string | null | undefined): GeoPoint |
   return isValidGeoPoint(point) ? point : null;
 }
 
-/** Última ubicación que el cliente compartió en la sesión (el mensaje actual primero) */
+/**
+ * ¿El cliente escribió una dirección de calle? ("Calle 30 # 5-10", "cra 45 no 26-85", "Av. 3 #12-40",
+ * "45 # 26-85"). Un barrio suelto o "la misma de antes" no cuentan.
+ */
+export function looksLikeStreetAddress(text: string | null | undefined): boolean {
+  const value = (text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const way = '(?:calle|cll?|carrera|cra|kra|kr|cr|avenida|av|diagonal|diag|dg|transversal|transv|tv|tr)';
+  // "Calle 30 # 5-10", "cra 45 no 26-85", "cl 72 num 43-15"
+  const street = new RegExp(`\\b${way}\\.?\\s*\\d+\\s*[a-z]?\\b[^\\n]{0,12}?(?:#|\\bn[o°º]\\.?\\s*\\d|\\bnum(?:ero)?\\.?\\s*\\d|\\d+\\s*-\\s*\\d+)`);
+  // "carrera 50 con calle 72"
+  const corner = new RegExp(`\\b${way}\\.?\\s*\\d+\\s*[a-z]?\\s+(?:con|x)\\s+${way}\\.?\\s*\\d+`);
+  // "45 # 26-85"
+  const plate = /\b\d+\s*[a-z]?\s*#\s*\d+\s*[a-z]?\s*-\s*\d+/;
+  return street.test(value) || corner.test(value) || plate.test(value);
+}
+
+/**
+ * Última ubicación que el cliente compartió en la sesión (el mensaje actual primero).
+ * - Un pin anterior a su último pedido registrado ya se usó para ese pedido: no se reutiliza.
+ * - Si después del pin escribió una dirección de calle, manda la dirección (cambió de lugar).
+ */
 export function latestSharedLocation(
   currentMessage: string,
-  history: Array<{ role: string; message: string }>,
+  history: Array<{ role: string; message: string; createdAt?: Date | string | null }>,
+  options: { notBefore?: Date | null } = {},
 ): GeoPoint | null {
   const current = parseSharedLocation(currentMessage);
   if (current) return current;
+  if (looksLikeStreetAddress(currentMessage)) return null;
+  const notBefore = options.notBefore?.getTime();
   for (let i = history.length - 1; i >= 0; i--) {
     if (history[i].role !== 'user') continue;
-    const point = parseSharedLocation(history[i].message);
+    const { message, createdAt } = history[i];
+    const at = createdAt ? new Date(createdAt).getTime() : NaN;
+    // Más viejo que el último pedido: ni ese pin ni los anteriores sirven
+    if (notBefore !== undefined && Number.isFinite(at) && at <= notBefore) return null;
+    const point = parseSharedLocation(message);
     if (point) return point;
+    if (looksLikeStreetAddress(message)) return null;
   }
   return null;
 }

@@ -5,9 +5,13 @@ import {
   buildCheckoutUrl,
   buildIntegritySignature,
   generatePaymentReference,
+  nextPaymentReference,
   toAmountInCents,
   WOMPI_CURRENCY,
 } from './wompi';
+
+/** Estados tras un intento que no cobró: el siguiente link lleva referencia nueva */
+const PAYMENT_RETRY_STATUSES = ['FAILED', 'CANCELLED'];
 
 type CheckoutRestaurant = Pick<Restaurant, 'slug' | 'wompiPublicKey' | 'wompiIntegritySecret' | 'wompiEventSecret'>;
 
@@ -33,8 +37,8 @@ export class WompiCheckoutService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Asigna paymentReference si el pedido aún no tiene (los reintentos del mismo pedido reutilizan
-   * la referencia) y devuelve el link con monto en centavos y firma de integridad.
+   * Asigna paymentReference si el pedido aún no tiene (un link pendiente se reutiliza tal cual; tras
+   * un pago rechazado va con referencia nueva) y devuelve el link con monto en centavos y firma de integridad.
    */
   async generatePaymentLink(
     order: Pick<Order, 'id' | 'total' | 'paymentReference' | 'paymentStatus'>,
@@ -49,6 +53,14 @@ export class WompiCheckoutService {
     if (!reference) {
       reference = generatePaymentReference(order.id);
       await this.prisma.order.update({ where: { id: order.id }, data: { paymentReference: reference } });
+    } else if (PAYMENT_RETRY_STATUSES.includes(order.paymentStatus)) {
+      // El intento anterior fue rechazado/anulado: Wompi no acepta repetir la referencia.
+      // La nueva conserva la base (-r2, -r3...) y el pedido vuelve a "pago pendiente".
+      reference = nextPaymentReference(reference);
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { paymentReference: reference, paymentStatus: 'PENDING' },
+      });
     }
 
     const amountInCents = toAmountInCents(order.total);

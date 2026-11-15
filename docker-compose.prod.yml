@@ -9,7 +9,7 @@
 #
 # Secretos en .env (no versionado; ver .env.example): POSTGRES_PASSWORD, JWT_SECRET, INTERNAL_API_KEY,
 # GOOGLE_GENERATIVE_AI_API_KEY, FRONTEND_URL, CLOUDFLARE_TUNNEL_TOKEN.
-# Solo nginx publica un puerto (80); db, redis, backend, frontend y baileys quedan dentro de koval_network.
+# Solo nginx publica un puerto (80, únicamente en 127.0.0.1); db, redis, backend, frontend y baileys quedan dentro de koval_network.
 
 name: kovalcloud
 
@@ -120,7 +120,9 @@ services:
     image: nginx:alpine
     restart: always
     ports:
-      - "80:80"
+      # Solo en el loopback del VPS: desde Internet únicamente por Cloudflare (WAF). cloudflared llega
+      # por la red interna (http://nginx:80); el puerto local queda para pruebas con curl en el VPS.
+      - "127.0.0.1:80:80"
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
       # Fotos de platos (las escribe el backend en /app/uploads/menu)

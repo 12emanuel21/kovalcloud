@@ -13,6 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import { IncomingMedia, notifySessionNumber, sendToNestjs, uploadMediaToNestjs } from './nestjsBridge';
 import { isDirectChatJid, isLidJid, LidStore, senderIdFor, type IncomingKey } from './lidResolver';
+import { isPermanentDisconnect, isStaleMessage, MAX_MESSAGE_AGE_MS, reconnectDelayMs } from './connectionPolicy';
 
 dotenv.config();
 
@@ -34,6 +35,16 @@ interface Session {
   // WhatsApp puede identificar contactos por LID (@lid) en vez de por número (@s.whatsapp.net):
   // número real de cada LID y JID con el que responder a lo que el backend envía
   lids: LidStore;
+  // Reconexión con backoff exponencial: intentos seguidos sin llegar a "open" y el reintento en espera
+  reconnectAttempts: number;
+  reconnectTimer: NodeJS.Timeout | null;
+}
+
+function clearReconnectTimer(session: Session | undefined) {
+  if (session?.reconnectTimer) {
+    clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = null;
+  }
 }
 
 const sessions = new Map<string, Session>();
@@ -133,7 +144,11 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
     qr: null,
     user: null,
     lids: new LidStore(authPathFor(restaurantId)),
+    reconnectAttempts: 0,
+    reconnectTimer: null,
   };
+  // Una conexión pedida desde el Dashboard reemplaza el reintento automático en espera
+  clearReconnectTimer(session);
   session.status = 'CONNECTING';
   sessions.set(restaurantId, session);
 
@@ -174,6 +189,7 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
       const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
 
       if (statusCode === DisconnectReason.loggedOut) {
+        clearReconnectTimer(session);
         console.log(`🚫 ${tag} Sesión cerrada (Logged Out). Limpiando credenciales...`);
         session.sock = null;
         sessions.delete(restaurantId);
@@ -193,12 +209,28 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
         return;
       }
 
-      console.log(`❌ ${tag} Conexión cerrada (${statusCode}). Reconectando en 3s...`);
+      // Bloqueo (403) o sesión abierta en otro lado (440): reintentar en bucle no sirve y empeora
+      // el bloqueo. Las credenciales se conservan; el dueño reconecta desde el Dashboard.
+      if (isPermanentDisconnect(statusCode)) {
+        clearReconnectTimer(session);
+        session.sock = null;
+        session.reconnectAttempts = 0;
+        console.log(`🛑 ${tag} Conexión cerrada (${statusCode}): no se reintenta automáticamente. Reconecta desde el Dashboard.`);
+        return;
+      }
+
+      // Backoff exponencial: 3 s, 6 s, 12 s... hasta 60 s (WhatsApp caído no recibe una ráfaga de sockets)
+      const delay = reconnectDelayMs(session.reconnectAttempts);
+      session.reconnectAttempts += 1;
+      console.log(`❌ ${tag} Conexión cerrada (${statusCode}). Reintento ${session.reconnectAttempts} en ${delay / 1000}s...`);
       session.sock = null;
-      setTimeout(() => {
+      clearReconnectTimer(session);
+      session.reconnectTimer = setTimeout(() => {
+        session.reconnectTimer = null;
         connectToWhatsApp(restaurantId).catch((e) => console.error(`${tag} Error reconectando:`, e));
-      }, 3000);
+      }, delay);
     } else if (connection === 'open') {
+      session.reconnectAttempts = 0;
       session.qr = null;
       session.status = 'CONNECTED';
       session.user = sock.user || null;
@@ -227,6 +259,11 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
       const remoteJid = msg.key.remoteJid;
       // Solo chats 1 a 1 con clientes: fuera grupos (@g.us), estados/difusión (@broadcast) y canales (@newsletter)
       if (!isDirectChatJid(remoteJid)) continue;
+      // Pendientes de hace más de 10 min (llegan juntos tras una reconexión): no se responden en ráfaga
+      if (isStaleMessage(msg.messageTimestamp)) {
+        console.log(`⏭️ ${tag} Mensaje de ${remoteJid} con más de ${MAX_MESSAGE_AGE_MS / 60000} min de antigüedad: no se responde`);
+        continue;
+      }
 
       const content = normalizeMessageContent(msg.message);
       const messageText =
@@ -307,6 +344,7 @@ export async function logoutWhatsApp(restaurantId: string): Promise<void> {
   console.log(`🔄 [${restaurantId}] Cerrando sesión de WhatsApp solicitada...`);
   const session = sessions.get(restaurantId);
   const sock = session?.sock;
+  clearReconnectTimer(session);
   if (session) session.sock = null;
   sessions.delete(restaurantId);
 

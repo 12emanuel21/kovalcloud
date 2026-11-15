@@ -145,7 +145,7 @@ describe('PaymentsService', () => {
     expect(prisma.order.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { paymentReference: 'KOV-ORDER1-AAAA' } }),
     );
-    expect(prisma.order.update.mock.calls[0][0].data).toEqual({ paymentStatus: 'PAID', paymentMethod: 'NEQUI' });
+    expect(prisma.order.update.mock.calls[0][0].data).toEqual({ paymentStatus: 'PAID', paymentMethod: 'NEQUI', wompiTransactionId: 'tx-1' });
     const emitted = gateway.emitOrderStatusUpdated.mock.calls[0][1];
     expect(emitted.restaurant).not.toHaveProperty('wompiEventSecret');
     expect(emitted.restaurant).not.toHaveProperty('whatsappToken');

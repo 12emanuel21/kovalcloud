@@ -13,6 +13,7 @@ import { UpdateRestaurantConfigDto } from './dto/update-restaurant-config.dto';
 import { isRestaurantClosed, parseBusinessHours } from './business-hours';
 import { normalizeHeader, parseMenuSpreadsheet } from './menu-spreadsheet';
 import { isOnlinePaymentEnabled, isWompiReady } from '../payments/wompi-checkout.service';
+import { isWompiTestKey } from '../payments/wompi';
 import { publicWhatsAppNumber } from './whatsapp-bot-number';
 import {
   normalizeCustomColor,
@@ -50,6 +51,8 @@ const metaSelect = {
 function changesSensitiveFields(current: Record<string, unknown>, next: Record<string, string | null | undefined>) {
   return Object.entries(next).some(([field, value]) => value !== undefined && (value || null) !== (current[field] || null));
 }
+
+const isProductionEnv = () => process.env.NODE_ENV === 'production';
 
 /** Las 4 llaves de Wompi (pública, privada, eventos e integridad) guardadas */
 function hasAllWompiKeys(r: Record<string, unknown>): boolean {
@@ -416,12 +419,22 @@ export class RestaurantsService {
     ) as Record<keyof typeof wompi, string | null>;
     // Primera vez que quedan las 4 llaves completas: se enciende solo, salvo que se envíe false.
     // Si el dueño lo apagó y luego cambia una llave, no se vuelve a encender (las llaves ya estaban completas).
-    const autoEnable = dto.isWompiEnabled === undefined && !hasAllWompiKeys(current) && hasAllWompiKeys(merged);
+    // En producción, llaves de prueba se pueden guardar pero no encienden los cobros (ver abajo)
+    const testKeysInProduction =
+      isProductionEnv() && (isWompiTestKey(merged.wompiPublicKey) || isWompiTestKey(merged.wompiPrivateKey));
+    const autoEnable =
+      dto.isWompiEnabled === undefined && !hasAllWompiKeys(current) && hasAllWompiKeys(merged) && !testKeysInProduction;
     const willBeEnabled = autoEnable || (dto.isWompiEnabled ?? current.isWompiEnabled);
     if (dto.isWompiEnabled === true || (willBeEnabled && Object.values(wompi).some((v) => v !== undefined))) {
       if (willBeEnabled && !isWompiReady(merged)) {
         throw new BadRequestException(
           'Para habilitar los cobros en línea completa la llave pública, el secreto de eventos y el secreto de integridad de Wompi',
+        );
+      }
+      // P1-3: en producción no se cobra con llaves del sandbox (el cliente "paga" y no llega dinero)
+      if (willBeEnabled && testKeysInProduction) {
+        throw new BadRequestException(
+          'Estas son llaves de prueba de Wompi (pub_test_ / prv_test_): no cobran dinero real. Usa las llaves de producción (pub_prod_ / prv_prod_) para activar los cobros en línea.',
         );
       }
     }

@@ -27,6 +27,72 @@ export function generatePaymentReference(orderId: string): string {
   return `KOV-${orderId.replace(/-/g, '').slice(0, 8).toUpperCase()}-${randomBytes(4).toString('hex').toUpperCase()}`;
 }
 
+/** Sufijo de reintento: "KOV-0F8FAD5B-1A2B3C4D-r2" -> intento 2 de la misma referencia base */
+const RETRY_SUFFIX = /-r(\d+)$/;
+
+/** Referencia sin el sufijo de reintento (la del primer intento) */
+export function basePaymentReference(reference: string): string {
+  return reference.replace(RETRY_SUFFIX, '');
+}
+
+/**
+ * Referencia del siguiente intento (Wompi no acepta repetir una referencia ya usada):
+ * KOV-X -> KOV-X-r2 -> KOV-X-r3. Se conserva la base para casar pagos tardíos de intentos previos.
+ */
+export function nextPaymentReference(reference: string): string {
+  const attempt = Number(RETRY_SUFFIX.exec(reference)?.[1] ?? 1);
+  return `${basePaymentReference(reference)}-r${attempt + 1}`;
+}
+
+/** Llaves del ambiente de pruebas de Wompi (no mueven dinero real) */
+export function isWompiTestKey(key: string | null | undefined): boolean {
+  return Boolean(key && /^(pub|prv)_test_/.test(key.trim()));
+}
+
+/** API de Wompi del ambiente de la llave: sandbox con prv_test_, producción con prv_prod_ */
+export function wompiApiBaseUrl(privateKey: string): string {
+  return isWompiTestKey(privateKey) ? 'https://sandbox.wompi.co/v1' : 'https://production.wompi.co/v1';
+}
+
+/** Transacción tal como la reporta la API de Wompi (solo los campos que usamos) */
+export interface WompiTransaction {
+  id: string;
+  status: string;
+  reference: string;
+  amount_in_cents: number;
+  currency: string;
+  payment_method_type?: string;
+}
+
+/** La API de Wompi no respondió (red, timeout o 5xx): el webhook pide reintento */
+export class WompiUnavailableError extends Error {}
+
+/**
+ * GET /transactions/:id con la llave privada del local. null si Wompi no la conoce (4xx);
+ * WompiUnavailableError si no se pudo consultar.
+ */
+export async function fetchWompiTransaction(
+  transactionId: string,
+  privateKey: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 8000,
+): Promise<WompiTransaction | null> {
+  const url = `${wompiApiBaseUrl(privateKey)}/transactions/${encodeURIComponent(transactionId)}`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      headers: { Authorization: `Bearer ${privateKey}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw new WompiUnavailableError(`Wompi no respondió: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (response.status >= 500) throw new WompiUnavailableError(`Wompi respondió ${response.status}`);
+  if (!response.ok) return null;
+  const body = (await response.json().catch(() => null)) as { data?: WompiTransaction } | null;
+  return body?.data?.id ? body.data : null;
+}
+
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
 /**

@@ -487,6 +487,26 @@ export class MetaWhatsAppService {
    * Pedido de la carta web citado en "Acabo de hacer el pedido #07": por turno de la jornada en
    * curso o por el código corto del id (pedidos de las últimas 24 h).
    */
+  /** Pedido web citado en un texto ("Acabo de hacer el pedido #07..."); null si no cita ninguno */
+  private async findWebOrderInText(restaurantId: string, text: string) {
+    const ref = parseWebOrderReference(text);
+    return ref ? this.findWebOrder(restaurantId, ref) : null;
+  }
+
+  /**
+   * Cuándo se registró el último pedido (no cancelado) del cliente en el local: los pines GPS
+   * anteriores ya se usaron para ese pedido. Bot (número tal cual) o carta (formato 57...).
+   */
+  private async lastOrderCreatedAt(restaurantId: string, customerPhone: string): Promise<Date | null> {
+    const phones = [...new Set([customerPhone, normalizeColombianPhone(customerPhone)])];
+    const last = await this.prisma.order.findFirst({
+      where: { restaurantId, customerPhone: { in: phones }, status: { not: OrderStatus.CANCELLED } },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    return last?.createdAt ?? null;
+  }
+
   private async findWebOrder(restaurantId: string, ref: WebOrderReference) {
     const order =
       'dailyNumber' in ref
@@ -824,12 +844,22 @@ export class MetaWhatsAppService {
       // Imagen o PDF tras un pedido sin pagar: es su comprobante (queda adjunto al pedido en el Kanban)
       const proofOrder = media?.stored ? await this.attachPaymentProof(restaurant.id, senderNumber, media.stored) : null;
 
+      // "Acabo de hacer el pedido #07" (mensaje que arma la carta web): se busca antes de la pausa
+      const webOrderRef = parseWebOrderReference(caption);
+      const textWebOrder = webOrderRef ? await this.findWebOrder(restaurant.id, webOrderRef) : null;
+
       // 2.4. Handover humano: el equipo atiende esta conversación desde el Inbox. Se registra el
       //      mensaje del cliente (sin transcribir audio ni llamar a la IA) y no se responde nada.
-      if ((await getHandoverState(this.prisma, restaurant.id, senderNumber)).botPaused) {
+      //      Excepción: el acuse del comprobante y el del pedido web son textos fijos (sin IA) y el
+      //      cliente no debe quedarse sin saber que su pedido o su pago llegaron.
+      const botPaused = (await getHandoverState(this.prisma, restaurant.id, senderNumber)).botPaused;
+      if (botPaused && !proofOrder && !textWebOrder) {
         this.logger.log(`👤 [${restaurant.name}] Bot pausado para [${senderNumber}]: lo atiende un humano`);
         if (incomingLabel) await this.recordChat(restaurant.id, senderNumber, [userEntry(incomingLabel)]);
         return;
+      }
+      if (botPaused) {
+        this.logger.log(`👤 [${restaurant.name}] Bot pausado para [${senderNumber}]: solo el acuse automático (sin IA)`);
       }
 
       // 2.42. Habeas Data (Ley 1581): la primera respuesta del bot lleva el aviso de tratamiento de
@@ -899,8 +929,8 @@ export class MetaWhatsAppService {
 
       // 3.9. "Acabo de hacer el pedido #07" (mensaje que arma la carta web): acuse fijo de recibido y
       //      en preparación, sin IA (la IA llegó a responder que ya iba "en camino")
-      const webOrderRef = parseWebOrderReference(messageText);
-      const webOrder = webOrderRef ? await this.findWebOrder(restaurant.id, webOrderRef) : null;
+      const webOrder =
+        messageText === caption ? textWebOrder : await this.findWebOrderInText(restaurant.id, messageText);
       if (webOrder) {
         const { order, dailyNumber } = webOrder;
         const isSameCustomer = normalizeColombianPhone(order.customerPhone) === normalizeColombianPhone(senderNumber);
@@ -911,7 +941,7 @@ export class MetaWhatsAppService {
         // Con instrucciones especiales, el pedido armado en la carta se revisa contra ellas antes de
         // darlo por cerrado (ej. jugo natural a domicilio). Sin instrucciones: acuse fijo, sin IA.
         const conflict =
-          !alreadyOut && isSameCustomer && restaurant.customInstructions?.trim()
+          !botPaused && !alreadyOut && isSameCustomer && restaurant.customInstructions?.trim()
             ? await this.reviewWebOrderRules(restaurant.customInstructions, order)
             : null;
         if (conflict) {
@@ -1146,8 +1176,15 @@ export class MetaWhatsAppService {
             toPrismaOrderType(aiResult) === OrderType.TAKEAWAY && branches.length > 1
               ? (matchBranchByName(branches, aiResult.pickupBranch) ?? mainBranchOf(branches))
               : null;
-          // Pin de WhatsApp (en este mensaje o antes en la sesión): el envío se cobra por distancia
-          const customerCoords = latestSharedLocation(messageText, chatHistory);
+          // Pin de WhatsApp (en este mensaje o antes en la sesión): el envío se cobra por distancia.
+          // Un pin anterior a su último pedido ya se usó (no se reutiliza para un pedido nuevo).
+          const hasPinInHistory = chatHistory.some((h) => h.role === CHAT_ROLE_USER && parseSharedLocation(h.message));
+          const lastOrderAt = hasPinInHistory ? await this.lastOrderCreatedAt(restaurant.id, senderNumber) : null;
+          // Excepción: "sí" repetido justo después de registrar; el pin sigue valiendo para que el
+          // antiduplicado responda "ya está registrado" en vez de volver a pedir la ubicación
+          const reconfirming =
+            aiResult.customerConfirmed && lastOrderAt !== null && Date.now() - lastOrderAt.getTime() < DUPLICATE_ORDER_WINDOW_MS;
+          const customerCoords = latestSharedLocation(messageText, chatHistory, { notBefore: reconfirming ? null : lastOrderAt });
           const isLocationMessage = Boolean(parseSharedLocation(messageText));
           const coordsArg: [] | [{ lat: number; lng: number }] = customerCoords ? [customerCoords] : [];
           const complete = hasRequiredData(aiResult, lines, Boolean(customerCoords));

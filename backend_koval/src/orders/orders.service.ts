@@ -8,7 +8,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, isWebMenuChannel } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderStatus, OrderType, Role } from '@prisma/client';
@@ -27,6 +27,7 @@ import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService } from '../customers/customers.service';
 import { resolveOrderBranchId } from '../branches/branch-routing';
 import { formatKm } from '../delivery-zones/distance/delivery-pricing.service';
+import { isRecordNotFound } from '../prisma/prisma-errors';
 
 /**
  * Confirmación inicial por WhatsApp. Con `paymentUrl` adjunta el link de pago (plan B si el cliente
@@ -128,6 +129,16 @@ export class OrdersService {
     // 2. Validar que la orden contenga al menos un item
     if (!items || items.length === 0) {
       throw new BadRequestException('El pedido debe contener al menos un producto');
+    }
+
+    // 2.1. Ley 1581: sin la autorización del checkout no se guardan los datos del cliente de la carta
+    if (isWebMenuChannel(channel) && acceptTerms !== true) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'TERMS_NOT_ACCEPTED',
+        message: 'Para hacer tu pedido debes aceptar el tratamiento de tus datos personales (Ley 1581 de 2012).',
+      });
     }
 
     // 3. Validar productos y calcular precios
@@ -567,18 +578,25 @@ export class OrdersService {
 
     const driver = await this.resolveDispatchDriver(order.restaurantId, dto);
 
-    const updatedOrder = await this.prisma.order.update({
-      where: { id: orderId },
-      data: {
-        status: OrderStatus.DELIVERED,
-        driverId: driver.id,
-        driverName: driver.name,
-        driverPhone: driver.phone,
-        driverVehicle: driver.vehicle,
-        dispatchedAt: new Date(),
-      },
-      include: { restaurant: true, items: { include: { menuItem: true } } },
-    });
+    // Atómico: la condición va en el mismo UPDATE. Con dos clics o dos pantallas a la vez solo el
+    // primero cambia la fila; el segundo recibe 409 y no reenvía los WhatsApp al cliente ni al repartidor.
+    const updatedOrder = await this.prisma.order
+      .update({
+        where: { id: orderId, dispatchedAt: null, status: { not: OrderStatus.CANCELLED } },
+        data: {
+          status: OrderStatus.DELIVERED,
+          driverId: driver.id,
+          driverName: driver.name,
+          driverPhone: driver.phone,
+          driverVehicle: driver.vehicle,
+          dispatchedAt: new Date(),
+        },
+        include: { restaurant: true, items: { include: { menuItem: true } } },
+      })
+      .catch((error: unknown) => {
+        if (isRecordNotFound(error)) throw new ConflictException('El pedido ya fue despachado o cancelado');
+        throw error;
+      });
 
     const response = await this.toOrderResponse(updatedOrder);
     this.ordersGateway.emitOrderStatusUpdated(updatedOrder.restaurantId, response);
@@ -613,15 +631,21 @@ export class OrdersService {
     if (order.paymentStatus === 'PAID') throw new ConflictException('El pedido ya está marcado como pagado');
     if (order.status === OrderStatus.CANCELLED) throw new ConflictException('El pedido está cancelado');
 
-    const updatedOrder = await this.prisma.order.update({
-      where: { id: orderId },
-      data: {
-        paymentStatus: 'PAID',
-        // Contra entrega o sin método: el pago llegó por transferencia (comprobante)
-        ...(!order.paymentMethod || order.paymentMethod === 'CASH' ? { paymentMethod: 'TRANSFERENCIA' } : {}),
-      },
-      include: { restaurant: true, items: { include: { menuItem: true } } },
-    });
+    // Atómico: si el webhook de Wompi u otra pantalla lo marcó pagado entretanto, no se confirma dos veces
+    const updatedOrder = await this.prisma.order
+      .update({
+        where: { id: orderId, paymentStatus: { not: 'PAID' }, status: { not: OrderStatus.CANCELLED } },
+        data: {
+          paymentStatus: 'PAID',
+          // Contra entrega o sin método: el pago llegó por transferencia (comprobante)
+          ...(!order.paymentMethod || order.paymentMethod === 'CASH' ? { paymentMethod: 'TRANSFERENCIA' } : {}),
+        },
+        include: { restaurant: true, items: { include: { menuItem: true } } },
+      })
+      .catch((error: unknown) => {
+        if (isRecordNotFound(error)) throw new ConflictException('El pedido ya está marcado como pagado o fue cancelado');
+        throw error;
+      });
     const response = await this.toOrderResponse(updatedOrder);
     this.ordersGateway.emitOrderUpdated(updatedOrder.restaurantId, response);
     void this.notifyCustomer(

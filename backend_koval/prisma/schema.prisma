@@ -225,6 +225,8 @@ model Order {
   paymentStatus    String  @default("PENDING")
   paymentReference String? @unique // Referencia enviada a la pasarela (KOV-...)
   paymentMethod    String? // Ej: NEQUI, CARD, PSE, CASH
+  // Transacción de Wompi que pagó el pedido (única: una transacción no paga dos pedidos)
+  wompiTransactionId String? @unique
   // Comprobante enviado por WhatsApp (archivo de uploads/chat/<restaurantId>/) y cuándo llegó
   paymentProofUrl  String?
   paymentProofAt   DateTime?

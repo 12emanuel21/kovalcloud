@@ -115,13 +115,23 @@ describe('MetaWhatsAppService · adjuntos entrantes y comprobantes', () => {
     expect(savedChats()[0].mediaUrl).toBeUndefined();
   });
 
-  it('con el bot pausado (lo atiende un humano): el comprobante se adjunta y se registra, sin responder', async () => {
+  it('con el bot pausado (lo atiende un humano): el comprobante se adjunta y se acusa igual (texto fijo, sin IA)', async () => {
     prisma.order.findFirst.mockResolvedValue({ id: 'order-9' });
     prisma.chatHistory.findFirst.mockImplementation(({ where }: any) =>
       Promise.resolve(where.role === 'system' ? { message: BOT_PAUSED_MARKER, createdAt: new Date() } : null),
     );
     await service.processIncomingWebhook(webhook({ type: 'image', image: { id: 'MEDIA-3', mime_type: 'image/jpeg' } }), '', false, ['rest-1']);
     expect(prisma.order.update).toHaveBeenCalled();
+    expect(sent).toHaveBeenCalledWith('PHONE', 'TOKEN', CUSTOMER, expect.stringContaining('Recibimos tu comprobante'), false);
+    expect(savedChats().map((c: any) => c.role)).toEqual(['user', 'model']);
+  });
+
+  it('con el bot pausado: una foto que no es comprobante solo queda en el Inbox, sin respuesta', async () => {
+    prisma.order.findFirst.mockResolvedValue(null);
+    prisma.chatHistory.findFirst.mockImplementation(({ where }: any) =>
+      Promise.resolve(where.role === 'system' ? { message: BOT_PAUSED_MARKER, createdAt: new Date() } : null),
+    );
+    await service.processIncomingWebhook(webhook({ type: 'image', image: { id: 'MEDIA-4', mime_type: 'image/jpeg' } }), '', false, ['rest-1']);
     expect(sent).not.toHaveBeenCalled();
     expect(savedChats()).toHaveLength(1);
   });

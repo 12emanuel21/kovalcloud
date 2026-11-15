@@ -21,7 +21,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, WEB_MENU_CHANNEL } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { DispatchOrderDto } from './dto/dispatch-order.dto';
 import { orderViewFor } from './order-visibility';
@@ -32,10 +32,12 @@ export class OrdersController {
 
   // Público: los clientes hacen pedidos desde el menú web.
   // Limitado por IP para evitar inundaciones de pedidos falsos.
+  // El canal lo fija el servidor: un pedido de este endpoint siempre es de la carta (exige Ley 1581)
+  // y no puede hacerse pasar por uno del bot (WHATSAPP).
   @UseGuards(ThrottlerGuard)
   @Post()
   create(@Body() createOrderDto: CreateOrderDto) {
-    return this.ordersService.create(createOrderDto);
+    return this.ordersService.create({ ...createOrderDto, channel: WEB_MENU_CHANNEL });
   }
 
   // Reporte contable .xlsx (?from=AAAA-MM-DD&to=AAAA-MM-DD, hora de Colombia; por defecto el mes en curso).

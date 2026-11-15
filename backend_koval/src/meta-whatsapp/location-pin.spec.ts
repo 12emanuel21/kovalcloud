@@ -13,6 +13,7 @@ import {
   formatSharedLocation,
   hasRequiredData,
   latestSharedLocation,
+  looksLikeStreetAddress,
   parseSharedLocation,
 } from './order-flow';
 
@@ -39,6 +40,49 @@ describe('Pin de ubicación de WhatsApp', () => {
       expect(latestSharedLocation('sí', history)).toEqual({ lat: 2, lng: 2 });
       expect(latestSharedLocation(formatSharedLocation(3, 3), history)).toEqual({ lat: 3, lng: 3 });
       expect(latestSharedLocation('hola', [])).toBeNull();
+    });
+
+    describe('[P1-7] pin vencido', () => {
+      const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+      const pinThenChat = [
+        { role: 'user', message: formatSharedLocation(10.99, -74.81), createdAt: at(40) },
+        { role: 'model', message: '✅ ¡Pedido confirmado! Turno #04', createdAt: at(39) },
+        { role: 'user', message: 'quiero otro perro a domicilio', createdAt: at(5) },
+      ];
+
+      it('un pin anterior al último pedido registrado ya se usó: no vale para el pedido nuevo', () => {
+        expect(latestSharedLocation('sí', pinThenChat, { notBefore: at(38) })).toBeNull();
+        // Sin pedidos desde el pin, sigue valiendo
+        expect(latestSharedLocation('sí', pinThenChat, { notBefore: at(60) })).toEqual({ lat: 10.99, lng: -74.81 });
+        expect(latestSharedLocation('sí', pinThenChat, { notBefore: null })).toEqual({ lat: 10.99, lng: -74.81 });
+        // Un pin nuevo (en el mensaje actual o después del pedido) sí cuenta
+        expect(latestSharedLocation(formatSharedLocation(11, -74), pinThenChat, { notBefore: at(38) })).toEqual({ lat: 11, lng: -74 });
+        expect(
+          latestSharedLocation('sí', [...pinThenChat, { role: 'user', message: formatSharedLocation(11, -74), createdAt: at(2) }], {
+            notBefore: at(38),
+          }),
+        ).toEqual({ lat: 11, lng: -74 });
+      });
+
+      it('si después del pin escribió una dirección nueva, manda la dirección', () => {
+        const history = [
+          { role: 'user', message: formatSharedLocation(10.99, -74.81), createdAt: at(10) },
+          { role: 'user', message: 'mejor mándalo a la Calle 30 # 5-10, donde mi mamá', createdAt: at(5) },
+        ];
+        expect(latestSharedLocation('sí', history)).toBeNull();
+        expect(latestSharedLocation('cra 45 no 26-85 apto 401', [history[0]])).toBeNull();
+        // Una referencia que no es dirección no anula el pin
+        expect(latestSharedLocation('apto 401, casa azul', [history[0]])).toEqual({ lat: 10.99, lng: -74.81 });
+      });
+
+      it('reconoce direcciones colombianas escritas, no barrios sueltos ni referencias', () => {
+        for (const text of ['Calle 30 # 5-10', 'cra 45 no 26-85', 'Cl. 72 #43-15 apto 2', 'Av. 3 #12-40', 'carrera 50 con calle 72', 'en la 45 # 26-85', 'Diagonal 12a N° 4-20']) {
+          expect([text, looksLikeStreetAddress(text)]).toEqual([text, true]);
+        }
+        for (const text of ['Riomar', 'apto 401', 'la misma de antes', 'sí, confirmo', 'quiero 2 perros', 'son 3 calles abajo', formatSharedLocation(1, 1)]) {
+          expect([text, looksLikeStreetAddress(text)]).toEqual([text, false]);
+        }
+      });
     });
   });
 
@@ -208,6 +252,52 @@ describe('Pin de ubicación de WhatsApp', () => {
         deliveryAddress: 'Ubicación compartida por WhatsApp',
       });
       expect(sent).toContain('Pedido confirmado');
+    });
+
+    describe('[P1-7] pin de un pedido anterior', () => {
+      const confirm = delivery({ customerName: 'Ana', paymentMethod: 'CASH', readyToConfirm: true, customerConfirmed: true, responseToUser: 'Perfecto.' });
+      const withTimedHistory = (pinMinutesAgo: number, lastOrderMinutesAgo: number | null) => {
+        const at = (m: number) => new Date(Date.now() - m * 60_000);
+        const history = [
+          { role: 'user', message: '📍 Ubicación compartida: (10.99, -74.81)', createdAt: at(pinMinutesAgo) },
+          { role: 'model', message: 'Listo', createdAt: at(pinMinutesAgo - 1) },
+          { role: 'user', message: 'quiero otro perro', createdAt: at(2) },
+        ];
+        prisma.chatHistory.findMany.mockResolvedValue([...history].reverse());
+        prisma.order.findFirst.mockImplementation(({ select }: any = {}) =>
+          Promise.resolve(select?.createdAt && lastOrderMinutesAgo !== null ? { createdAt: at(lastOrderMinutesAgo) } : null),
+        );
+      };
+
+      it('el pin ya se usó en el pedido anterior: no se registra el nuevo con esas coordenadas', async () => {
+        await build();
+        withTimedHistory(40, 30);
+        await run({ type: 'text', text: { body: 'sí, confirmo' } }, confirm);
+        expect(prisma.order.create).not.toHaveBeenCalled();
+        expect(zones.quoteForOrder).not.toHaveBeenCalled();
+        // Se busca el último pedido no cancelado del cliente en este local
+        expect(prisma.order.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { restaurantId: 'rest-1', customerPhone: { in: ['573009876543'] }, status: { not: 'CANCELLED' } },
+            select: { createdAt: true },
+          }),
+        );
+      });
+
+      it('pin compartido después del último pedido: se usa', async () => {
+        await build();
+        withTimedHistory(20, 30);
+        await run({ type: 'text', text: { body: 'sí, confirmo' } }, confirm);
+        expect(prisma.order.create.mock.calls[0][0].data).toMatchObject({ customerLat: 10.99, customerLng: -74.81 });
+      });
+
+      it('"sí" repetido justo después de registrar: el antiduplicado sigue respondiendo con el pin', async () => {
+        await build();
+        withTimedHistory(6, 1);
+        const sent = await run({ type: 'text', text: { body: 'sí' } }, confirm);
+        expect(zones.quoteForOrder).toHaveBeenCalledWith('rest-1', 'DELIVERY', undefined, undefined, { lat: 10.99, lng: -74.81 });
+        expect(sent).toBeDefined();
+      });
     });
 
     it('local sin coordenadas: la IA se llama como antes (sin la regla del pin)', async () => {

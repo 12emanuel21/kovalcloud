@@ -704,6 +704,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
                       placeholder="Ej. Carlos Gómez"
+                      maxLength={100}
                       required
                       className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                     />
@@ -718,6 +719,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       value={customerPhone}
                       onChange={(e) => setCustomerPhone(e.target.value)}
                       placeholder="Ej. 300 123 4567"
+                      maxLength={30}
                       required
                       className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                     />
@@ -827,6 +829,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           type="text"
                           value={deliveryAddress}
                           onChange={(e) => setDeliveryAddress(e.target.value)}
+                          maxLength={250}
                           placeholder={coords ? 'Ej. Apto 401, casa azul (referencia)' : 'Ej. Cra 45 # 26-85 Apto 401'}
                           required={needsNeighborhood}
                           className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
@@ -840,6 +843,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           type="text"
                           value={neighborhood}
                           onChange={(e) => setNeighborhood(e.target.value)}
+                          maxLength={120}
                           placeholder="Ej. Riomar"
                           required={needsNeighborhood}
                           autoComplete="address-level3"
@@ -888,6 +892,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <textarea
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
+                      maxLength={500}
                       placeholder="Ej. Sin cebolla en la pizza, llevar cambio de 50mil..."
                       rows={2}
                       className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2 text-sm text-sf-text placeholder-sf-muted outline-none transition resize-none`}

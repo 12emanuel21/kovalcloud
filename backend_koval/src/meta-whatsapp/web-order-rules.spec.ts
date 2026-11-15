@@ -146,6 +146,30 @@ describe('Instrucciones del local en la atención por WhatsApp', () => {
       ai.reviewWebOrder.mockRejectedValue(new Error('Gemini caído'));
       await expect(send(WEB_MESSAGE)).resolves.toBe(STANDARD_ACK);
     });
+
+    describe('[P1-15] con el chat en pausa (lo atiende una persona)', () => {
+      const paused = () =>
+        prisma.chatHistory.findFirst.mockImplementation(({ where }: any) =>
+          Promise.resolve(where.message?.in ? { message: BOT_PAUSED_MARKER, createdAt: new Date() } : null),
+        );
+
+      it('el acuse del pedido web sale igual (texto fijo), sin revisión de IA ni nueva pausa', async () => {
+        await build(RULE);
+        paused();
+        await expect(send(WEB_MESSAGE)).resolves.toBe(STANDARD_ACK);
+        expect(ai.reviewWebOrder).not.toHaveBeenCalled();
+        expect(ai.parseOrderIntent).not.toHaveBeenCalled();
+        expect(savedMessages()).toEqual([WEB_MESSAGE, STANDARD_ACK]);
+      });
+
+      it('cualquier otro mensaje sigue sin respuesta y queda en el Inbox', async () => {
+        await build(null);
+        paused();
+        await expect(send('hola, ¿me cambian la bebida?')).resolves.toBeUndefined();
+        expect(ai.parseOrderIntent).not.toHaveBeenCalled();
+        expect(savedMessages()).toEqual(['hola, ¿me cambian la bebida?']);
+      });
+    });
   });
 
   describe('conversación normal', () => {
