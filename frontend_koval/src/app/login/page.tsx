@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
+import { LoginError, useAuth } from '@/context/AuthContext';
 import { homePathForRole } from '@/lib/roles';
 
 export default function LoginPage() {
@@ -13,6 +13,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Cuenta con 2FA: tras validar la contraseña, el backend pide el código de 6 dígitos
+  const [needsCode, setNeedsCode] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
 
   // Si ya está autenticado, redirigir a la zona de su rol
   useEffect(() => {
@@ -27,8 +30,14 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      await login(email, password);
+      await login(email, password, needsCode ? totpCode : undefined);
     } catch (err: unknown) {
+      if (err instanceof LoginError && err.code === 'TWO_FACTOR_REQUIRED') {
+        setNeedsCode(true);
+        setTotpCode('');
+        return;
+      }
+      if (err instanceof LoginError && err.code === 'TWO_FACTOR_INVALID') setTotpCode('');
       setError(err instanceof Error ? err.message : 'Error al iniciar sesión');
     } finally {
       setIsLoading(false);
@@ -61,6 +70,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="tu@correo.com"
               required
+              readOnly={needsCode}
               className="bg-slate-950 border border-slate-700 text-white rounded-xl px-4 py-3 w-full focus:border-indigo-500 outline-none transition-colors"
             />
           </div>
@@ -75,9 +85,47 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
+              readOnly={needsCode}
               className="bg-slate-950 border border-slate-700 text-white rounded-xl px-4 py-3 w-full focus:border-indigo-500 outline-none transition-colors"
             />
           </div>
+
+          {needsCode && (
+            <div>
+              <label htmlFor="totp-code" className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Código de verificación
+              </label>
+              <input
+                id="totp-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                maxLength={7}
+                pattern="\d{3}\s?\d{3}"
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/[^\d\s]/g, ''))}
+                placeholder="123 456"
+                required
+                className="bg-slate-950 border border-slate-700 text-white rounded-xl px-4 py-3 w-full text-center font-mono text-lg tracking-[0.3em] focus:border-indigo-500 outline-none transition-colors"
+              />
+              <p className="mt-2 text-xs text-slate-400">
+                Tu cuenta tiene verificación en 2 pasos. Escribe el código de 6 dígitos de tu app de autenticación.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setNeedsCode(false);
+                  setTotpCode('');
+                  setPassword('');
+                  setError('');
+                }}
+                className="mt-2 text-xs font-semibold text-slate-400 underline underline-offset-2 hover:text-white"
+              >
+                Usar otra cuenta
+              </button>
+            </div>
+          )}
 
           <button
             type="submit"
@@ -93,7 +141,7 @@ export default function LoginPage() {
                 <span>Iniciando sesión...</span>
               </>
             ) : (
-              <span>Ingresar al Sistema</span>
+              <span>{needsCode ? 'Verificar código' : 'Ingresar al Sistema'}</span>
             )}
           </button>
         </form>

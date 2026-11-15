@@ -16,6 +16,7 @@ auth_info_baileys/
 
 # Builds y caches
 dist/
+dist-test/
 build/
 .next/
 out/

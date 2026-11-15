@@ -41,6 +41,8 @@ import {
   ADD_ON_STATUSES,
   ADD_ON_WINDOW_MS,
   buildAddOnConfirmationMessage,
+  buildAddOnLockedNotice,
+  ADD_ON_LOCKED_MARKER,
   buildAddOnRegisteredMessage,
   buildConfirmationMessage,
   buildDistanceQuoteMessage,
@@ -560,6 +562,11 @@ export class MetaWhatsAppService {
   }
 
   /** Pedido recién registrado del cliente al que todavía se le pueden sumar productos */
+  /**
+   * Pedido reciente al que se le pueden sumar productos. Nunca uno pagado ni con link de pago:
+   * el repartidor no cobraría lo agregado ("Pagado en línea: no cobrar") y Wompi rechazaría el
+   * pago del link viejo por monto distinto. En esos casos lo nuevo va como pedido aparte.
+   */
   private async findOpenOrderForAddOn(restaurantId: string, customerPhone: string) {
     const order = await this.prisma.order.findFirst({
       where: {
@@ -568,10 +575,30 @@ export class MetaWhatsAppService {
         status: { in: [...ADD_ON_STATUSES] as OrderStatus[] },
         archivedAt: null,
         createdAt: { gte: new Date(Date.now() - ADD_ON_WINDOW_MS) },
+        paymentStatus: { not: 'PAID' },
+        paymentReference: null,
       },
       orderBy: { createdAt: 'desc' },
     });
     return order ? { order, dailyNumber: await dailyNumberOf(this.prisma, order) } : null;
+  }
+
+  /** Pedido reciente que NO admite adiciones por estar pagado o con link de pago (para avisarlo) */
+  private async findLockedOrderForAddOn(restaurantId: string, customerPhone: string) {
+    const order = await this.prisma.order.findFirst({
+      where: {
+        restaurantId,
+        customerPhone,
+        status: { in: [...ADD_ON_STATUSES] as OrderStatus[] },
+        archivedAt: null,
+        createdAt: { gte: new Date(Date.now() - ADD_ON_WINDOW_MS) },
+        OR: [{ paymentStatus: 'PAID' }, { paymentReference: { not: null } }],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return order
+      ? { dailyNumber: await dailyNumberOf(this.prisma, order), paid: order.paymentStatus === 'PAID' }
+      : null;
   }
 
   /** Suma productos (precios de la BD) a un pedido existente y avisa al Kanban/KDS; devuelve el nuevo total */
@@ -1090,6 +1117,21 @@ export class MetaWhatsAppService {
             : null;
         const addOnLines = addOnTarget ? buildOrderLines(aiResult.items, menuItems) : [];
 
+        // Quería sumar al pedido anterior, pero está pagado o tiene link de pago: va como pedido
+        // nuevo. Lo que aceptó era una adición (otro total, quizá sin domicilio): se le muestra el
+        // resumen del pedido nuevo y solo se registra cuando acepta ESE resumen.
+        let addOnLockedNotice: string | null = null;
+        if (aiResult.intent === 'ORDER' && aiResult.addToPreviousOrder && !addOnTarget) {
+          const locked = await this.findLockedOrderForAddOn(restaurant.id, senderNumber);
+          if (locked) {
+            addOnLockedNotice = buildAddOnLockedNotice(locked.dailyNumber, locked.paid);
+            const lastBotMessage = [...chatHistory].reverse().find((h) => h.role === CHAT_ROLE_MODEL)?.message ?? '';
+            if (aiResult.customerConfirmed && !lastBotMessage.includes(ADD_ON_LOCKED_MARKER)) {
+              aiResult = { ...aiResult, customerConfirmed: false, readyToConfirm: true };
+            }
+          }
+        }
+
         if (addOnTarget && addOnLines.length > 0) {
           if (aiResult.customerConfirmed) {
             const newTotal = await this.appendItemsToOrder(addOnTarget.order, addOnLines, addOnTarget.dailyNumber);
@@ -1214,7 +1256,14 @@ export class MetaWhatsAppService {
             }
           } else if (complete && aiResult.readyToConfirm) {
             // 6.2. Datos completos: pedir confirmación con el total exacto (aún NO se crea el pedido)
-            finalResponse = `${aiResult.responseToUser}\n\n${buildConfirmationMessage(aiResult, lines, quote, pickupBranch?.name)}`.trim();
+            finalResponse = [
+              aiResult.responseToUser,
+              addOnLockedNotice,
+              buildConfirmationMessage(aiResult, lines, quote, pickupBranch?.name),
+            ]
+              .filter((part) => part?.trim())
+              .join('\n\n')
+              .trim();
           } else if (isLocationMessage && customerCoords && toPrismaOrderType(aiResult) === OrderType.DELIVERY) {
             // 6.25. Acaba de compartir su ubicación: distancia y costo del envío de una vez
             const pinQuote = await this.deliveryZones.quoteForOrder(

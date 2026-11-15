@@ -269,6 +269,17 @@ export function toPrismaOrderType(ai: OrderIntent): OrderType {
 
 // ── Adición a un pedido ya registrado ("agrégame una gaseosa" justo después de confirmar) ──
 
+/**
+ * Pedido pagado (o con link de pago en curso): no se le suman productos, porque el repartidor no
+ * cobraría lo agregado y Wompi rechazaría el monto. Lo nuevo va como pedido aparte.
+ */
+export const ADD_ON_LOCKED_MARKER = 'va como un pedido nuevo';
+
+export function buildAddOnLockedNotice(dailyNumber: number, paid: boolean): string {
+  const why = paid ? 'ya está pagado' : 'ya tiene un link de pago generado';
+  return `Tu pedido *${formatDailyNumber(dailyNumber)}* ${why}, así que esto ${ADD_ON_LOCKED_MARKER} con su propio total:`;
+}
+
 /** Estados en los que todavía se le pueden sumar productos (aún no sale del local) */
 export const ADD_ON_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING'] as const;
 /** Ventana para tomar "agrégame..." como parte del pedido recién confirmado */

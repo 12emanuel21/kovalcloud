@@ -12,7 +12,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { IncomingMedia, notifySessionNumber, sendToNestjs, uploadMediaToNestjs } from './nestjsBridge';
-import { isLidJid, LidStore, senderIdFor, type IncomingKey } from './lidResolver';
+import { isDirectChatJid, isLidJid, LidStore, senderIdFor, type IncomingKey } from './lidResolver';
 
 dotenv.config();
 
@@ -225,9 +225,8 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
       const remoteJid = msg.key.remoteJid;
-      if (!remoteJid || remoteJid.includes('@broadcast') || remoteJid.includes('status@broadcast')) {
-        continue;
-      }
+      // Solo chats 1 a 1 con clientes: fuera grupos (@g.us), estados/difusión (@broadcast) y canales (@newsletter)
+      if (!isDirectChatJid(remoteJid)) continue;
 
       const content = normalizeMessageContent(msg.message);
       const messageText =
@@ -264,6 +263,7 @@ export async function connectToWhatsApp(restaurantId: string): Promise<Session> 
       // Número real del cliente; "lid:<id>" si WhatsApp no lo comparte (nunca los dígitos del LID
       // como si fueran un teléfono)
       const senderId = senderIdFor(msg.key as IncomingKey, session.lids);
+      if (!senderId) continue;
       const pushName = msg.pushName || 'Cliente WhatsApp';
 
       console.log(

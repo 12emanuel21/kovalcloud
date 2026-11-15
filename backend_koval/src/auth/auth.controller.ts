@@ -15,6 +15,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { LoginThrottlerGuard } from './guards/login-throttler.guard';
 import { Roles } from './decorators/roles.decorator';
 import { KitchenAccess } from './decorators/kitchen-access.decorator';
 import { AuthenticatedUser } from './strategies/jwt.strategy';
@@ -34,6 +35,9 @@ export class AuthController {
     return this.authService.register(registerDto);
   }
 
+  // Máximo 5 intentos por minuto por IP (contraseña y código 2FA)
+  @UseGuards(LoginThrottlerGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('login')
   login(@Body() loginDto: LoginDto) {

@@ -19,6 +19,10 @@ import type { JwtPayload } from './strategies/jwt.strategy';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
 import { SUDO_SCOPE, SUDO_TOKEN_TTL_SECONDS, sudoTokenSecret, type SudoTokenPayload } from './sudo';
 
+/** Respuestas del login con 2FA (401 + code): el frontend pide o vuelve a pedir el código */
+export const LOGIN_TWO_FACTOR_REQUIRED = 'TWO_FACTOR_REQUIRED';
+export const LOGIN_TWO_FACTOR_INVALID = 'TWO_FACTOR_INVALID';
+
 /** TOTP con ±1 ventana de 30 s de tolerancia (relojes de celular desfasados) */
 const totp = authenticator.clone({ window: 1 });
 
@@ -118,6 +122,28 @@ export class AuthService {
     // revelar a terceros si el correo existe.
     if (!user.isActive) {
       throw new ForbiddenException('Tu acceso al sistema fue desactivado. Contacta al administrador del local.');
+    }
+
+    // 2FA activo: la contraseña sola no basta. Se pide el código DESPUÉS de validar la contraseña
+    // (no revela a terceros qué cuentas tienen 2FA). 401 con un código que el login reconoce.
+    if (user.isTwoFactorEnabled && user.twoFactorSecret) {
+      const totpCode = loginDto.totpCode?.replace(/\s/g, '') ?? '';
+      if (!totpCode) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          error: 'Unauthorized',
+          code: LOGIN_TWO_FACTOR_REQUIRED,
+          message: 'Ingresa el código de 6 dígitos de tu app de autenticación.',
+        });
+      }
+      if (!isValidTotp(totpCode, user.twoFactorSecret)) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          error: 'Unauthorized',
+          code: LOGIN_TWO_FACTOR_INVALID,
+          message: 'El código de verificación no es válido o ya expiró.',
+        });
+      }
     }
 
     // 3. Generar JWT firmado (incluye el tenant para filtrar datos por restaurante)

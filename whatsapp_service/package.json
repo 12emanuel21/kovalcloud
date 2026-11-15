@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",

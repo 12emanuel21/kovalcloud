@@ -5,6 +5,17 @@ import { useRouter } from 'next/navigation';
 import { homePathForRole, type UserRole } from '@/lib/roles';
 import { clearSudoToken } from '@/lib/sudo-token';
 
+/** Error del login con el código del backend (ej. TWO_FACTOR_REQUIRED) */
+export class LoginError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'LoginError';
+  }
+}
+
 export interface Restaurant {
   id: string;
   name: string;
@@ -38,7 +49,8 @@ interface AuthContextType {
   exitImpersonation: () => void;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** totpCode: código de 6 dígitos para cuentas con 2FA (lanza LoginError con code si falta) */
+  login: (email: string, password: string, totpCode?: string) => Promise<void>;
   logout: () => void;
   syncAuth: () => boolean;
   /** Reemplaza el token de sesión (p. ej. tras cambiar la contraseña, que invalida los anteriores) */
@@ -134,16 +146,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [token, router]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, totpCode?: string) => {
     const res = await fetch(`${API_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.trim(), password }),
+      body: JSON.stringify({ email: email.trim(), password, ...(totpCode ? { totpCode: totpCode.replace(/\s/g, '') } : {}) }),
     });
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.message || 'Credenciales incorrectas (correo o contraseña inválidos)');
+      // TWO_FACTOR_REQUIRED / TWO_FACTOR_INVALID: la pantalla de login pide el código de 6 dígitos
+      throw new LoginError(
+        errorData.message || 'Credenciales incorrectas (correo o contraseña inválidos)',
+        typeof errorData.code === 'string' ? errorData.code : undefined,
+      );
     }
 
     const data = await res.json();

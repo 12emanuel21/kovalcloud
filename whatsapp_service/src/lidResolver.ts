@@ -25,6 +25,17 @@ export const isLidJid = (jid: string | null | undefined): jid is string => Boole
 const isPnJid = (jid: string | null | undefined): jid is string => Boolean(jid?.endsWith(PN_SUFFIX));
 
 /**
+ * Chat 1 a 1 con un cliente: número (@s.whatsapp.net) o LID (@lid). Todo lo demás se ignora:
+ * grupos (@g.us), estados y listas de difusión (@broadcast), canales (@newsletter). Si no, el bot
+ * respondía con la IA dentro de los grupos del número del negocio.
+ */
+export function isDirectChatJid(jid: string | null | undefined): jid is string {
+  if (typeof jid !== 'string') return false;
+  const user = jid.split('@')[0];
+  return Boolean(user) && (jid.endsWith(PN_SUFFIX) || jid.endsWith(LID_SUFFIX));
+}
+
+/**
  * Mapa LID -> número de una sesión, y JID con el que responder a cada contacto.
  * Se guarda junto a las credenciales (se borra con ellas al desvincular) para seguir
  * respondiendo bien a los LID tras un reinicio.
@@ -110,10 +121,12 @@ export function resolveSenderPhone(key: IncomingKey, store: LidStore): string | 
 
 /**
  * Identificador del cliente para el backend: su número, o "lid:<id>" cuando WhatsApp no lo comparte.
- * También deja anotado a qué chat responder.
+ * También deja anotado a qué chat responder. null si no es un chat 1 a 1 (grupo, canal, difusión):
+ * nunca se registra un grupo como destino de respuesta.
  */
-export function senderIdFor(key: IncomingKey, store: LidStore): string {
+export function senderIdFor(key: IncomingKey, store: LidStore): string | null {
   const remoteJid = key.remoteJid ?? '';
+  if (!isDirectChatJid(remoteJid)) return null;
   const phone = resolveSenderPhone(key, store);
   if (phone) {
     store.rememberReplyJid(phone, remoteJid);

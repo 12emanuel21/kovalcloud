@@ -123,7 +123,9 @@ export class RestaurantsController {
     return this.restaurantsService.uploadBanner(id, file);
   }
 
-  @UseGuards(JwtAuthGuard, TenantGuard)
+  // Borra en cascada TODO el tenant (pedidos, clientes, chats, menú, usuarios): solo SUPERADMIN
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(Role.SUPERADMIN)
   @TenantParam('id')
   @Delete(':id')
   remove(@Param('id') id: string) {
