@@ -66,6 +66,10 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:?Falta INTERNAL_API_KEY en .env}
       - FRONTEND_URL=${FRONTEND_URL:?Falta FRONTEND_URL en .env (ej. https://kovalcloude.autobotsdev.dev)}
       - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY:?Falta GOOGLE_GENERATIVE_AI_API_KEY en .env}
+      # Opcionales: modelo principal, respaldos (separados por coma) y tiempo máximo por intento
+      - GEMINI_MODEL=${GEMINI_MODEL:-}
+      - GEMINI_FALLBACK_MODEL=${GEMINI_FALLBACK_MODEL:-}
+      - GEMINI_TIMEOUT_MS=${GEMINI_TIMEOUT_MS:-}
       - WHATSAPP_SERVICE_URL=http://baileys:5000/send
     depends_on:
       db:

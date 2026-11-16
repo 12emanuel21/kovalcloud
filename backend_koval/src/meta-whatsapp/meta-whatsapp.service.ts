@@ -3,7 +3,7 @@ import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { syncWhatsAppBotNumber } from '../restaurants/whatsapp-bot-number';
-import { AiService, type OrderIntent } from '../ai/ai.service';
+import { AiService, dayPartOf, type OrderIntent } from '../ai/ai.service';
 import { isLidContact, normalizeColombianPhone } from '../orders/phone';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { OrderStatus, OrderType } from '@prisma/client';
@@ -25,6 +25,7 @@ import { isValidGeoPoint } from '../delivery-zones/distance/distance-calculator.
 import { activeBranchesOf, mainBranchOf, matchBranchByName, resolveOrderBranchId } from '../branches/branch-routing';
 import { activeSessionHistory } from './chat-session';
 import { isHttpUrl, menuLinkReply, menuWebUrl, withMenuLink } from './menu-link';
+import { buildQuickReply, detectQuickIntent, hasPendingConfirmation } from './quick-replies';
 import {
   BAILEYS_MEDIA_PREFIX,
   MENU_PDF_MEDIA,
@@ -1065,6 +1066,18 @@ export class MetaWhatsAppService {
       const chatHistory = activeSessionHistory(rawHistory.reverse());
       if (rawHistory.length > 0 && chatHistory.length === 0) {
         this.logger.log(`🕒 Sesión nueva para [${senderNumber}]: más de 3 h sin mensajes, contexto anterior descartado`);
+      }
+
+      // 4.6. Atajo instantáneo: un saludo simple o "menú/carta" se responde sin esperar a la IA (que en
+      //      un pico de demanda puede tardar), con el enlace a la carta. Con un resumen pendiente de
+      //      "¿Confirmas?" no aplica: el mensaje sigue el flujo de confirmación.
+      const quickIntent = detectQuickIntent(messageText);
+      if (quickIntent && !hasPendingConfirmation(chatHistory)) {
+        const quickReply = withNotice(buildQuickReply(quickIntent, restaurant.name, menuWebUrl(restaurant), dayPartOf(new Date())));
+        this.logger.log(`⚡ [${restaurant.name}] Atajo de ${quickIntent === 'menu' ? 'carta' : 'saludo'} para [${senderNumber}] sin IA`);
+        await this.sendTextMessage(targetPhoneId, targetToken, senderNumber, quickReply, isBaileys);
+        await this.recordChat(restaurant.id, senderNumber, [userEntry(messageText.trim()), { role: CHAT_ROLE_MODEL, message: quickReply }]);
+        return;
       }
 
       // Guardar el mensaje del usuario en el historial (con su adjunto: foto con texto, nota de voz)

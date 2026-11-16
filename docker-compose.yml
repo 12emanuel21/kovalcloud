@@ -36,6 +36,10 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:?Falta INTERNAL_API_KEY en .env}
       - FRONTEND_URL=${FRONTEND_URL:-}
       - GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY}
+      # Opcionales: modelo principal, respaldos (separados por coma) y tiempo máximo por intento
+      - GEMINI_MODEL=${GEMINI_MODEL:-}
+      - GEMINI_FALLBACK_MODEL=${GEMINI_FALLBACK_MODEL:-}
+      - GEMINI_TIMEOUT_MS=${GEMINI_TIMEOUT_MS:-}
       - WHATSAPP_SERVICE_URL=http://koval_baileys:5000/send
     networks:
       - koval_network

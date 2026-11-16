@@ -176,12 +176,12 @@ describe('Instrucciones del local en la atención por WhatsApp', () => {
     it('la IA recibe las instrucciones del local; sin ellas se llama como siempre', async () => {
       await build(`  ${RULE} `);
       ai.parseOrderIntent.mockResolvedValue({ intent: 'GREETING', items: [], responseToUser: 'Hola' });
-      await send('hola');
+      await send('¿qué jugos tienen?');
       expect(ai.parseOrderIntent.mock.calls[0][4]).toEqual({ customInstructions: RULE });
 
       await build(null);
       ai.parseOrderIntent.mockResolvedValue({ intent: 'GREETING', items: [], responseToUser: 'Hola' });
-      await send('hola');
+      await send('¿qué jugos tienen?');
       expect(ai.parseOrderIntent.mock.calls[0]).toHaveLength(4);
     });
   });

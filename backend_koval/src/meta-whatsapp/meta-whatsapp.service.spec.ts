@@ -794,7 +794,7 @@ describe('MetaWhatsAppService', () => {
         jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
         const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
 
-        await service.processIncomingWebhook(textPayload('hola'), 'napoles-verify-token');
+        await service.processIncomingWebhook(textPayload('¿tienen domicilio?'), 'napoles-verify-token');
 
         expect(sendSpy.mock.calls[0][3]).toBe(`¡Hola! Bienvenido\n\n${PRIVACY_NOTICE}`);
         expect(customers.safeTouch).toHaveBeenCalledWith('rest-1', '573009876543', { acceptTerms: false });

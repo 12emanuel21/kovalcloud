@@ -302,7 +302,7 @@ describe('Pin de ubicación de WhatsApp', () => {
 
     it('local sin coordenadas: la IA se llama como antes (sin la regla del pin)', async () => {
       await build({ located: false });
-      await run({ type: 'text', text: { body: 'hola' } }, { intent: 'GREETING', items: [], responseToUser: 'Hola' });
+      await run({ type: 'text', text: { body: '¿hasta qué hora abren?' } }, { intent: 'QUESTION', items: [], responseToUser: 'Hasta las 10' });
       expect(ai.parseOrderIntent.mock.calls[0]).toHaveLength(4);
     });
   });
