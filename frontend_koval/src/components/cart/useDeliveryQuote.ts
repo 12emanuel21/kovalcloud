@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 
 const API_URL = '/api';
-const QUOTE_DEBOUNCE_MS = 500;
+/** Pausa tras la última tecla antes de cotizar (la dirección se geocodifica en el backend) */
+const QUOTE_DEBOUNCE_MS = 600;
 
 /** Respuesta de GET /restaurants/:id/delivery-coverage/quote (misma forma que calculateDeliveryFee) */
 export type DeliveryQuote =
@@ -13,10 +14,20 @@ export type DeliveryQuote =
       zoneName: string | null;
       deliveryFee: number;
       coverageConfigured: boolean;
-      /** Por distancia (pin GPS): km viales estimados */
+      /** Por distancia (pin GPS o dirección escrita): km viales estimados */
       distanceKm?: number;
+      /** La distancia salió de la dirección escrita (aproximada), no del GPS */
+      geocoded?: boolean;
     }
-  | { isCovered: false; deliveryFee: 0; fallback: 'TAKEAWAY'; coverageConfigured: true; distanceKm?: number; maxRadius?: number };
+  | {
+      isCovered: false;
+      deliveryFee: 0;
+      fallback: 'TAKEAWAY';
+      coverageConfigured: true;
+      distanceKm?: number;
+      maxRadius?: number;
+      geocoded?: boolean;
+    };
 
 /** Pin GPS del cliente ("Usar mi ubicación actual") */
 export interface CustomerCoords {
@@ -29,6 +40,8 @@ export interface DeliveryCoverage {
   zones: Array<{ name: string; fee: number }>;
   /** Tarifa estándar del local para barrios fuera de las zonas (null = no tiene) */
   defaultDeliveryFee?: number | null;
+  /** El local cobra por distancia: basta con escribir la dirección (el GPS es opcional) */
+  distancePricing?: boolean;
 }
 
 /** Mismo nombre que usa el backend para la tarifa estándar */
@@ -51,10 +64,12 @@ export function useDeliveryQuote(
   const place = neighborhood.trim();
   const key = `${place}|${address.trim()}|${coords ? `${coords.lat},${coords.lng}` : ''}`;
   const hasZones = Boolean(coverage?.zones.length);
+  const distancePricing = Boolean(coverage?.distancePricing);
   const defaultFee = coverage?.defaultDeliveryFee && coverage.defaultDeliveryFee > 0 ? coverage.defaultDeliveryFee : null;
   // Con pin GPS se cotiza por distancia (si el local está ubicado; si no, el backend usa las zonas).
-  // Con zonas se cotiza el barrio en el backend; solo con tarifa estándar no hace falta preguntar
-  const shouldQuote = enabled && (Boolean(coords) || (hasZones && Boolean(place || address.trim())));
+  // Por distancia también con solo la dirección escrita (el backend la geocodifica). Con zonas se
+  // cotiza el barrio; solo con tarifa estándar no hace falta preguntar.
+  const shouldQuote = enabled && (Boolean(coords) || ((hasZones || distancePricing) && Boolean(place || address.trim())));
 
   useEffect(() => {
     if (!enabled || !restaurantId) return;
@@ -95,7 +110,7 @@ export function useDeliveryQuote(
   }, [shouldQuote, restaurantId, place, address, key, coords]);
 
   const flatQuote: DeliveryQuote | null =
-    enabled && !coords && !hasZones && defaultFee !== null
+    enabled && !coords && !hasZones && !distancePricing && defaultFee !== null
       ? { isCovered: true, zoneId: null, zoneName: DEFAULT_FEE_ZONE_NAME, deliveryFee: defaultFee, coverageConfigured: true }
       : null;
   const quote = flatQuote ?? (shouldQuote && quoted?.key === key ? quoted.quote : null);
@@ -107,7 +122,9 @@ export function useDeliveryQuote(
     /** Cotizando el texto actual (todavía no hay respuesta para lo que escribió) */
     quoting: shouldQuote && quoted?.key !== key,
     deliveryFee: quote?.isCovered ? quote.deliveryFee : 0,
-    /** La tarifa salió del pin GPS (el barrio deja de ser obligatorio) */
+    /** La tarifa salió de la distancia (pin GPS o dirección escrita): el barrio deja de ser obligatorio */
     byDistance: quote?.distanceKm !== undefined,
+    /** El local cobra por distancia: la dirección escrita basta para cotizar */
+    distancePricing,
   };
 }

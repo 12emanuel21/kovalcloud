@@ -200,7 +200,7 @@ export class OrdersService {
         code: 'OUT_OF_COVERAGE',
         message:
           quote.distanceKm !== undefined && quote.maxRadius !== undefined
-            ? `Tu ubicación está a ${formatKm(quote.distanceKm)} km y supera nuestro rango de domicilio (${formatKm(quote.maxRadius)} km). Puedes pedirlo para recoger en el local.`
+            ? `${quote.geocoded ? 'Tu dirección' : 'Tu ubicación'} está a ${formatKm(quote.distanceKm)} km y supera nuestro rango de domicilio (${formatKm(quote.maxRadius)} km). Puedes pedirlo para recoger en el local.`
             : 'Todavía no llegamos a tu barrio con domicilio. Puedes pedirlo para recoger en el local.',
         fallback: quote.fallback,
         ...(quote.distanceKm !== undefined ? { distanceKm: quote.distanceKm, maxRadius: quote.maxRadius } : {}),

@@ -60,7 +60,14 @@ export class DeliveryZonesService {
       this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { defaultDeliveryFee: true } }),
     ]);
     const defaultDeliveryFee = usableDefaultFee(restaurant?.defaultDeliveryFee);
-    return { coverageConfigured: zones.length > 0 || defaultDeliveryFee !== null, zones, defaultDeliveryFee };
+    // Por distancia: la carta cotiza la dirección escrita (no solo el barrio de una zona)
+    const distancePricing = await this.pricing.hasDistancePricing(restaurantId);
+    return {
+      coverageConfigured: zones.length > 0 || defaultDeliveryFee !== null || distancePricing,
+      zones,
+      defaultDeliveryFee,
+      ...(distancePricing ? { distancePricing: true } : {}),
+    };
   }
 
   async create(restaurantId: string, dto: CreateDeliveryZoneDto) {
@@ -122,9 +129,14 @@ export class DeliveryZonesService {
   }
 
   /**
-   * Cotización completa: con pin GPS del cliente y el local (o una sede) ubicado, por distancia
-   * (Haversine x 1.30, tarifa escalonada). Sin pin o sin coordenadas del local: zonas y tarifa
-   * estándar, como siempre.
+   * Cotización completa, con el local (o una sede) ubicado se cobra por distancia (Haversine x 1.30,
+   * tarifa escalonada, sede más cercana):
+   * 1. Pin GPS del cliente.
+   * 2. Sin pin: la dirección (y el barrio) escritos, geocodificados por detrás.
+   * 3. Sin coordenadas del local, o dirección que no se ubica: zonas y tarifa estándar, como siempre.
+   * Una dirección geocodificada fuera del radio no rechaza el pedido por sí sola (la ubicación es
+   * aproximada): manda lo que digan las zonas o la tarifa estándar, y solo si tampoco cubren queda
+   * fuera de cobertura.
    */
   async quote(
     restaurantId: string,
@@ -136,7 +148,17 @@ export class DeliveryZonesService {
       const byDistance = await this.pricing.calculateFee(restaurantId, customerCoords, targetBranchId);
       if (byDistance) return byDistance;
     }
-    return this.calculateDeliveryFee(restaurantId, places.neighborhood, places.address);
+    const byAddress = isValidGeoPoint(customerCoords)
+      ? null
+      : await this.pricing.calculateFeeForAddress(restaurantId, places, targetBranchId);
+    if (byAddress?.isCovered) return byAddress;
+    const byZones = await this.calculateDeliveryFee(restaurantId, places.neighborhood, places.address);
+    return byAddress && !byZones.isCovered ? byAddress : byZones;
+  }
+
+  /** ¿El local cobra el domicilio por distancia? (la carta cotiza también con solo la dirección) */
+  hasDistancePricing(restaurantId: string) {
+    return this.pricing.hasDistancePricing(restaurantId);
   }
 
   /** Flete de un pedido: solo los domicilios pagan envío (recoger y mesa: 0) */

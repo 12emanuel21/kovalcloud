@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DISTANCE_CALCULATOR, isValidGeoPoint, type GeoPoint, type IDistanceCalculator } from './distance-calculator.interface';
 import { HaversineDistanceCalculator, roundKm } from './haversine-calculator.service';
+import { GEOCODER, type IGeocoder } from './geocoding.service';
 
 /** Tarifa escalonada por distancia */
 export interface DistancePricing {
@@ -63,6 +64,7 @@ interface Origin {
   point: GeoPoint;
   branchId: string | null;
   branchName: string | null;
+  isMain: boolean;
   pricing: DistancePricing;
 }
 
@@ -89,12 +91,16 @@ function mergePricing(brand: DistancePricing, branch?: Partial<PricingFields>): 
 @Injectable()
 export class DeliveryPricingService {
   private readonly calculator: IDistanceCalculator;
+  /** Sin geocodificador (tests, o sin registrar) no se cotizan direcciones escritas: zonas como siempre */
+  private readonly geocoder: IGeocoder | null;
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() @Inject(DISTANCE_CALCULATOR) calculator?: IDistanceCalculator,
+    @Optional() @Inject(GEOCODER) geocoder?: IGeocoder,
   ) {
     this.calculator = calculator ?? new HaversineDistanceCalculator();
+    this.geocoder = geocoder ?? null;
   }
 
   /**
@@ -105,6 +111,36 @@ export class DeliveryPricingService {
    */
   async calculateFee(restaurantId: string, customerCoords: GeoPoint, targetBranchId?: string | null): Promise<DistanceQuote | null> {
     if (!isValidGeoPoint(customerCoords)) return null;
+    const origins = await this.loadOrigins(restaurantId, targetBranchId);
+    return origins.length > 0 ? this.priceFrom(origins, customerCoords) : null;
+  }
+
+  /**
+   * Dirección escrita (sin pin): se geocodifica cerca del local y se cotiza igual que un pin, con la
+   * sede más cercana. null si el local no cobra por distancia, no hay geocodificador o la dirección
+   * no se ubica (quien llama sigue con las zonas o la tarifa estándar).
+   */
+  async calculateFeeForAddress(
+    restaurantId: string,
+    places: { address?: string | null; neighborhood?: string | null },
+    targetBranchId?: string | null,
+  ): Promise<(DistanceQuote & { geocoded: true }) | null> {
+    if (!this.geocoder || !(places.address?.trim() || places.neighborhood?.trim())) return null;
+    const origins = await this.loadOrigins(restaurantId, targetBranchId);
+    if (origins.length === 0) return null;
+    // Sesgo hacia la ciudad del local: la sede principal (o la primera ubicada)
+    const bias = (origins.find((origin) => origin.isMain) ?? origins[0]).point;
+    const point = await this.geocoder.geocode(places.address, { bias, neighborhood: places.neighborhood });
+    if (!point) return null;
+    return { ...(await this.priceFrom(origins, point)), geocoded: true };
+  }
+
+  /** ¿El local (o alguna sede activa) tiene coordenadas? Entonces cobra el domicilio por distancia. */
+  async hasDistancePricing(restaurantId: string): Promise<boolean> {
+    return (await this.loadOrigins(restaurantId)).length > 0;
+  }
+
+  private async loadOrigins(restaurantId: string, targetBranchId?: string | null): Promise<Origin[]> {
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: restaurantId },
       select: {
@@ -117,7 +153,7 @@ export class DeliveryPricingService {
         },
       },
     });
-    if (!restaurant) return null;
+    if (!restaurant) return [];
 
     const brand: DistancePricing = {
       baseDeliveryFee: restaurant.baseDeliveryFee,
@@ -125,9 +161,10 @@ export class DeliveryPricingService {
       extraKmFee: restaurant.extraKmFee,
       maxDeliveryRadiusKm: restaurant.maxDeliveryRadiusKm,
     };
-    const origins = this.originsFor(restaurant, (restaurant.branches ?? []) as BranchRow[], brand, targetBranchId);
-    if (origins.length === 0) return null;
+    return this.originsFor(restaurant, (restaurant.branches ?? []) as BranchRow[], brand, targetBranchId);
+  }
 
+  private async priceFrom(origins: Origin[], customerCoords: GeoPoint): Promise<DistanceQuote> {
     const measured = await Promise.all(
       origins.map(async (origin) => ({ origin, distanceKm: roundKm(await this.calculator.calculateDistance(origin.point, customerCoords)) })),
     );
@@ -168,7 +205,13 @@ export class DeliveryPricingService {
     const located = branches
       .map((branch) => ({ branch, point: { lat: branch.latitude, lng: branch.longitude } }))
       .filter((entry): entry is { branch: BranchRow; point: GeoPoint } => isValidGeoPoint(entry.point as Partial<GeoPoint>))
-      .map(({ branch, point }) => ({ point, branchId: branch.id, branchName: branch.name, pricing: mergePricing(brand, branch) }));
+      .map(({ branch, point }) => ({
+        point,
+        branchId: branch.id,
+        branchName: branch.name,
+        isMain: branch.isMain,
+        pricing: mergePricing(brand, branch),
+      }));
 
     const target = targetBranchId ? located.filter((origin) => origin.branchId === targetBranchId) : [];
     if (target.length > 0) return target;
@@ -178,6 +221,6 @@ export class DeliveryPricingService {
     const point = { lat: restaurant.latitude, lng: restaurant.longitude };
     if (!isValidGeoPoint(point as Partial<GeoPoint>)) return [];
     const main = branches.find((branch) => branch.isMain) ?? null;
-    return [{ point: point as GeoPoint, branchId: main?.id ?? null, branchName: main?.name ?? null, pricing: brand }];
+    return [{ point: point as GeoPoint, branchId: main?.id ?? null, branchName: main?.name ?? null, isMain: true, pricing: brand }];
   }
 }

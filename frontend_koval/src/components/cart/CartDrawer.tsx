@@ -193,7 +193,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   // Con zonas el barrio es obligatorio (define la tarifa); solo con tarifa estándar no hace falta
-  const { coverage, hasZones, quote, quoting, deliveryFee, byDistance } = useDeliveryQuote(
+  const { coverage, hasZones, quote, quoting, deliveryFee, byDistance, distancePricing } = useDeliveryQuote(
     restaurantId,
     isOpen && isDelivery,
     neighborhood,
@@ -202,11 +202,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   );
   // Con el pin cotizado por distancia, dirección y barrio pasan a ser opcionales
   const needsNeighborhood = hasZones && !byDistance;
+  // Por distancia, la dirección escrita es el flujo principal (el GPS es opcional)
+  const addressRequired = needsNeighborhood || (distancePricing && !coords);
 
   const requestMyLocation = () => {
     setLocationError(null);
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setLocationError('Tu navegador no permite compartir la ubicación. Escribe tu dirección y barrio.');
+      setLocationError('Tu navegador no permite usar el GPS. Con tu dirección y barrio es suficiente.');
       return;
     }
     setLocating(true);
@@ -223,8 +225,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         setLocating(false);
         setLocationError(
           error.code === error.PERMISSION_DENIED
-            ? 'No diste permiso para usar tu ubicación. Escribe tu dirección y barrio.'
-            : 'No pudimos obtener tu ubicación. Inténtalo de nuevo o escribe tu dirección y barrio.',
+            ? 'Sin permiso para el GPS: con tu dirección y barrio es suficiente.'
+            : 'No pudimos obtener tu ubicación. Con tu dirección y barrio es suficiente.',
         );
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 },
@@ -275,6 +277,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     }
     if (isDelivery && needsNeighborhood && !neighborhood.trim()) {
       setErrorMsg('Escribe tu barrio para calcular el domicilio.');
+      return;
+    }
+    // Por distancia, con la dirección escrita basta (el GPS es opcional)
+    if (isDelivery && distancePricing && !coords && !deliveryAddress.trim()) {
+      setErrorMsg('Escribe tu dirección para calcular el domicilio.');
       return;
     }
     if (outOfCoverage) {
@@ -788,42 +795,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   {isDelivery && (
                     <>
                       <div>
-                        <button
-                          type="button"
-                          onClick={requestMyLocation}
-                          disabled={locating}
-                          className={`w-full rounded-sf border px-3.5 py-2.5 text-sm font-semibold transition disabled:opacity-60 ${
-                            coords ? `border-sf-primary ${accent.text} bg-sf-bg` : 'border-sf-border text-sf-text hover:border-sf-muted'
-                          }`}
-                        >
-                          {locating ? 'Obteniendo tu ubicación...' : coords ? '📍 Ubicación lista · Actualizar' : '📍 Usar mi ubicación actual'}
-                        </button>
-                        <p className="mt-1.5 text-[11px] text-sf-muted" aria-live="polite">
-                          {locationError
-                            ? locationError
-                            : coords
-                              ? quoting
-                                ? 'Calculando el envío por distancia...'
-                                : quote?.isCovered && byDistance
-                                  ? `Distancia: ${quote.distanceKm!.toLocaleString('es-CO')} km · Envío: ${formatCOP(quote.deliveryFee)}`
-                                  : quote?.isCovered
-                                    ? 'Ubicación guardada para el repartidor.'
-                                    : null
-                              : 'Calculamos el envío exacto con tu ubicación. También puedes escribir tu dirección.'}
-                          {coords && (
-                            <button
-                              type="button"
-                              onClick={() => setCoords(null)}
-                              className="ml-2 font-semibold underline underline-offset-2"
-                            >
-                              Quitar
-                            </button>
-                          )}
-                        </p>
-                      </div>
-                      <div>
                         <label className="block text-xs font-medium text-sf-body mb-1">
-                          Dirección de Entrega {needsNeighborhood ? <span className={accent.text}>*</span> : '(Opcional)'}
+                          Dirección de Entrega {addressRequired ? <span className={accent.text}>*</span> : '(Opcional)'}
                         </label>
                         <input
                           type="text"
@@ -831,9 +804,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           onChange={(e) => setDeliveryAddress(e.target.value)}
                           maxLength={250}
                           placeholder={coords ? 'Ej. Apto 401, casa azul (referencia)' : 'Ej. Cra 45 # 26-85 Apto 401'}
-                          required={needsNeighborhood}
+                          required={addressRequired}
+                          autoComplete="street-address"
                           className={`w-full bg-sf-bg border border-sf-border ${accent.focus} focus:ring-1 rounded-sf px-3.5 py-2.5 text-sm text-sf-text placeholder-sf-muted outline-none transition`}
                         />
+                        {/* Por distancia: el envío se calcula mientras escribe (sin exigir el GPS) */}
+                        {distancePricing && !coords && (deliveryAddress.trim() || neighborhood.trim()) && (
+                          <p className="mt-1.5 text-[11px] text-sf-muted" aria-live="polite">
+                            {quoting
+                              ? 'Calculando el envío...'
+                              : quote?.isCovered && byDistance
+                                ? `Envío aprox. (${quote.distanceKm!.toLocaleString('es-CO')} km): ${formatCOP(quote.deliveryFee)}`
+                                : null}
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-sf-body mb-1">
@@ -866,7 +850,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           <div className="mt-2 rounded-sf border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-sf-text">
                             <p className="font-medium">
                               {quote?.isCovered === false && quote.distanceKm !== undefined
-                                ? `Tu ubicación está a ${quote.distanceKm.toLocaleString('es-CO')} km y supera nuestro rango de domicilio${quote.maxRadius !== undefined ? ` (${quote.maxRadius.toLocaleString('es-CO')} km)` : ''}.`
+                                ? `${quote.geocoded ? 'Tu dirección' : 'Tu ubicación'} está a ${quote.distanceKm.toLocaleString('es-CO')} km y supera nuestro rango de domicilio${quote.maxRadius !== undefined ? ` (${quote.maxRadius.toLocaleString('es-CO')} km)` : ''}.`
                                 : `Todavía no llegamos a ${neighborhood.trim() || 'tu barrio'} con domicilio.`}
                             </p>
                             <button
@@ -880,6 +864,45 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                               Cambiar a Recoger en el local
                             </button>
                           </div>
+                        )}
+                      </div>
+                      {/* GPS opcional: solo afina el cálculo; nunca es obligatorio ni se insiste */}
+                      <div>
+                        <button
+                          type="button"
+                          onClick={requestMyLocation}
+                          disabled={locating}
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold underline-offset-2 transition hover:underline disabled:opacity-60 ${
+                            coords ? accent.text : 'text-sf-muted'
+                          }`}
+                        >
+                          {locating
+                            ? 'Obteniendo tu ubicación...'
+                            : coords
+                              ? '📍 Ubicación GPS guardada · Actualizar'
+                              : '📍 O usar mi GPS para mayor precisión'}
+                        </button>
+                        {(locationError || coords) && (
+                          <p className="mt-1 text-[11px] text-sf-muted" aria-live="polite">
+                            {locationError
+                              ? locationError
+                              : quoting
+                                ? 'Calculando el envío por distancia...'
+                                : quote?.isCovered && byDistance
+                                  ? `Distancia: ${quote.distanceKm!.toLocaleString('es-CO')} km · Envío: ${formatCOP(quote.deliveryFee)}`
+                                  : quote?.isCovered
+                                    ? 'Ubicación guardada para el repartidor.'
+                                    : null}
+                            {coords && (
+                              <button
+                                type="button"
+                                onClick={() => setCoords(null)}
+                                className="ml-2 font-semibold underline underline-offset-2"
+                              >
+                                Quitar
+                              </button>
+                            )}
+                          </p>
                         )}
                       </div>
                     </>

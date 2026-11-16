@@ -40,6 +40,8 @@ services:
       - GEMINI_MODEL=${GEMINI_MODEL:-}
       - GEMINI_FALLBACK_MODEL=${GEMINI_FALLBACK_MODEL:-}
       - GEMINI_TIMEOUT_MS=${GEMINI_TIMEOUT_MS:-}
+      # Opcional: false apaga la geocodificación de direcciones escritas (Photon / Nominatim)
+      - GEOCODING_ENABLED=${GEOCODING_ENABLED:-}
       - WHATSAPP_SERVICE_URL=http://koval_baileys:5000/send
     networks:
       - koval_network

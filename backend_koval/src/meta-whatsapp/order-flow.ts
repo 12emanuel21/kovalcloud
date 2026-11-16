@@ -96,11 +96,16 @@ export function latestSharedLocation(
  */
 export function buildDistanceQuoteMessage(quote: DeliveryQuote, subtotal: number): string | null {
   if (quote.distanceKm === undefined) return null;
+  // Dirección escrita (geocodificada): la distancia es aproximada; con pin GPS es la calculada
+  const place = quote.geocoded ? 'Tu dirección' : 'Tu ubicación';
   if (!quote.isCovered) {
     const radius = quote.maxRadius !== undefined ? ` (${formatKm(quote.maxRadius)} km)` : '';
-    return `Tu ubicación está a ${formatKm(quote.distanceKm)} km y supera nuestro rango máximo de domicilio${radius}. ¿Quieres pedirlo para recoger en el local?`;
+    return `${place} está a ${formatKm(quote.distanceKm)} km y supera nuestro rango máximo de domicilio${radius}. ¿Quieres pedirlo para recoger en el local?`;
   }
-  const lines = [`🛵 Distancia calculada: ${formatKm(quote.distanceKm)} km`, `💵 Costo de envío: ${money(quote.deliveryFee)} COP`];
+  const lines = [
+    `🛵 Distancia ${quote.geocoded ? 'aproximada' : 'calculada'}: ${formatKm(quote.distanceKm)} km`,
+    `💵 Costo de envío: ${money(quote.deliveryFee)} COP`,
+  ];
   if (subtotal > 0) {
     lines.push(`Subtotal: ${money(subtotal)} + Envío: ${money(quote.deliveryFee)} = Total: ${money(subtotal + quote.deliveryFee)}`);
   }

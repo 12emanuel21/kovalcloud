@@ -157,7 +157,8 @@ describe('Motor de domicilio por distancia', () => {
         deliveryZone: { findMany: jest.fn().mockResolvedValue(zones) },
         restaurant: { findUnique: jest.fn().mockResolvedValue({ defaultDeliveryFee: null }) },
       };
-      const pricing: any = { calculateFee: jest.fn().mockResolvedValue(distance) };
+      // Sin geocodificación de la dirección escrita (null): se mantiene el comportamiento por zonas
+      const pricing: any = { calculateFee: jest.fn().mockResolvedValue(distance), calculateFeeForAddress: jest.fn().mockResolvedValue(null) };
       return { pricing, service: new DeliveryZonesService(prisma, pricing) };
     };
 

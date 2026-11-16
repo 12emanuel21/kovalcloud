@@ -32,6 +32,8 @@ export type DeliveryQuote =
       /** Cotización por distancia (pin GPS): km viales estimados y sede de origen */
       distanceKm?: number;
       branchName?: string | null;
+      /** La distancia salió de la dirección escrita (geocodificada), no de un pin: es aproximada */
+      geocoded?: boolean;
     }
   | {
       isCovered: false;
@@ -42,6 +44,7 @@ export type DeliveryQuote =
       distanceKm?: number;
       maxRadius?: number;
       branchId?: string | null;
+      geocoded?: boolean;
     };
 
 export const DEFAULT_FEE_ZONE_NAME = 'Tarifa general';

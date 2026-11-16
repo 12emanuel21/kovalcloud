@@ -123,18 +123,18 @@ export function buildPickupBranchesRule(branchNames: string[]): string {
 }
 
 /**
- * Regla 9.1 (solo si el local o alguna sede tiene coordenadas): el domicilio se cobra por distancia,
- * así que se pide primero el pin de WhatsApp. Sin coordenadas no se agrega y el bot pide dirección
- * y barrio como siempre.
+ * Regla 9.1 (solo si el local o alguna sede tiene coordenadas): el domicilio se cobra por distancia
+ * a partir de la dirección escrita (se geocodifica por detrás); el pin de WhatsApp es opcional y, si
+ * llega, es lo más preciso. Sin coordenadas no se agrega y el bot pide dirección y barrio como siempre.
  */
 export function buildLocationPinRule(enabled: boolean): string {
   if (!enabled) return '';
-  return `## Regla 9.1 — Pin de ubicación (domicilio por distancia; tiene prioridad sobre la Regla 3)
-- Cuando el cliente pida domicilio y aún no haya compartido su ubicación, pídela así (es el único caso en que puedes usar ese emoji al pedir datos): "📍 Por favor compártenos tu ubicación actual por WhatsApp (icono de clip 📎 o '+' -> Ubicación) para calcular el envío exacto."
-- Si el cliente no puede o prefiere escribirla, acepta dirección y barrio sin insistir.
-- Un mensaje del cliente que empieza por "📍 Ubicación compartida:" ES su ubicación: ya no le pidas dirección ni barrio (solo, si quiere, una referencia corta como "apto 302" o "casa azul" en deliveryAddress). Deja intent = ORDER si tiene un pedido en curso.
-- Al recibir la ubicación, el sistema calcula la distancia (calculate_delivery_cost con su latitud y longitud) y agrega al mensaje la distancia, el costo del envío y el total. Tú NO escribas distancias, kilómetros, costos de envío ni totales: responde una frase breve y pide el siguiente dato que falte (nombre o método de pago).
-- Si el sistema avisa que la ubicación supera el rango máximo de domicilio, ofrece amablemente recoger en el local (TAKEAWAY) sin insistir con el domicilio.
+  return `## Regla 9.1 — Domicilio por distancia (el pin de ubicación es opcional)
+- Para un domicilio pide la dirección y el barrio de forma natural, como en la Regla 3. NO le pidas al cliente que comparta su ubicación: con la dirección escrita el sistema calcula la distancia y el valor del envío.
+- Si el cliente comparte su ubicación por su cuenta, perfecto: un mensaje que empieza por "📍 Ubicación compartida:" ES su ubicación; ya no le pidas dirección ni barrio (solo, si quiere, una referencia corta como "apto 302" o "casa azul" en deliveryAddress). Deja intent = ORDER si tiene un pedido en curso.
+- Solo si el cliente pregunta cómo hacerlo, o si su dirección no se entiende, puedes mencionar que también puede enviar su ubicación por WhatsApp (clip 📎 o '+' -> Ubicación), siempre como opción.
+- El sistema calcula la distancia, el costo del envío y el total y los agrega al mensaje (calculate_delivery_cost). Tú NO escribas distancias, kilómetros, costos de envío ni totales: responde una frase breve y pide el siguiente dato que falte (nombre o método de pago).
+- Si el sistema avisa que la dirección supera el rango máximo de domicilio, ofrece amablemente recoger en el local (TAKEAWAY) sin insistir con el domicilio.
 
 `;
 }

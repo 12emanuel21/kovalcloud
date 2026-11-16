@@ -116,10 +116,14 @@ describe('Pin de ubicación de WhatsApp', () => {
       expect(summary).toMatch(/¿Confirmas\?$/);
     });
 
-    it('la regla del pin solo entra al prompt si el local cobra por distancia', () => {
+    it('la regla de distancia solo entra al prompt si el local cobra por distancia (pin opcional)', () => {
       expect(buildLocationPinRule(false)).toBe('');
       const rule = buildLocationPinRule(true);
-      expect(rule).toContain("📍 Por favor compártenos tu ubicación actual por WhatsApp (icono de clip 📎 o '+' -> Ubicación) para calcular el envío exacto.");
+      // Ya no se exige el pin: se piden dirección y barrio; el pin queda como opción del cliente
+      expect(rule).not.toContain('Por favor compártenos tu ubicación');
+      expect(rule).toContain('NO le pidas al cliente que comparta su ubicación');
+      expect(rule).toContain('el pin de ubicación es opcional');
+      expect(rule).toContain('📍 Ubicación compartida:');
       expect(rule).toContain('calculate_delivery_cost');
     });
   });

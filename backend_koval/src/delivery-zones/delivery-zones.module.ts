@@ -5,6 +5,7 @@ import { DeliveryZonesService } from './delivery-zones.service';
 import { DeliveryPricingService } from './distance/delivery-pricing.service';
 import { HaversineDistanceCalculator } from './distance/haversine-calculator.service';
 import { DISTANCE_CALCULATOR } from './distance/distance-calculator.interface';
+import { GEOCODER, GeocodingService } from './distance/geocoding.service';
 
 @Module({
   imports: [AuthModule],
@@ -14,6 +15,8 @@ import { DISTANCE_CALCULATOR } from './distance/distance-calculator.interface';
     DeliveryPricingService,
     // Hoy Haversine con factor vial; para OSRM basta con registrar otra clase aquí
     { provide: DISTANCE_CALCULATOR, useClass: HaversineDistanceCalculator },
+    // Direcciones escritas -> coordenadas (Photon / Nominatim, con caché en memoria)
+    { provide: GEOCODER, useClass: GeocodingService },
   ],
   exports: [DeliveryZonesService, DeliveryPricingService],
 })
