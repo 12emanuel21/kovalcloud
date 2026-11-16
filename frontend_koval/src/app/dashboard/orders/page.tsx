@@ -10,7 +10,7 @@ import DispatchModal from '@/components/orders/DispatchModal';
 import PaymentProofModal from '@/components/orders/PaymentProofModal';
 import { formatCustomerPhone, isLidContact, waPhone } from '@/lib/customer-phone';
 import { orderNumberLabel } from '@/lib/order-number';
-import { branchNameOf, useBranches } from '../settings/useBranches';
+import { branchNameOf, hasMultipleBranches, useBranches } from '../settings/useBranches';
 
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'DELIVERED' | 'CANCELLED';
 
@@ -118,6 +118,48 @@ const playOrderChime = () => {
   }
 };
 
+type KanbanColumnId = 'pending' | 'preparing' | 'delivered';
+
+/** Columnas del tablero: en escritorio se ven las 3; en móvil y tablet, una a la vez con pestañas */
+const KANBAN_COLUMNS: Array<{
+  id: KanbanColumnId;
+  title: string;
+  /** Nombre corto para la pestaña móvil */
+  tab: string;
+  empty: string;
+  dot: string;
+  badge: string;
+}> = [
+  {
+    id: 'pending',
+    title: 'Pendientes',
+    tab: 'Pendientes',
+    empty: 'No hay pedidos pendientes',
+    dot: 'bg-amber-400 animate-pulse',
+    badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  },
+  {
+    id: 'preparing',
+    title: 'En Preparación',
+    tab: 'Preparando',
+    empty: 'No hay pedidos en preparación',
+    dot: 'bg-blue-400',
+    badge: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  },
+  {
+    id: 'delivered',
+    title: 'Listos / Despachados',
+    tab: 'Listos',
+    empty: 'No hay pedidos despachados',
+    dot: 'bg-emerald-400',
+    badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  },
+];
+
+/** Botón secundario de la tarjeta (WhatsApp, mapa, comprobante): 44 px de alto para el dedo */
+const quickActionClass =
+  'inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition';
+
 export default function OrdersPage() {
   const { restaurantId, token, logout } = useAuth();
 
@@ -133,6 +175,11 @@ export default function OrdersPage() {
   // Multisede: filtro por sede ('' = todas). Sin sedes no se muestra nada nuevo
   const { branches } = useBranches();
   const [branchFilter, setBranchFilter] = useState('');
+  // Con una sola sede no se muestra ni el filtro ni la etiqueta de sede (todo es el mismo local)
+  const multiBranch = hasMultipleBranches(branches);
+  const singleBranch = branches.length === 1;
+  // Columna visible en móvil y tablet (en escritorio se ven las 3)
+  const [mobileColumn, setMobileColumn] = useState<KanbanColumnId>('pending');
   const [isConnectedWs, setIsConnectedWs] = useState<boolean>(false);
   const [newOrderToast, setNewOrderToast] = useState<{ id: string; customer: string; total: number | null } | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -310,6 +357,11 @@ export default function OrdersPage() {
   const deliveredOrders = filterBySearch(
     orders.filter((o) => o.status === 'DELIVERED' || (o.status as string) === 'READY')
   );
+  const columnOrders: Record<KanbanColumnId, Order[]> = {
+    pending: pendingOrders,
+    preparing: preparingOrders,
+    delivered: deliveredOrders,
+  };
 
   const formatOrderTime = (dateStr: string) => {
     try {
@@ -360,7 +412,9 @@ export default function OrdersPage() {
     const turn = orderNumberLabel(order);
     const cleanPhone = waPhone(order.customerPhone);
     const isWhatsApp = order.channel === 'WHATSAPP';
-    const branchName = order.branchId ? order.branch?.name ?? branchNameOf(branches, order.branchId, '') : '';
+    const branchName =
+      order.branchId && !singleBranch ? order.branch?.name ?? branchNameOf(branches, order.branchId, '') : '';
+    const hasGps = order.orderType !== 'DINE_IN' && order.customerLat != null && order.customerLng != null;
 
     return (
       <div
@@ -395,20 +449,6 @@ export default function OrdersPage() {
                 </span>
               )}
               {renderPaymentBadge(order)}
-              {order.paymentProofUrl && (
-                <button
-                  type="button"
-                  onClick={() => setProofOrderId(order.id)}
-                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-black tracking-wide transition ${
-                    order.paymentStatus === 'PAID'
-                      ? 'border border-slate-600 text-slate-300 hover:border-slate-500'
-                      : 'animate-pulse bg-amber-400 text-slate-950 hover:bg-amber-300'
-                  }`}
-                  title="Ver el comprobante que envió el cliente por WhatsApp"
-                >
-                  🧾 {order.paymentStatus === 'PAID' ? 'COMPROBANTE' : 'VER COMPROBANTE'}
-                </button>
-              )}
             </div>
           </div>
 
@@ -427,56 +467,66 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        {/* Información del Cliente */}
-        <div className="space-y-1 text-xs">
-          <div className="flex items-center justify-between">
-            {order.customerPhone ? (
-              <p className="text-slate-400 font-mono text-[11px]">
-                {isLidContact(order.customerPhone) ? formatCustomerPhone(order.customerPhone) : order.customerPhone}
-              </p>
-            ) : (
-              <span />
-            )}
+        {/* Cliente: la dirección completa se lee de un vistazo (sin depender del hover) */}
+        <div className="space-y-1.5">
+          {order.customerPhone && (
+            <p className="font-mono text-xs text-slate-400">
+              {isLidContact(order.customerPhone) ? formatCustomerPhone(order.customerPhone) : order.customerPhone}
+            </p>
+          )}
+          {order.orderType === 'DINE_IN' && order.tableNumber ? (
+            <p className="text-sm font-semibold text-indigo-400">🍽️ Mesa: {order.tableNumber}</p>
+          ) : order.deliveryAddress ? (
+            <p className="whitespace-normal break-words text-sm leading-snug text-slate-200">📍 {order.deliveryAddress}</p>
+          ) : null}
+        </div>
+
+        {/* Acciones rápidas: WhatsApp, mapa del pin y comprobante */}
+        {(cleanPhone || hasGps || order.paymentProofUrl) && (
+          <div className="flex flex-wrap gap-2">
             {cleanPhone && (
               <a
                 href={`https://wa.me/${cleanPhone}`}
                 target="_blank"
                 rel="noreferrer"
-                className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-[10px] font-semibold transition flex items-center gap-1"
+                className={`${quickActionClass} border-emerald-500/20 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20`}
                 title="Abrir chat en WhatsApp"
               >
-                <span>WhatsApp</span>
-                <span className="font-mono">↗</span>
+                WhatsApp <span className="font-mono" aria-hidden>↗</span>
               </a>
             )}
+            {hasGps && (
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${order.customerLat},${order.customerLng}`}
+                target="_blank"
+                rel="noreferrer"
+                className={`${quickActionClass} border-sky-500/20 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20`}
+                title="Abrir el pin del cliente en Google Maps"
+              >
+                🗺️ Mapa
+                {order.deliveryDistanceKm != null ? ` · ${order.deliveryDistanceKm.toLocaleString('es-CO')} km` : ''}
+              </a>
+            )}
+            {order.paymentProofUrl && (
+              <button
+                type="button"
+                onClick={() => setProofOrderId(order.id)}
+                className={`${quickActionClass} ${
+                  order.paymentStatus === 'PAID'
+                    ? 'border-slate-600 text-slate-300 hover:border-slate-500'
+                    : 'animate-pulse border-amber-300 bg-amber-400 font-black text-slate-950 hover:bg-amber-300'
+                }`}
+                title="Ver el comprobante que envió el cliente por WhatsApp"
+              >
+                🧾 {order.paymentStatus === 'PAID' ? 'Comprobante' : 'Ver comprobante'}
+              </button>
+            )}
           </div>
-
-          {order.orderType === 'DINE_IN' && order.tableNumber ? (
-            <p className="text-indigo-400 font-semibold text-[11px] flex items-center gap-1 pt-1">
-              <span>🍽️ Mesa: {order.tableNumber}</span>
-            </p>
-          ) : order.deliveryAddress ? (
-            <p className="text-slate-400 text-[11px] truncate pt-0.5" title={order.deliveryAddress}>
-              📍 {order.deliveryAddress}
-            </p>
-          ) : null}
-          {order.orderType !== 'DINE_IN' && order.customerLat != null && order.customerLng != null && (
-            <a
-              href={`https://www.google.com/maps/search/?api=1&query=${order.customerLat},${order.customerLng}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-400 hover:text-sky-300"
-              title="Abrir el pin del cliente en Google Maps"
-            >
-              🗺️ Ver ubicación GPS
-              {order.deliveryDistanceKm != null ? ` · ${order.deliveryDistanceKm.toLocaleString('es-CO')} km` : ''}
-            </a>
-          )}
-        </div>
+        )}
 
         {/* Notas especiales */}
         {order.notes && (
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[11px] text-amber-300">
+          <div className="whitespace-normal break-words rounded border border-amber-500/20 bg-amber-500/10 p-2 text-xs text-amber-300">
             📝 {order.notes}
           </div>
         )}
@@ -486,7 +536,7 @@ export default function OrdersPage() {
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
             Productos ({order.items?.reduce((acc, it) => acc + it.quantity, 0) || 0})
           </p>
-          <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+          <div className="space-y-1">
             {order.items?.map((item) => (
               <div
                 key={item.id}
@@ -496,7 +546,7 @@ export default function OrdersPage() {
                   <span className="font-bold text-amber-400 font-mono shrink-0">
                     {item.quantity}x
                   </span>
-                  <span className="text-slate-200 font-medium truncate">
+                  <span className="break-words font-medium text-slate-200">
                     {item.menuItem?.name || 'Producto'}
                   </span>
                 </div>
@@ -527,7 +577,7 @@ export default function OrdersPage() {
               onClick={() =>
                 order.orderType === 'DELIVERY' ? setDispatchOrder(order) : handleUpdateStatus(order.id, 'DELIVERED')
               }
-              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition shadow-md shadow-emerald-900/40 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+              className="w-full min-h-11 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold px-4 rounded-lg text-sm transition shadow-md shadow-emerald-900/40 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
             >
               {isUpdating ? (
                 <>
@@ -555,7 +605,7 @@ export default function OrdersPage() {
                 disabled={isUpdating}
                 onClick={() => handleArchive(order.id)}
                 title="Saca el pedido del tablero. Sigue en el historial y en el reporte de Excel."
-                className="w-full border border-slate-600 hover:border-slate-400 hover:bg-slate-800 disabled:opacity-50 text-slate-200 font-bold py-2 px-3 rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                className="w-full min-h-11 border border-slate-600 hover:border-slate-400 hover:bg-slate-800 disabled:opacity-50 text-slate-200 font-bold px-3 rounded-lg text-sm transition flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 {isUpdating ? 'Archivando...' : '📦 Entregado / Archivar'}
               </button>
@@ -613,12 +663,12 @@ export default function OrdersPage() {
         {/* Buscador, Exportar y Actualizar */}
         <div className="flex flex-wrap items-center gap-3">
           <ExportOrdersButton />
-          {branches.length > 0 && (
+          {multiBranch && (
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
               aria-label="Filtrar pedidos por sede"
-              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-blue-500 outline-none cursor-pointer"
+              className="min-h-11 bg-slate-900 border border-slate-800 rounded-xl px-3 text-sm text-white focus:border-blue-500 outline-none cursor-pointer"
             >
               <option value="">Todas las sedes</option>
               {branches.map((branch) => (
@@ -629,18 +679,21 @@ export default function OrdersPage() {
               ))}
             </select>
           )}
-          <div className="relative">
+          <div className="relative min-w-0 flex-1 sm:flex-none">
             <input
-              type="text"
+              type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Buscar por cliente o #turno..."
-              className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 outline-none w-56 md:w-64 transition"
+              aria-label="Buscar pedidos por cliente, teléfono o turno"
+              className="min-h-11 w-full bg-slate-900 border border-slate-800 rounded-xl pl-3.5 pr-10 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none sm:w-56 md:w-64 transition [&::-webkit-search-cancel-button]:hidden"
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-2 text-xs text-slate-400 hover:text-white"
+                aria-label="Limpiar búsqueda"
+                className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-sm text-slate-400 hover:text-white"
               >
                 ✕
               </button>
@@ -650,8 +703,9 @@ export default function OrdersPage() {
           <button
             onClick={() => fetchOrders(true)}
             disabled={loading}
-            className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition disabled:opacity-50 cursor-pointer"
+            className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition disabled:opacity-50 cursor-pointer"
             title="Recargar órdenes"
+            aria-label="Recargar pedidos"
           >
             <svg
               className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
@@ -684,92 +738,82 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Tablero Kanban (3 Columnas) */}
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-          {[1, 2, 3].map((col) => (
-            <div
-              key={col}
-              className="bg-slate-900/50 rounded-xl p-4 border border-slate-800 min-h-[70vh] animate-pulse space-y-4"
+      {/* Móvil y tablet: una columna a la vez, con pestañas y contadores (sin scroll infinito) */}
+      <div
+        role="tablist"
+        aria-label="Estado de los pedidos"
+        className="sticky top-0 z-20 grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-slate-950/95 p-1.5 backdrop-blur lg:hidden"
+      >
+        {KANBAN_COLUMNS.map((column) => {
+          const count = columnOrders[column.id].length;
+          const selected = mobileColumn === column.id;
+          return (
+            <button
+              key={column.id}
+              type="button"
+              role="tab"
+              id={`kanban-tab-${column.id}`}
+              aria-selected={selected}
+              aria-controls={`kanban-column-${column.id}`}
+              onClick={() => setMobileColumn(column.id)}
+              className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-xs font-bold transition sm:flex-row sm:gap-1.5 sm:text-sm ${
+                selected ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              }`}
             >
-              <div className="h-6 bg-slate-800 rounded w-1/3 mb-4" />
-              <div className="h-44 bg-slate-800/60 rounded-lg" />
-              <div className="h-44 bg-slate-800/60 rounded-lg" />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-          {/* Columna 1: Pendientes */}
-          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-800 min-h-[70vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/80">
-              <div className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse" />
-                <h2 className="font-bold text-sm text-white">Pendientes</h2>
-              </div>
-              <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold font-mono">
-                {pendingOrders.length}
+              <span className="flex items-center gap-1">
+                {column.id === 'pending' && count > 0 && !selected && (
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400 animate-pulse" aria-hidden />
+                )}
+                {column.tab}
               </span>
-            </div>
+              <span className={`min-w-6 rounded-full border px-1.5 font-mono text-xs ${column.badge}`}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
 
-            <div className="flex-1">
-              {pendingOrders.length === 0 ? (
-                <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-lg text-slate-500 text-xs">
-                  No hay pedidos pendientes
+      {/* Tablero: 3 columnas en escritorio (lg+); en móvil solo la de la pestaña elegida */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
+        {KANBAN_COLUMNS.map((column) => {
+          const list = columnOrders[column.id];
+          const visibleOnMobile = mobileColumn === column.id;
+          return (
+            <section
+              key={column.id}
+              id={`kanban-column-${column.id}`}
+              aria-labelledby={`kanban-title-${column.id}`}
+              className={`${visibleOnMobile ? 'flex' : 'hidden'} flex-col rounded-xl border border-slate-800 bg-slate-900/50 p-3 sm:p-4 lg:flex lg:min-h-[70vh]`}
+            >
+              <div className="mb-4 flex items-center justify-between border-b border-slate-800/80 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${column.dot}`} />
+                  <h2 id={`kanban-title-${column.id}`} className="text-sm font-bold text-white">
+                    {column.title}
+                  </h2>
                 </div>
-              ) : (
-                pendingOrders.map(renderOrderCard)
-              )}
-            </div>
-          </div>
-
-          {/* Columna 2: En Preparación */}
-          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-800 min-h-[70vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/80">
-              <div className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-blue-400" />
-                <h2 className="font-bold text-sm text-white">En Preparación</h2>
+                <span className={`rounded-full border px-2 py-0.5 font-mono text-xs font-bold ${column.badge}`}>
+                  {loading ? '…' : list.length}
+                </span>
               </div>
-              <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-bold font-mono">
-                {preparingOrders.length}
-              </span>
-            </div>
 
-            <div className="flex-1">
-              {preparingOrders.length === 0 ? (
-                <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-lg text-slate-500 text-xs">
-                  No hay pedidos en preparación
-                </div>
-              ) : (
-                preparingOrders.map(renderOrderCard)
-              )}
-            </div>
-          </div>
-
-          {/* Columna 3: Listos / Despachados */}
-          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-800 min-h-[70vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/80">
-              <div className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                <h2 className="font-bold text-sm text-white">Listos / Despachados</h2>
+              <div className="flex-1">
+                {loading ? (
+                  <div className="space-y-4 animate-pulse">
+                    <div className="h-44 rounded-lg bg-slate-800/60" />
+                    <div className="h-44 rounded-lg bg-slate-800/60" />
+                  </div>
+                ) : list.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-800 px-4 py-12 text-center text-sm text-slate-500">
+                    {column.empty}
+                  </div>
+                ) : (
+                  list.map(renderOrderCard)
+                )}
               </div>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold font-mono">
-                {deliveredOrders.length}
-              </span>
-            </div>
-
-            <div className="flex-1">
-              {deliveredOrders.length === 0 ? (
-                <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-lg text-slate-500 text-xs">
-                  No hay pedidos despachados
-                </div>
-              ) : (
-                deliveredOrders.map(renderOrderCard)
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+            </section>
+          );
+        })}
+      </div>
       {(() => {
         const proofOrder = proofOrderId ? orders.find((o) => o.id === proofOrderId) : null;
         return proofOrder?.paymentProofUrl ? (

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -163,7 +164,11 @@ export function ShiftExtensionPanel() {
 
       {emergency ? (
         <p className="text-[11px] text-rose-200/80 lg:text-right">
-          Desactiva el cierre de emergencia en Ajustes para poder prorrogar el horario.
+          Desactiva el{' '}
+          <Link href="/dashboard/settings?tab=horarios" className="font-semibold underline underline-offset-2 hover:text-white">
+            cierre de emergencia
+          </Link>{' '}
+          para poder prorrogar el horario.
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">

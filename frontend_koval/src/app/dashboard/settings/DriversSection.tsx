@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Bike, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { SettingsCardHeader, SettingsFeedback, primaryButtonClass, settingsCardClass } from './settings-ui';
-import { branchNameOf, useBranches } from './useBranches';
+import { branchNameOf, hasMultipleBranches, useBranches } from './useBranches';
 import { BranchSelect } from './BranchSelect';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
@@ -51,7 +51,8 @@ export function DriversSection() {
   const { token, restaurantId } = useAuth();
   // Multisede: el KDS de cada sede solo ofrece sus repartidores (y los de "todas las sedes")
   const { branches } = useBranches();
-  const hasBranches = branches.length > 0;
+  // Con una sola sede (o ninguna) no hay nada que elegir: todo va al mismo local
+  const hasBranches = hasMultipleBranches(branches);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);

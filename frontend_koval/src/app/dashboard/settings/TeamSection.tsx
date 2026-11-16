@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { SudoCancelledError, useSudoMode } from '@/context/SudoContext';
-import { useBranches } from './useBranches';
+import { hasMultipleBranches, useBranches } from './useBranches';
 import { BranchSelect } from './BranchSelect';
 
 const API_URL = typeof window !== 'undefined' ? '/api' : 'http://koval_backend:4000';
@@ -53,7 +53,8 @@ export function TeamSection() {
   const [newBranchId, setNewBranchId] = useState<string | null>(null);
   // Multisede: cada cocina puede quedar atada a una sede
   const { branches } = useBranches();
-  const hasBranches = branches.length > 0;
+  // Con una sola sede (o ninguna) no hay nada que elegir: todo va al mismo local
+  const hasBranches = hasMultipleBranches(branches);
   const [branchSavingId, setBranchSavingId] = useState<string | null>(null);
 
   const authHeaders = useCallback(

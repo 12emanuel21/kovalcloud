@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Building2, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { SettingsCardHeader, SettingsFeedback, primaryButtonClass, settingsCardClass } from './settings-ui';
-import { branchApiError, useBranches, type Branch } from './useBranches';
+import { branchApiError, hasMultipleBranches, useBranches, type Branch } from './useBranches';
 
 interface BranchForm {
   name: string;
@@ -43,6 +43,7 @@ export function BranchesSection() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const shownFeedback = feedback ?? (error ? { type: 'error' as const, text: error } : null);
+  const multiBranch = hasMultipleBranches(branches);
 
   const openForm = (branch?: Branch) => {
     setEditing(branch ? branch.id : 'new');
@@ -155,9 +156,10 @@ export function BranchesSection() {
     <section className={settingsCardClass}>
       <SettingsCardHeader
         title="Sedes"
-        description="Si tu marca tiene varios locales, créalos aquí. La carta y el WhatsApp siguen siendo uno solo: cada domicilio va a la cocina de la sede que atiende su barrio (según la zona) y quien recoge elige la sede. La sede principal recibe los pedidos de barrios sin zona."
+        description="Solo si tu marca tiene más de un local. La carta y el WhatsApp siguen siendo uno solo."
         action={
-          editing !== 'new' && (
+          editing !== 'new' &&
+          branches.length > 0 && (
             <button type="button" onClick={() => openForm()} className={primaryButtonClass}>
               <Plus className="h-4 w-4" /> Agregar sede
             </button>
@@ -167,6 +169,24 @@ export function BranchesSection() {
 
       <div className="space-y-4 p-6">
         <SettingsFeedback feedback={shownFeedback} />
+
+        {/* Con 2 o más sedes se explica cómo se reparten los pedidos; con una, todo es un solo local */}
+        {multiBranch && (
+          <details className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-sm text-slate-400">
+            <summary className="cursor-pointer font-semibold text-slate-300">¿Cómo se reparten los pedidos entre sedes?</summary>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>Cada domicilio va a la cocina de la sede que atiende el barrio (según la zona de domicilio).</li>
+              <li>Quien recoge en el local elige la sede en la carta o por WhatsApp.</li>
+              <li>La sede principal recibe los pedidos de barrios sin zona y los que no eligieron sede.</li>
+            </ul>
+          </details>
+        )}
+        {!loading && branches.length === 1 && !editing && (
+          <p className="text-sm text-slate-400">
+            Con una sola sede todo funciona como un solo local. Agrega otra cuando abras un segundo local para separar
+            cocinas, repartidores y zonas.
+          </p>
+        )}
 
         {editing && (
           <form onSubmit={handleSave} className="space-y-3 rounded-xl border border-emerald-500/30 bg-slate-950/60 p-4">
@@ -277,9 +297,12 @@ export function BranchesSection() {
               <Building2 className="h-8 w-8 text-slate-600" />
               <p className="text-sm font-semibold text-slate-300">Tu marca funciona como un solo local</p>
               <p className="max-w-sm text-xs text-slate-500">
-                Si tienes más de un local, agrega tus sedes: cada una tendrá su propio KDS, sus repartidores y sus zonas de
-                domicilio.
+                No necesitas configurar nada aquí. Si abres otro local, agrégalo: cada sede tendrá su propia pantalla de
+                cocina, sus repartidores y sus zonas de domicilio.
               </p>
+              <button type="button" onClick={() => openForm()} className={`${primaryButtonClass} mt-2 min-h-11`}>
+                <Plus className="h-4 w-4" /> Tengo más de un local
+              </button>
             </div>
           )
         ) : (

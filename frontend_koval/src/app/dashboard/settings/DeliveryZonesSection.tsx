@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { MapPin, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { SettingsCardHeader, SettingsFeedback, primaryButtonClass, settingsCardClass } from './settings-ui';
-import { branchNameOf, useBranches } from './useBranches';
+import { branchNameOf, hasMultipleBranches, useBranches } from './useBranches';
 import { BranchSelect } from './BranchSelect';
 import { DistancePricingCard } from './DistancePricingCard';
 
@@ -50,7 +50,8 @@ export function DeliveryZonesSection() {
   const { token, restaurantId } = useAuth();
   // Multisede: con sedes creadas, cada zona se asigna a la cocina que la atiende
   const { branches } = useBranches();
-  const hasBranches = branches.length > 0;
+  // Con una sola sede (o ninguna) no hay nada que elegir: todo va al mismo local
+  const hasBranches = hasMultipleBranches(branches);
   const [zones, setZones] = useState<DeliveryZone[]>([]);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);

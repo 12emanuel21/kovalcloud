@@ -69,3 +69,9 @@ export function useBranches() {
 /** Nombre de la sede para tablas ("—" si no tiene) */
 export const branchNameOf = (branches: Branch[], branchId: string | null | undefined, fallback = '—') =>
   branches.find((branch) => branch.id === branchId)?.name ?? fallback;
+
+/**
+ * ¿Opera como multisede? Con una sola sede (o ninguna) todo es un solo local: se ocultan los
+ * selectores y filtros de sede para no sumar complejidad.
+ */
+export const hasMultipleBranches = (branches: Branch[]) => branches.length > 1;

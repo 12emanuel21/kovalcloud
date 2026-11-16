@@ -74,7 +74,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         <TopBar onMenuClick={() => setMobileSidebarOpen(true)} />
         {/* relative: los elementos absolutos (ej. sr-only) quedan dentro del scroll de main; sin esto
             escapan al documento, lo alargan y debajo del panel asoma el fondo del body */}
-        <main className="relative flex-1 overflow-y-auto p-6">
+        <main className="relative flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="mx-auto w-full max-w-7xl">{children}</div>
         </main>
       </div>

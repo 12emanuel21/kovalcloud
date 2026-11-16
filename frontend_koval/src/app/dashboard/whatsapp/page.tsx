@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { Suspense, useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { SudoCancelledError, useSudoMode } from '@/context/SudoContext';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -32,13 +33,23 @@ interface WhatsappConfigData {
   metaAppSecretMasked?: string | null;
 }
 
+/** ?modo=qr abre la vinculación por código QR (Ajustes › WhatsApp); ?modo=meta, la API oficial */
 export default function WhatsAppDashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <WhatsAppDashboard />
+    </Suspense>
+  );
+}
+
+function WhatsAppDashboard() {
+  const requestedMode = useSearchParams().get('modo');
   const { restaurantId , token} = useAuth();
   // Cambiar credenciales de Meta (PATCH /restaurants/:id) o cerrar la sesión de WhatsApp Web exige Sudo Mode
   const { sudoFetch } = useSudoMode();
 
   // Selector de Pestaña Activa ('meta' | 'baileys')
-  const [activeTab, setActiveTab] = useState<'meta' | 'baileys'>('meta');
+  const [activeTab, setActiveTab] = useState<'meta' | 'baileys'>(requestedMode === 'qr' ? 'baileys' : 'meta');
 
   // --- ESTADOS: PESTAÑA META CLOUD API ---
   const [metaLoading, setMetaLoading] = useState<boolean>(true);
