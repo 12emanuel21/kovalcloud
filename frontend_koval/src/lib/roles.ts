@@ -36,3 +36,15 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   OWNER: 'Propietario',
   KITCHEN: 'Cocina',
 };
+
+/** Zonas privadas de la app: solo aquí una sesión caducada lleva al login */
+export const PROTECTED_PATH_PREFIXES = ['/dashboard', '/admin', '/kitchen'] as const;
+
+/**
+ * ¿La ruta es del panel (privada)? Se usa una lista de rutas privadas y no de públicas: la carta
+ * también se abre por subdominio (pizzeria.kovalcloud.com/ se reescribe a /menu/<slug>, pero el
+ * navegador sigue viendo "/"), así que cualquier ruta que no sea del panel se trata como pública.
+ */
+export function isProtectedAppPath(pathname: string): boolean {
+  return PROTECTED_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}

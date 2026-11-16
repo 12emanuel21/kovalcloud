@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { homePathForRole, type UserRole } from '@/lib/roles';
+import { homePathForRole, isProtectedAppPath, type UserRole } from '@/lib/roles';
 import { clearSudoToken } from '@/lib/sudo-token';
 
 /** Error del login con el código del backend (ej. TWO_FACTOR_REQUIRED) */
@@ -132,13 +132,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem('koval_user', JSON.stringify(freshUser));
       })
       .catch((status) => {
-        // Token caducado o usuario eliminado: cerrar la sesión local
+        // Token caducado o usuario eliminado: siempre se cierra la sesión local, pero solo se va al
+        // login desde el panel. Un cliente en la carta pública (/menu o subdominio) nunca sale de ella.
         if (!cancelled && status === 401) {
           setToken(null);
           setUser(null);
           localStorage.removeItem('koval_token');
           localStorage.removeItem('koval_user');
-          router.push('/login');
+          if (isProtectedAppPath(window.location.pathname)) router.push('/login');
         }
       });
     return () => {

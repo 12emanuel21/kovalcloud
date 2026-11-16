@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { LoginError, useAuth } from '@/context/AuthContext';
 import { homePathForRole } from '@/lib/roles';
+import { ThemeToggle } from '@/components/theme/ThemeToggle';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -45,7 +46,11 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans">
+    <div className="relative min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans">
+      {/* Claro por defecto; el usuario puede cambiarlo aquí o en el panel (misma preferencia) */}
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
         
         <div className="text-center mb-8">
