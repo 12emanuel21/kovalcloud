@@ -112,10 +112,13 @@ export class OrdersService {
     // Endpoint público: `status` y `unitPrice` del cliente se ignoran.
     // El pedido nace PENDING y los precios salen siempre de la base de datos.
 
-    // 1. Validar que el restaurante exista (con sus sedes activas, para enrutar el pedido)
+    // 1. Validar que el restaurante exista (con sus sedes activas, para enrutar el pedido; la
+    //    principal primero y luego por nombre, igual que la carta)
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: restaurantId },
-      include: { branches: { where: { isActive: true }, select: { id: true, isMain: true } } },
+      include: {
+        branches: { where: { isActive: true }, orderBy: [{ isMain: 'desc' }, { name: 'asc' }], select: { id: true, isMain: true } },
+      },
     });
     if (!restaurant) {
       throw new NotFoundException('Restaurante no encontrado');
@@ -210,18 +213,18 @@ export class OrdersService {
       typeof customerLat === 'number' && typeof customerLng === 'number' ? { lat: customerLat, lng: customerLng } : null;
     const phone = normalizeColombianPhone(customerPhone);
 
-    // 3.55. Sede que lo prepara: la de la zona (domicilio) o la elegida (recoger); si no, la principal.
-    //       Sin sedes configuradas queda en null y todo funciona como un solo local.
+    // 3.55. Sede que lo prepara: la que eligió el cliente (domicilio, recoger o mesa). Si no llega, la
+    //       principal o, sin principal activa, la primera sede activa: con sedes activas el pedido
+    //       nunca queda sin sede. Sin sedes configuradas queda en null (un solo local).
     const branches = restaurant.branches ?? [];
-    if (requestedBranchId && orderType !== OrderType.DELIVERY && !branches.some((b) => b.id === requestedBranchId)) {
+    if (requestedBranchId && branches.length > 0 && !branches.some((b) => b.id === requestedBranchId)) {
       throw new BadRequestException({
         statusCode: 400,
         error: 'Bad Request',
         code: 'BRANCH_UNAVAILABLE',
-        message: 'La sede que elegiste no está disponible. Elige otra para recoger tu pedido.',
+        message: 'La sede que elegiste no está disponible. Elige otra sede para tu pedido.',
       });
     }
-    // Domicilios: la sede principal (el local puede cambiarla en el Kanban al definir el domicilio)
     const branchId = resolveOrderBranchId({ orderType, quote: null, requestedBranchId, branches });
 
     // 3.6. Cliente del local (teléfono único por restaurante) y su autorización de datos (Ley 1581)

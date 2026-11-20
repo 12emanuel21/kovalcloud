@@ -1,4 +1,4 @@
-import { activeBranchesOf, resolveOrderBranchId } from './branch-routing';
+import { activeBranchesOf, mainBranchOf, resolveOrderBranchId } from './branch-routing';
 import { quoteFor } from '../delivery-zones/delivery-coverage';
 
 describe('Enrutamiento de pedidos por sede', () => {
@@ -41,9 +41,25 @@ describe('Enrutamiento de pedidos por sede', () => {
     expect(resolveOrderBranchId({ orderType: 'DINE_IN', quote: null, requestedBranchId: 'b-60', branches })).toBe('b-60');
   });
 
-  it('DELIVERY ignora la sede que mande el cliente: manda la zona', () => {
+  it('la sede que eligió el cliente manda en cualquier tipo de pedido (también en domicilio)', () => {
     const quote = quoteFor(zones, null, 'Riomar');
-    expect(resolveOrderBranchId({ orderType: 'DELIVERY', quote, requestedBranchId: 'b-30', branches })).toBe('b-60');
+    expect(resolveOrderBranchId({ orderType: 'DELIVERY', quote, requestedBranchId: 'b-30', branches })).toBe('b-30');
+    expect(resolveOrderBranchId({ orderType: 'DELIVERY', quote: null, requestedBranchId: 'b-60', branches })).toBe('b-60');
+    // Una sede inactiva o ajena no se asigna: cae en la principal
+    expect(resolveOrderBranchId({ orderType: 'DELIVERY', quote: null, requestedBranchId: 'b-otra', branches })).toBe('b-30');
+  });
+
+  it('sin principal activa: la primera sede activa (con sedes activas nunca queda en null)', () => {
+    const sinPrincipal = [
+      { id: 'b-60', isMain: false },
+      { id: 'b-90', isMain: false },
+    ];
+    for (const orderType of ['DELIVERY', 'TAKEAWAY', 'DINE_IN', undefined]) {
+      expect(resolveOrderBranchId({ orderType, quote: null, branches: sinPrincipal })).toBe('b-60');
+    }
+    expect(mainBranchOf(sinPrincipal)?.id).toBe('b-60');
+    expect(mainBranchOf([{ id: 'b-90', isMain: false }, ...branches])?.id).toBe('b-30');
+    expect(mainBranchOf([])).toBeNull();
   });
 
   it('restaurante sin sedes: null (comportamiento de un solo local)', () => {
@@ -57,5 +73,8 @@ describe('Enrutamiento de pedidos por sede', () => {
     const ok: any = { branch: { findMany: jest.fn().mockResolvedValue(branches) } };
     await expect(activeBranchesOf(ok, 'rest-1')).resolves.toEqual(branches);
     expect(ok.branch.findMany.mock.calls[0][0].where).toEqual({ restaurantId: 'rest-1', isActive: true });
+    // Mismo orden que la carta (principal primero) y con la dirección para mostrársela al cliente
+    expect(ok.branch.findMany.mock.calls[0][0].orderBy).toEqual([{ isMain: 'desc' }, { name: 'asc' }]);
+    expect(ok.branch.findMany.mock.calls[0][0].select).toMatchObject({ name: true, address: true });
   });
 });

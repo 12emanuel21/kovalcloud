@@ -193,16 +193,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const { flatDeliveryFee } = useFlatDeliveryFee(restaurantId, isOpen && isDelivery);
   const deliveryFeePending = isDelivery && flatDeliveryFee === null;
   const deliveryFee = isDelivery && flatDeliveryFee !== null ? flatDeliveryFee : 0;
-  // Multisede: quien recoge elige la sede (por defecto la principal); con una sola no se pregunta
-  const isPickup = !tableNumber && fulfillment === 'TAKEAWAY';
-  const pickupBranches = usePickupBranches(restaurantId, isOpen && !tableNumber);
+  // Multisede: con 2 o más sedes activas el cliente elige a cuál envía su pedido (domicilio o recoger),
+  // viendo el nombre y la dirección de cada una. Con una sola no se pregunta: el backend la asigna.
+  const { branches: orderBranches, reload: reloadBranches } = usePickupBranches(restaurantId, isOpen && !tableNumber);
   const [chosenBranchId, setChosenBranchId] = useState<string | null>(null);
-  const pickupBranch =
-    pickupBranches.find((branch) => branch.id === chosenBranchId) ??
-    pickupBranches.find((branch) => branch.isMain) ??
-    pickupBranches[0] ??
-    null;
-  const showBranchPicker = isPickup && pickupBranches.length > 1;
+  const showBranchPicker = !tableNumber && orderBranches.length > 1;
+  const chosenBranch = showBranchPicker ? (orderBranches.find((branch) => branch.id === chosenBranchId) ?? null) : null;
   const grandTotal = totalAmount + (isDelivery ? deliveryFee : 0);
 
   const formatCOP = (val: number) => {
@@ -239,6 +235,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       setErrorMsg('Escribe la dirección de entrega.');
       return;
     }
+    if (showBranchPicker && !chosenBranch) {
+      setErrorMsg('Elige a cuál de nuestras sedes deseas enviar tu pedido.');
+      return;
+    }
     if (!acceptTerms) {
       setErrorMsg('Para hacer tu pedido debes autorizar el tratamiento de tus datos (Ley 1581).');
       return;
@@ -261,8 +261,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         deliveryAddress: isDelivery ? deliveryAddress.trim() || undefined : undefined,
         neighborhood: isDelivery ? neighborhood.trim() || undefined : undefined,
         acceptTerms,
-        // Sede donde recoge; los domicilios los enruta el backend por la zona del barrio
-        branchId: isPickup && pickupBranch ? pickupBranch.id : undefined,
+        // Sede que eligió el cliente (domicilio o recoger); sin elegir, el backend asigna la principal
+        branchId: chosenBranch ? chosenBranch.id : undefined,
         notes: notes.trim() || undefined,
         paymentMethod,
         items: items.map((item) => ({
@@ -292,10 +292,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           );
           return;
         }
-        // La sede elegida se desactivó mientras el cliente pedía: que elija otra
+        // La sede elegida se desactivó mientras el cliente pedía: se recargan las sedes y elige otra
         if (errorData.code === 'BRANCH_UNAVAILABLE') {
           setChosenBranchId(null);
-          setErrorMsg(errorData.message || 'La sede que elegiste no está disponible. Elige otra para recoger tu pedido.');
+          reloadBranches();
+          setErrorMsg(errorData.message || 'La sede que elegiste no está disponible. Elige otra sede para tu pedido.');
           return;
         }
         const message = Array.isArray(errorData.message) ? errorData.message.join('. ') : errorData.message;
@@ -347,7 +348,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               deliveryAddress: payload.deliveryAddress,
               neighborhood: payload.neighborhood,
               pickup: payload.orderType === 'TAKEAWAY',
-              pickupBranch: payload.orderType === 'TAKEAWAY' && pickupBranches.length > 1 ? pickupBranch?.name : undefined,
+              branchName: chosenBranch?.name,
               tableNumber: payload.tableNumber,
               notes: payload.notes,
             }),
@@ -706,10 +707,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
                   {showBranchPicker && (
                     <fieldset>
-                      <legend className="block text-xs font-medium text-sf-body mb-1.5">¿En qué sede lo recoges?</legend>
-                      <div role="radiogroup" aria-label="Sede para recoger" className="grid gap-2">
-                        {pickupBranches.map((branch) => {
-                          const selected = pickupBranch?.id === branch.id;
+                      <legend className="block text-xs font-medium text-sf-body mb-1.5">
+                        ¿A cuál de nuestras sedes deseas enviar tu pedido? <span className={accent.text}>*</span>
+                      </legend>
+                      <div role="radiogroup" aria-label="Sede del pedido" className="grid gap-2">
+                        {orderBranches.map((branch) => {
+                          const selected = chosenBranch?.id === branch.id;
                           return (
                             <button
                               key={branch.id}
@@ -720,14 +723,24 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                                 setChosenBranchId(branch.id);
                                 setErrorMsg(null);
                               }}
-                              className={`rounded-sf border px-3 py-2.5 text-left transition ${
-                                selected ? `border-sf-primary bg-sf-bg` : 'border-sf-border hover:border-sf-muted'
+                              className={`flex min-h-11 items-center gap-3 rounded-sf border px-3 py-2.5 text-left transition ${
+                                selected ? 'border-sf-primary bg-sf-bg' : 'border-sf-border hover:border-sf-muted'
                               }`}
                             >
-                              <span className={`block text-xs font-semibold ${selected ? accent.text : 'text-sf-text'}`}>
-                                {branch.name}
+                              <span
+                                aria-hidden
+                                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                                  selected ? 'border-sf-primary' : 'border-sf-muted'
+                                }`}
+                              >
+                                {selected && <span className="h-2 w-2 rounded-full bg-sf-primary" />}
                               </span>
-                              <span className="block text-[11px] text-sf-muted">{branch.address}</span>
+                              <span className="min-w-0">
+                                <span className={`block text-xs font-semibold ${selected ? accent.text : 'text-sf-text'}`}>
+                                  {branch.name}
+                                </span>
+                                <span className="block text-[11px] text-sf-muted">{branch.address}</span>
+                              </span>
                             </button>
                           );
                         })}

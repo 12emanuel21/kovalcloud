@@ -194,15 +194,16 @@ export function buildConfirmationMessage(
   lines: OrderLine[],
   /** Domicilio: tarifa fija del local o pendiente (lo define el local tras registrar el pedido) */
   delivery?: DeliveryFeeInfo | null,
-  /** Marcas con varias sedes: dónde recoge (la elegida o la principal) */
-  pickupBranchName?: string | null,
+  /** Marcas con varias sedes: la sede que eligió el cliente (domicilio, recoger o reserva) */
+  branchName?: string | null,
 ): string {
   const total = orderTotal(lines);
+  const atBranch = branchName ? ` en la sede ${branchName}` : '';
 
   if (isReservation(ai) && ai.reservation) {
     const people = Math.floor(ai.reservation.people ?? 1);
     const { time } = ai.reservation;
-    const header = `📅 *Reserva de mesa* para ${people} ${people === 1 ? 'persona' : 'personas'} a las ${time}.`;
+    const header = `📅 *Reserva de mesa* para ${people} ${people === 1 ? 'persona' : 'personas'} a las ${time}${atBranch}.`;
     if (lines.length === 0) {
       return `${header}\n\n¿Confirmas?`;
     }
@@ -210,12 +211,11 @@ export function buildConfirmationMessage(
   }
 
   if (ai.orderType === 'TAKEAWAY') {
-    const where = pickupBranchName ? ` en la sede ${pickupBranchName}` : '';
-    return `🛍️ *Para recoger*${where}\n${itemsSummary(lines)}\n\nTu total es ${money(total)}.\n${paymentLine(ai)}\n\n¿Confirmas?`;
+    return `🛍️ *Para recoger*${atBranch}\n${itemsSummary(lines)}\n\nTu total es ${money(total)}.\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
   // Domicilio: con tarifa fija, desglose exacto; si no, solo los productos (el local confirma el envío)
   const address = [ai.deliveryAddress, ai.neighborhood?.trim()].filter(Boolean).join(', ') || 'tu ubicación compartida';
-  const header = `🛵 *Domicilio* a: ${address}\n${itemsSummary(lines)}`;
+  const header = `🛵 *Domicilio* a: ${address}${branchName ? `\nSede: ${branchName}` : ''}\n${itemsSummary(lines)}`;
   if (delivery && !delivery.deliveryFeePending) {
     return `${header}\n\nSubtotal: ${money(total)}\nDomicilio: ${formatDeliveryFee(delivery.deliveryFee)}\nTotal: ${money(total + delivery.deliveryFee)}\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
@@ -232,18 +232,20 @@ export function buildConfirmationMessage(
 export function buildRegisteredMessage(
   ai: OrderIntent,
   dailyNumber: number,
-  pickupBranchName?: string | null,
+  /** Marcas con varias sedes: la sede que eligió el cliente */
+  branchName?: string | null,
   deliveryFeePending = false,
 ): string {
   const ref = formatDailyNumber(dailyNumber);
+  const atBranch = branchName ? ` en la sede ${branchName}` : '';
   if (isReservation(ai)) {
-    return `✅ Reserva confirmada. Tu turno es el ${ref}. Te esperamos.`;
+    return `✅ Reserva confirmada. Tu turno es el ${ref}. Te esperamos${atBranch}.`;
   }
   if (deliveryFeePending && ai.orderType === 'DELIVERY') {
     return `✅ Pedido registrado. Tu turno es el ${ref}. En instantes te confirmamos por aquí el valor del domicilio y el total a pagar.`;
   }
   return ai.orderType === 'TAKEAWAY'
-    ? `✅ Pedido confirmado. Tu turno es el ${ref}. Te avisamos cuando esté listo para recoger${pickupBranchName ? ` en la sede ${pickupBranchName}` : ''}.`
+    ? `✅ Pedido confirmado. Tu turno es el ${ref}. Te avisamos cuando esté listo para recoger${atBranch}.`
     : `✅ Pedido confirmado. Tu turno es el ${ref}. Ya lo estamos preparando.`;
 }
 

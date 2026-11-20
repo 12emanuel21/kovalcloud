@@ -75,8 +75,8 @@ export interface OrderWhatsAppDetails {
   neighborhood?: string;
   /** Pasa a recoger en el local */
   pickup?: boolean;
-  /** Sede donde recoge (marcas con varias sedes) */
-  pickupBranch?: string;
+  /** Sede que eligió el cliente (marcas con varias sedes), para domicilio o recoger */
+  branchName?: string;
   tableNumber?: string;
   notes?: string;
 }
@@ -91,9 +91,12 @@ export function buildOrderWhatsAppMessage(order: OrderWhatsAppDetails): string {
     '',
   ];
   if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
-  else if (order.pickup) lines.push(order.pickupBranch ? `Para recoger en la sede ${order.pickupBranch}` : 'Para recoger en el local');
-  else if (order.deliveryAddress || order.neighborhood) {
-    lines.push(`Dirección: ${[order.deliveryAddress, order.neighborhood].filter(Boolean).join(', ')}`);
+  else if (order.pickup) lines.push(order.branchName ? `Para recoger en la sede ${order.branchName}` : 'Para recoger en el local');
+  else {
+    if (order.deliveryAddress || order.neighborhood) {
+      lines.push(`Dirección: ${[order.deliveryAddress, order.neighborhood].filter(Boolean).join(', ')}`);
+    }
+    if (order.branchName) lines.push(`Sede: ${order.branchName}`);
   }
   const pendingDelivery = Boolean(order.deliveryFeePending) && !order.tableNumber && !order.pickup;
   if (pendingDelivery) lines.push('Domicilio: por confirmar');

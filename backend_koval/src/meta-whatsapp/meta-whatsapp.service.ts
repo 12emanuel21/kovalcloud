@@ -7,7 +7,7 @@ import { AiService, dayPartOf, type OrderIntent } from '../ai/ai.service';
 import { initialDeliveryFee } from '../orders/delivery-fee';
 import { isLidContact, normalizeColombianPhone } from '../orders/phone';
 import { OrdersGateway } from '../orders/orders.gateway';
-import { OrderStatus, OrderType } from '@prisma/client';
+import { OrderStatus } from '@prisma/client';
 import { MetaWebhookPayloadDto } from './dto/webhook-payload.dto';
 import { internalApiHeaders } from '../config/secrets';
 import { buildClosedMessage, isRestaurantClosed } from '../restaurants/business-hours';
@@ -21,7 +21,8 @@ import {
 import { BOT_PAUSED_MARKER, getHandoverState } from '../chats/handover';
 import { ChatQueue } from './chat-queue';
 import { CustomersService, PRIVACY_NOTICE, withPrivacyNotice } from '../customers/customers.service';
-import { activeBranchesOf, mainBranchOf, matchBranchByName, resolveOrderBranchId } from '../branches/branch-routing';
+import { activeBranchesOf, matchBranchByName, resolveOrderBranchId } from '../branches/branch-routing';
+import { buildBranchQuestion, withBranchList } from './branch-choice';
 import { activeSessionHistory } from './chat-session';
 import { isHttpUrl, menuLinkReply, menuWebUrl, withMenuLink } from './menu-link';
 import { buildQuickReply, detectQuickIntent, hasPendingConfirmation } from './quick-replies';
@@ -1097,13 +1098,14 @@ export class MetaWhatsAppService {
 
       // 5. Procesar el mensaje con Inteligencia Artificial (Gemini). Si falla (incluso tras el
       //    reintento), se responde igual: el cliente nunca se queda sin respuesta
-      // Multisede: con más de una sede activa la IA pregunta en cuál recoge (TAKEAWAY)
+      // Multisede: con 2 o más sedes activas el cliente elige a cuál envía su pedido (domicilio,
+      // recoger o reserva) viendo el nombre y la dirección de cada una. Con 0 o 1 no se pregunta.
       const branches = await activeBranchesOf(this.prisma, restaurant.id);
-      const pickupBranchNames = branches.length > 1 ? branches.map((b) => b.name ?? '').filter(Boolean) : [];
+      const multiBranch = branches.length > 1;
       // Instrucciones especiales del local (Ajustes > Perfil): van al final del prompt
       const customInstructions = restaurant.customInstructions?.trim() || null;
       const aiExtras = {
-        ...(pickupBranchNames.length > 1 ? { pickupBranches: pickupBranchNames } : {}),
+        ...(multiBranch ? { branches: branches.map(({ name, address }) => ({ name, address })) } : {}),
         ...(customInstructions ? { customInstructions } : {}),
       };
       // Sin sedes ni instrucciones la IA se llama exactamente como antes
@@ -1183,11 +1185,8 @@ export class MetaWhatsAppService {
           }
         } else if (aiResult.intent === 'ORDER' || aiResult.intent === 'RESERVATION') {
           const lines = buildOrderLines(aiResult.items, menuItems);
-          // Recoger en una marca con varias sedes: la que dijo el cliente o, si no dijo, la principal
-          const pickupBranch =
-            toPrismaOrderType(aiResult) === OrderType.TAKEAWAY && branches.length > 1
-              ? (matchBranchByName(branches, aiResult.pickupBranch) ?? mainBranchOf(branches))
-              : null;
+          // Multisede: la sede que eligió el cliente (por su nombre, número o dirección)
+          const chosenBranch = multiBranch ? matchBranchByName(branches, aiResult.branch) : null;
           // Pin de WhatsApp (opcional, si el cliente lo envía): queda en el pedido para el repartidor.
           // Un pin anterior a su último pedido ya se usó (no se reutiliza para un pedido nuevo).
           const hasPinInHistory = chatHistory.some((h) => h.role === CHAT_ROLE_USER && parseSharedLocation(h.message));
@@ -1200,6 +1199,8 @@ export class MetaWhatsAppService {
           const complete = hasRequiredData(aiResult, lines, Boolean(customerCoords));
           // Domicilio/recoger no se confirman sin saber si paga en efectivo o por transferencia
           const missingPaymentMethod = complete && needsPaymentMethod(aiResult) && !aiResult.paymentMethod;
+          // Con varias sedes, ningún pedido se resume ni se registra sin la sede que eligió el cliente
+          const missingBranch = complete && multiBranch && !chosenBranch;
           // Domicilio manual: tarifa fija del local o pendiente (el local lo define en el Kanban y se lo
           // confirma al cliente). Sin cálculo por zonas, distancia ni geocodificación.
           const delivery = initialDeliveryFee(toPrismaOrderType(aiResult), restaurant);
@@ -1207,6 +1208,10 @@ export class MetaWhatsAppService {
           if (missingPaymentMethod && (aiResult.readyToConfirm || aiResult.customerConfirmed)) {
             // 6.0. La IA dio el pedido por listo sin el método de pago: se pregunta antes del resumen
             finalResponse = withPaymentMethodQuestion(aiResult, aiResult.responseToUser);
+          } else if (missingBranch && (aiResult.readyToConfirm || aiResult.customerConfirmed)) {
+            // 6.05. La IA dio el pedido por listo sin sede: en vez del resumen, las sedes con su
+            //       dirección y la pregunta (la respuesta de cierre de la IA no aplica todavía)
+            finalResponse = buildBranchQuestion(branches, aiResult.orderType);
           } else if (complete && aiResult.customerConfirmed) {
             // 6.1. El cliente aceptó la confirmación: registrar el pedido (total = productos + domicilio)
             const subtotal = orderTotal(lines);
@@ -1234,11 +1239,12 @@ export class MetaWhatsAppService {
                 address: isDelivery ? aiResult.deliveryAddress : undefined,
                 neighborhood: isDelivery ? aiResult.neighborhood : undefined,
               });
-              // Sede que lo prepara: recoger, la elegida; domicilio, la principal (el local la cambia en el Kanban)
+              // Sede que lo prepara: la que eligió el cliente; con una sola sede, esa (la principal).
+              // Con sedes activas nunca queda en null (el local puede cambiarla en el Kanban)
               const branchId = resolveOrderBranchId({
                 orderType: toPrismaOrderType(aiResult),
                 quote: null,
-                requestedBranchId: pickupBranch?.id,
+                requestedBranchId: chosenBranch?.id,
                 branches,
               });
               const newOrder = await this.prisma.order.create({
@@ -1283,7 +1289,7 @@ export class MetaWhatsAppService {
               // Emitir el evento por WebSocket al KDS (Kitchen Display System)
               this.ordersGateway.emitNewOrder(restaurant.id, { ...newOrder, dailyNumber });
 
-              finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber, pickupBranch?.name, deliveryFeePending)}`.trim();
+              finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber, chosenBranch?.name, deliveryFeePending)}`.trim();
 
               // Cobro: efectivo sin cuentas; transferencia con los datos de pago del local y el comprobante.
               // Domicilio pendiente: los datos de pago llegan con el valor del domicilio (aún no hay total).
@@ -1295,7 +1301,7 @@ export class MetaWhatsAppService {
             finalResponse = [
               aiResult.responseToUser,
               addOnLockedNotice,
-              buildConfirmationMessage(aiResult, lines, delivery, pickupBranch?.name),
+              buildConfirmationMessage(aiResult, lines, delivery, chosenBranch?.name),
             ]
               .filter((part) => part?.trim())
               .join('\n\n')
@@ -1308,6 +1314,8 @@ export class MetaWhatsAppService {
         finalResponse = aiResult.responseToUser?.trim() || AI_FALLBACK_REPLY;
       }
       if (!finalResponse?.trim()) finalResponse = AI_FALLBACK_REPLY;
+      // La IA preguntó la sede sin mostrar todas con su dirección: se agrega la lista
+      if (multiBranch) finalResponse = withBranchList(finalResponse, branches);
 
       // 7. Enviar la respuesta generada por IA al cliente vía Meta Graph API v22.0
       let pdfSent = false;

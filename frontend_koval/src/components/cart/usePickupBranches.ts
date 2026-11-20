@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 const API_URL = '/api';
 
-/** Sede activa para recoger (GET /restaurants/:id/pickup-branches) */
+/** Sede activa de la marca (GET /restaurants/:id/pickup-branches: la principal primero) */
 export interface PickupBranch {
   id: string;
   name: string;
@@ -13,11 +13,14 @@ export interface PickupBranch {
 }
 
 /**
- * Sedes de la marca para "Recoger en el local". Sin sedes (o si falla la carga) la carta funciona
- * como un solo local y el backend asigna la sede principal.
+ * Sedes de la marca para que el cliente elija a cuál envía su pedido (domicilio o recoger). Sin sedes,
+ * con una sola o si falla la carga, la carta funciona como un solo local y el backend asigna la sede.
+ * reload(): vuelve a pedirlas (p. ej. si la sede elegida se desactivó mientras el cliente pedía).
  */
 export function usePickupBranches(restaurantId: string, enabled: boolean) {
   const [branches, setBranches] = useState<PickupBranch[]>([]);
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => setVersion((v) => v + 1), []);
 
   useEffect(() => {
     if (!enabled || !restaurantId) return;
@@ -31,7 +34,7 @@ export function usePickupBranches(restaurantId: string, enabled: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [enabled, restaurantId]);
+  }, [enabled, restaurantId, version]);
 
-  return branches;
+  return { branches, reload };
 }

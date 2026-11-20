@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
+import { OrdersGateway } from './orders.gateway';
 
 describe('OrdersService · multisede (sede ligera)', () => {
   const restaurant = { id: 'rest-1', name: 'Betania', isTemporarilyClosed: false, businessHours: null, extendedUntil: null };
@@ -41,13 +42,21 @@ describe('OrdersService · multisede (sede ligera)', () => {
       ...extra,
     }) as any;
 
-  it('carga solo las sedes activas junto con el restaurante', async () => {
+  it('carga solo las sedes activas junto con el restaurante (la principal primero, como en la carta)', async () => {
     const { service, prisma } = build();
     await service.create(dto({ orderType: 'DELIVERY', neighborhood: 'Riomar' }));
     expect(prisma.restaurant.findUnique.mock.calls[0][0].include.branches.where).toEqual({ isActive: true });
+    expect(prisma.restaurant.findUnique.mock.calls[0][0].include.branches.orderBy).toEqual([{ isMain: 'desc' }, { name: 'asc' }]);
   });
 
-  it('DELIVERY: la sede principal (el local la reasigna en el Kanban al definir el domicilio); suena en su KDS', async () => {
+  it('DELIVERY: la sede que eligió el cliente en la carta', async () => {
+    const { service, create, gateway } = build();
+    await service.create(dto({ orderType: 'DELIVERY', branchId: 'b-60' }));
+    expect(create.mock.calls[0][0].data).toMatchObject({ branchId: 'b-60', deliveryFeePending: true });
+    expect(gateway.emitNewOrder.mock.calls[0][1]).toMatchObject({ branchId: 'b-60' });
+  });
+
+  it('DELIVERY sin sede elegida: la sede principal (el local la reasigna en el Kanban al definir el domicilio); suena en su KDS', async () => {
     const { service, create, gateway } = build();
     await service.create(dto({ orderType: 'DELIVERY', neighborhood: 'Riomar' }));
     await service.create(dto({ orderType: 'DELIVERY', neighborhood: 'Soledad' }));
@@ -66,12 +75,53 @@ describe('OrdersService · multisede (sede ligera)', () => {
     expect(create.mock.calls[1][0].data.branchId).toBe('b-30');
   });
 
-  it('TAKEAWAY a una sede inexistente o inactiva: 400 BRANCH_UNAVAILABLE sin crear el pedido', async () => {
-    const { service, create } = build();
-    const error = await service.create(dto({ orderType: 'TAKEAWAY', branchId: 'b-cerrada' })).catch((e) => e);
-    expect(error).toBeInstanceOf(BadRequestException);
-    expect(error.getResponse()).toMatchObject({ code: 'BRANCH_UNAVAILABLE' });
-    expect(create).not.toHaveBeenCalled();
+  it('TAKEAWAY o DELIVERY a una sede inexistente o inactiva: 400 BRANCH_UNAVAILABLE sin crear el pedido', async () => {
+    for (const orderType of ['TAKEAWAY', 'DELIVERY']) {
+      const { service, create } = build();
+      const error = await service.create(dto({ orderType, branchId: 'b-cerrada' })).catch((e) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.getResponse()).toMatchObject({ code: 'BRANCH_UNAVAILABLE', message: 'La sede que elegiste no está disponible. Elige otra sede para tu pedido.' });
+      expect(create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('respaldo: sin branchId y sin sede principal activa, la primera sede activa (nunca null con sedes activas)', async () => {
+    const { service, create } = build([
+      { id: 'b-60', isMain: false },
+      { id: 'b-90', isMain: false },
+    ]);
+    for (const orderType of ['DELIVERY', 'TAKEAWAY', 'DINE_IN']) {
+      await service.create(dto({ orderType, ...(orderType === 'DINE_IN' ? { tableNumber: '4' } : {}) }));
+    }
+    expect(create.mock.calls.map(([call]) => call.data.branchId)).toEqual(['b-60', 'b-60', 'b-60']);
+  });
+
+  it('con una sola sede activa, todo va a esa sede', async () => {
+    const { service, create } = build([{ id: 'b-30', isMain: true }]);
+    await service.create(dto({ orderType: 'DELIVERY' }));
+    await service.create(dto({ orderType: 'TAKEAWAY' }));
+    expect(create.mock.calls.map(([call]) => call.data.branchId)).toEqual(['b-30', 'b-30']);
+  });
+
+  it('una sede que ya no existe con el local sin sedes: se ignora y el pedido sigue como un solo local', async () => {
+    const { service, create } = build([]);
+    await service.create(dto({ orderType: 'TAKEAWAY', branchId: 'b-vieja' }));
+    expect(create.mock.calls[0][0].data).not.toHaveProperty('branchId');
+  });
+
+  it('al crearse, el pedido llega al instante al tablero del dueño y al KDS de su sede (WebSocket)', async () => {
+    const { prisma } = build();
+    const emitted: Array<{ room: string; event: string; payload: any }> = [];
+    const gateway = new OrdersGateway({} as any, {} as any);
+    gateway.server = { to: (room: string) => ({ emit: (event: string, data: any) => emitted.push({ room, event, payload: data }) }) } as any;
+    const customers: any = { safeTouch: jest.fn().mockResolvedValue({ id: 'cust-1' }) };
+    const real = new OrdersService(prisma, gateway, {} as any, {} as any, customers);
+    await real.create(dto({ orderType: 'TAKEAWAY', branchId: 'b-60' }));
+    const newOrder = emitted.filter((e) => e.event === 'new_order');
+    expect(newOrder.map((e) => e.room)).toEqual(['restaurant_rest-1', 'restaurant_rest-1_kitchen', 'restaurant_rest-1_kitchen_b-60']);
+    // El dueño ve los importes; la cocina de la sede, no
+    expect(newOrder[0].payload).toMatchObject({ branchId: 'b-60', total: 10000 });
+    expect(newOrder[2].payload).toMatchObject({ branchId: 'b-60', total: null });
   });
 
   it('restaurante sin sedes: el pedido no lleva branchId (igual que siempre)', async () => {

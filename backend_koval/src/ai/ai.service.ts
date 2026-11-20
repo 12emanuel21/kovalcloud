@@ -3,6 +3,7 @@ import { generateObject, generateText, ModelMessage } from 'ai';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
 import { buildWaiterSystemPrompt, sanitizeCustomInstructions } from '../meta-whatsapp/prompts/waiter.prompt';
+import type { BranchOption } from '../meta-whatsapp/branch-choice';
 import { RESTAURANT_TIMEZONE } from '../restaurants/business-hours';
 import { isOverloadError, resolveModelChain, resolveTimeoutMs, runWithModelFallback } from './model-fallback';
 
@@ -62,10 +63,10 @@ const OrderIntentSchema = z.object({
     })
     .optional()
     .describe('Solo para DINE_IN'),
-  pickupBranch: z
+  branch: z
     .string()
     .optional()
-    .describe('Solo TAKEAWAY en locales con varias sedes: nombre exacto de la sede donde recoge, si el cliente la dijo'),
+    .describe('Solo en locales con varias sedes: nombre EXACTO de la sede que eligió el cliente para su pedido (domicilio, recoger o reserva)'),
   paymentMethod: z
     .enum(['CASH', 'TRANSFER'])
     .optional()
@@ -75,7 +76,9 @@ const OrderIntentSchema = z.object({
   readyToConfirm: z
     .boolean()
     .default(false)
-    .describe('True cuando ya se hizo el upselling y están todos los datos del tipo de pedido y el método de pago'),
+    .describe(
+      'True cuando ya se hizo la pregunta de la bebida (si aplicaba) y están todos los datos del tipo de pedido, el método de pago y la sede (si el local tiene varias)',
+    ),
   customerConfirmed: z
     .boolean()
     .default(false)
@@ -176,10 +179,10 @@ export class AiService {
     chatHistory: Array<{ role: string; message: string }> = [],
     restaurantName: string = 'nuestro restaurante',
     /**
-     * pickupBranches: marcas con varias sedes (para preguntar dónde recoge).
+     * branches: sedes activas con su dirección (con 2 o más, el cliente elige a cuál envía su pedido).
      * customInstructions: reglas del negocio escritas por el dueño (van al final del prompt).
      */
-    options: { pickupBranches?: string[]; customInstructions?: string | null } = {},
+    options: { branches?: BranchOption[]; customInstructions?: string | null } = {},
   ): Promise<OrderIntent> {
     this.logger.log('Parsing order intent for message: ' + userMessage);
 
@@ -198,7 +201,7 @@ export class AiService {
         restaurantName,
         dayPart,
         menu: menuContext,
-        pickupBranches: options.pickupBranches,
+        branches: options.branches,
         customInstructions: options.customInstructions,
       }),
       messages: [
