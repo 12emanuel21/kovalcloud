@@ -2,7 +2,23 @@ import { PartialType } from '@nestjs/mapped-types';
 import { Transform } from 'class-transformer';
 import { CUSTOM_INSTRUCTIONS_MAX_LENGTH } from '../custom-instructions';
 import { CreateRestaurantDto } from './create-restaurant.dto';
-import { IsIn, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsLatitude,
+  IsLongitude,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
+import { MAX_DELIVERY_FEE, MAX_DELIVERY_FEE_PRESETS } from '../../orders/delivery-fee';
 import {
   HEX_COLOR_PATTERN,
   MENU_COLOR_MODES,
@@ -50,6 +66,25 @@ export class UpdateRestaurantDto extends PartialType(CreateRestaurantDto) {
   @Min(0, { message: 'La tarifa estándar no puede ser negativa' })
   @Max(1_000_000, { message: 'La tarifa estándar es demasiado alta' })
   defaultDeliveryFee?: number | null;
+
+  // Domicilio manual: montos sugeridos de los botones rápidos del Kanban (pesos enteros, 0 = Gratis).
+  // [] o null = volver a los de siempre
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsArray({ message: 'Los montos de domicilio deben ser una lista' })
+  @ArrayMaxSize(MAX_DELIVERY_FEE_PRESETS, { message: `Máximo ${MAX_DELIVERY_FEE_PRESETS} montos de domicilio` })
+  @IsInt({ each: true, message: 'Cada monto de domicilio debe ser un número entero de pesos' })
+  @Min(0, { each: true, message: 'Los montos de domicilio no pueden ser negativos' })
+  @Max(MAX_DELIVERY_FEE, { each: true, message: 'Un monto de domicilio es demasiado alto' })
+  deliveryFeePresets?: number[] | null;
+
+  // Tarifa fija única (se cobra sola en cada domicilio, sin confirmar en el Kanban); null la quita
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsInt({ message: 'La tarifa fija debe ser un número entero de pesos' })
+  @Min(0, { message: 'La tarifa fija no puede ser negativa' })
+  @Max(MAX_DELIVERY_FEE, { message: 'La tarifa fija es demasiado alta' })
+  flatDeliveryFee?: number | null;
 
   // Instrucciones especiales del local (reglas en español para el asistente). Se recortan los
   // espacios antes de validar el máximo; "" o null las borran

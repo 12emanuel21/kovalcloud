@@ -23,6 +23,7 @@ import {
   resolveMenuTheme,
 } from './menu-themes';
 import { TwoFactorAuthService, type SudoCredentials } from '../auth/two-factor-auth.service';
+import { cleanDeliveryFeePresets, resolveDeliveryFeePresets, usableFlatDeliveryFee } from '../orders/delivery-fee';
 import { assertUploadedImage, deleteMenuImage, writeMenuImage, type UploadedImageFile } from '../menu-items/menu-item-image';
 
 const userSelect = { id: true, email: true, name: true, role: true } as const;
@@ -292,7 +293,8 @@ export class RestaurantsService {
       },
     });
     if (!restaurant) throw new NotFoundException('Restaurante no encontrado');
-    return toRestaurantResponse(restaurant);
+    // Ajustes > Domicilio: sin montos guardados se muestran los de siempre
+    return { ...toRestaurantResponse(restaurant), deliveryFeePresets: resolveDeliveryFeePresets(restaurant.deliveryFeePresets) };
   }
 
   /** Identidad del local y credenciales de Meta; estas últimas solo en Sudo Mode */
@@ -348,6 +350,15 @@ export class RestaurantsService {
           updateRestaurantDto.defaultDeliveryFee === undefined
             ? undefined
             : Math.round(updateRestaurantDto.defaultDeliveryFee ?? 0) || null,
+        // Domicilio manual: montos de los botones del Kanban ([] o null = los de siempre) y tarifa fija
+        deliveryFeePresets:
+          updateRestaurantDto.deliveryFeePresets === undefined
+            ? undefined
+            : updateRestaurantDto.deliveryFeePresets === null || updateRestaurantDto.deliveryFeePresets.length === 0
+              ? Prisma.DbNull
+              : cleanDeliveryFeePresets(updateRestaurantDto.deliveryFeePresets),
+        flatDeliveryFee:
+          updateRestaurantDto.flatDeliveryFee === undefined ? undefined : usableFlatDeliveryFee(updateRestaurantDto.flatDeliveryFee),
         // Instrucciones especiales: undefined = no se toca; "" o null = se borran
         customInstructions: cleanCustomInstructions(updateRestaurantDto.customInstructions),
         // Domicilio por distancia: undefined = no se toca; coordenadas null = se apaga el motor

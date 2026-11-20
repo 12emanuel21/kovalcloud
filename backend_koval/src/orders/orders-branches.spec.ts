@@ -1,7 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
-import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 
 describe('OrdersService · multisede (sede ligera)', () => {
   const restaurant = { id: 'rest-1', name: 'Betania', isTemporarilyClosed: false, businessHours: null, extendedUntil: null };
@@ -29,7 +28,7 @@ describe('OrdersService · multisede (sede ligera)', () => {
     };
     const gateway = { emitNewOrder: jest.fn() };
     const customers: any = { safeTouch: jest.fn().mockResolvedValue({ id: 'cust-1' }) };
-    const service = new OrdersService(prisma, gateway as any, {} as any, {} as any, new DeliveryZonesService(prisma), customers);
+    const service = new OrdersService(prisma, gateway as any, {} as any, {} as any, customers);
     return { service, create, prisma, gateway };
   };
   const dto = (extra: Record<string, unknown> = {}) =>
@@ -48,19 +47,15 @@ describe('OrdersService · multisede (sede ligera)', () => {
     expect(prisma.restaurant.findUnique.mock.calls[0][0].include.branches.where).toEqual({ isActive: true });
   });
 
-  it('DELIVERY en una zona con sede: el pedido va a esa sede y suena en su KDS', async () => {
+  it('DELIVERY: la sede principal (el local la reasigna en el Kanban al definir el domicilio); suena en su KDS', async () => {
     const { service, create, gateway } = build();
     await service.create(dto({ orderType: 'DELIVERY', neighborhood: 'Riomar' }));
-    expect(create.mock.calls[0][0].data).toMatchObject({ branchId: 'b-60', deliveryZoneId: 'z-norte', deliveryFee: 6000 });
-    expect(gateway.emitNewOrder.mock.calls[0][1]).toMatchObject({ branchId: 'b-60' });
-  });
-
-  it('DELIVERY con tarifa estándar (barrio sin zona) o zona sin sede: la sede principal', async () => {
-    const { service, create } = build();
     await service.create(dto({ orderType: 'DELIVERY', neighborhood: 'Soledad' }));
-    await service.create(dto({ orderType: 'DELIVERY', neighborhood: 'Prado' }));
-    expect(create.mock.calls[0][0].data).toMatchObject({ branchId: 'b-30', deliveryFee: 15000 });
-    expect(create.mock.calls[1][0].data).toMatchObject({ branchId: 'b-30', deliveryZoneId: 'z-centro' });
+    // Ya no se enruta por zonas: las dos van a la principal, con el domicilio pendiente
+    for (const [call] of create.mock.calls) {
+      expect(call.data).toMatchObject({ branchId: 'b-30', deliveryFee: 0, deliveryFeePending: true });
+    }
+    expect(gateway.emitNewOrder.mock.calls[0][1]).toMatchObject({ branchId: 'b-30' });
   });
 
   it('TAKEAWAY: la sede elegida por el cliente, o la principal si no eligió', async () => {
@@ -92,7 +87,7 @@ describe('OrdersService · multisede (sede ligera)', () => {
   describe('tablero (GET /orders)', () => {
     const listWith = () => {
       const prisma: any = { order: { findMany: jest.fn().mockResolvedValue([]) } };
-      return { prisma, service: new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any) };
+      return { prisma, service: new OrdersService(prisma, {} as any, {} as any, {} as any, {} as any) };
     };
 
     it('la cocina de una sede solo ve los pedidos de su sede', async () => {

@@ -1,9 +1,8 @@
 import { formatDailyNumber } from '../orders/daily-number';
 import { OrderType } from '@prisma/client';
 import type { OrderIntent } from '../ai/ai.service';
-import type { DeliveryQuote } from '../delivery-zones/delivery-coverage';
-import { formatKm } from '../delivery-zones/distance/delivery-pricing.service';
 import { isValidGeoPoint, type GeoPoint } from '../delivery-zones/distance/distance-calculator.interface';
+import { DELIVERY_FEE_PENDING_NOTE, formatDeliveryFee } from '../orders/delivery-fee';
 
 export interface MenuItemRef {
   id: string;
@@ -23,15 +22,19 @@ export interface OrderLine {
 
 const money = (value: number) => `$${value.toLocaleString('es-CO')}`;
 
-/** El valor del domicilio depende de la zona y lo define el local: el bot nunca lo inventa */
-export const DELIVERY_FEE_NOTE = 'El valor del domicilio, si aplica, se suma según tu zona.';
+/** El valor del domicilio lo define el local (Kanban) o su tarifa fija: el bot nunca lo inventa */
+export const DELIVERY_FEE_NOTE = 'El valor del domicilio te lo confirmamos en instantes.';
 
-/** Flete que se cobra con el pedido (0 si no es domicilio o el local no configuró zonas) */
-export const deliveryFeeOf = (quote: DeliveryQuote | null | undefined) => (quote?.isCovered ? quote.deliveryFee : 0);
+/** Domicilio con el que nace el pedido (ver initialDeliveryFee): tarifa fija o pendiente del local */
+export interface DeliveryFeeInfo {
+  deliveryFee: number;
+  deliveryFeePending: boolean;
+}
 
 /**
  * Ubicación compartida por WhatsApp (pin nativo, Meta o Baileys): se guarda en el chat con este
- * texto legible y de ahí se recuperan las coordenadas al cotizar y al registrar el pedido.
+ * texto legible y de ahí se recuperan las coordenadas al registrar el pedido (el repartidor va con
+ * el mapa). El pin es opcional y no define el valor del domicilio.
  */
 export const SHARED_LOCATION_PREFIX = '📍 Ubicación compartida:';
 
@@ -88,38 +91,6 @@ export function latestSharedLocation(
     if (looksLikeStreetAddress(message)) return null;
   }
   return null;
-}
-
-/**
- * Envío calculado al recibir el pin (antes del resumen final):
- * distancia, costo y, si ya hay productos, subtotal + envío = total.
- */
-export function buildDistanceQuoteMessage(quote: DeliveryQuote, subtotal: number): string | null {
-  if (quote.distanceKm === undefined) return null;
-  // Dirección escrita (geocodificada): la distancia es aproximada; con pin GPS es la calculada
-  const place = quote.geocoded ? 'Tu dirección' : 'Tu ubicación';
-  if (!quote.isCovered) {
-    const radius = quote.maxRadius !== undefined ? ` (${formatKm(quote.maxRadius)} km)` : '';
-    return `${place} está a ${formatKm(quote.distanceKm)} km y supera nuestro rango máximo de domicilio${radius}. ¿Quieres pedirlo para recoger en el local?`;
-  }
-  const lines = [
-    `🛵 Distancia ${quote.geocoded ? 'aproximada' : 'calculada'}: ${formatKm(quote.distanceKm)} km`,
-    `💵 Costo de envío: ${money(quote.deliveryFee)} COP`,
-  ];
-  if (subtotal > 0) {
-    lines.push(`Subtotal: ${money(subtotal)} + Envío: ${money(quote.deliveryFee)} = Total: ${money(subtotal + quote.deliveryFee)}`);
-  }
-  return lines.join('\n');
-}
-
-/** Domicilio fuera de las zonas del local: se ofrece recoger (o se pide el barrio si no lo dijo) */
-export function buildOutOfCoverageMessage(ai: OrderIntent, quote?: DeliveryQuote | null): string {
-  // Por distancia (pin GPS): se dice cuánto supera el rango
-  const byDistance = quote && !quote.isCovered ? buildDistanceQuoteMessage(quote, 0) : null;
-  if (byDistance) return byDistance;
-  const place = ai.neighborhood?.trim();
-  if (!place) return '¿En qué barrio queda la dirección? Así te confirmo el valor del domicilio.';
-  return `Por ahora no tenemos cobertura de domicilio en ${place}. ¿Quieres pedirlo para recoger en el local?`;
 }
 
 /** "Limonada Cerezada " -> "limonada cerezada" (sin tildes ni mayúsculas) */
@@ -221,7 +192,8 @@ function paymentLine(ai: OrderIntent): string {
 export function buildConfirmationMessage(
   ai: OrderIntent,
   lines: OrderLine[],
-  quote?: DeliveryQuote | null,
+  /** Domicilio: tarifa fija del local o pendiente (lo define el local tras registrar el pedido) */
+  delivery?: DeliveryFeeInfo | null,
   /** Marcas con varias sedes: dónde recoge (la elegida o la principal) */
   pickupBranchName?: string | null,
 ): string {
@@ -241,28 +213,34 @@ export function buildConfirmationMessage(
     const where = pickupBranchName ? ` en la sede ${pickupBranchName}` : '';
     return `🛍️ *Para recoger*${where}\n${itemsSummary(lines)}\n\nTu total es ${money(total)}.\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
-  // Domicilio: el sistema no conoce el valor del envío por zona; nunca se presenta como total final
+  // Domicilio: con tarifa fija, desglose exacto; si no, solo los productos (el local confirma el envío)
   const address = [ai.deliveryAddress, ai.neighborhood?.trim()].filter(Boolean).join(', ') || 'tu ubicación compartida';
   const header = `🛵 *Domicilio* a: ${address}\n${itemsSummary(lines)}`;
-  if (quote?.isCovered && quote.distanceKm !== undefined) {
-    // Por distancia (pin GPS): distancia, envío y total exactos
-    return `${header}\n\n${buildDistanceQuoteMessage(quote, total)}\n${paymentLine(ai)}\n\n¿Confirmas?`;
+  if (delivery && !delivery.deliveryFeePending) {
+    return `${header}\n\nSubtotal: ${money(total)}\nDomicilio: ${formatDeliveryFee(delivery.deliveryFee)}\nTotal: ${money(total + delivery.deliveryFee)}\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
-  if (quote?.isCovered && quote.coverageConfigured) {
-    // Zona encontrada: desglose exacto de productos + domicilio
-    return `${header}\n\nSubtotal: ${money(total)}\nDomicilio (${quote.zoneName}): ${money(quote.deliveryFee)}\nTotal: ${money(total + quote.deliveryFee)}\n${paymentLine(ai)}\n\n¿Confirmas?`;
+  if (delivery?.deliveryFeePending) {
+    return `${header}\n\nSubtotal de productos: ${money(total)}\n${DELIVERY_FEE_PENDING_NOTE}\n${paymentLine(ai)}\n\n¿Confirmas?`;
   }
   return `${header}\n\nTu total en productos es ${money(total)}. ${DELIVERY_FEE_NOTE}\n${paymentLine(ai)}\n\n¿Confirmas?`;
 }
 
 /**
- * Mensaje tras registrar el pedido (el "✅" le indica a la IA que ya quedó registrado).
- * La referencia es el turno del día (#07), no el UUID: es lo que ven la cocina y el repartidor.
+ * Pedido registrado. Domicilio pendiente: aún no va a cocina; el local define el valor y se lo
+ * confirma al cliente por este chat (con el total y cómo pagar).
  */
-export function buildRegisteredMessage(ai: OrderIntent, dailyNumber: number, pickupBranchName?: string | null): string {
+export function buildRegisteredMessage(
+  ai: OrderIntent,
+  dailyNumber: number,
+  pickupBranchName?: string | null,
+  deliveryFeePending = false,
+): string {
   const ref = formatDailyNumber(dailyNumber);
   if (isReservation(ai)) {
     return `✅ Reserva confirmada. Tu turno es el ${ref}. Te esperamos.`;
+  }
+  if (deliveryFeePending && ai.orderType === 'DELIVERY') {
+    return `✅ Pedido registrado. Tu turno es el ${ref}. En instantes te confirmamos por aquí el valor del domicilio y el total a pagar.`;
   }
   return ai.orderType === 'TAKEAWAY'
     ? `✅ Pedido confirmado. Tu turno es el ${ref}. Te avisamos cuando esté listo para recoger${pickupBranchName ? ` en la sede ${pickupBranchName}` : ''}.`
@@ -403,6 +381,8 @@ export interface ReceivedOrder {
   orderType: string;
   paymentMethod?: string | null;
   paymentStatus?: string | null;
+  /** Domicilio aún sin valor: el local lo define en el Kanban */
+  deliveryFeePending?: boolean | null;
 }
 
 /**
@@ -425,6 +405,10 @@ export function buildWebOrderReceivedMessage(
   paymentDetails?: string | null,
 ): string {
   const greeting = name ? `¡Hola ${name}!` : '¡Hola!';
+  // Domicilio por definir: aún no va a cocina; los datos de pago llegan con el valor del domicilio
+  if (order.deliveryFeePending && order.orderType === 'DELIVERY') {
+    return `${greeting} Recibimos tu pedido *${formatDailyNumber(dailyNumber)}*. 🛵 En instantes te confirmamos por aquí el valor del domicilio (según tu dirección y el clima) y el total a pagar.`;
+  }
   const next =
     order.orderType === 'TAKEAWAY'
       ? 'Te avisamos por aquí cuando esté listo para recoger.'

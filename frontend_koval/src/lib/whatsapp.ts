@@ -67,12 +67,12 @@ export interface OrderWhatsAppDetails {
   customerName: string;
   items: Array<{ name: string; quantity: number; price: number }>;
   total: number;
-  /** Valor del domicilio según la zona (incluido en total) */
+  /** Valor del domicilio (tarifa fija del local, incluido en total) */
   deliveryFee?: number;
+  /** Domicilio por confirmar: el local lo define y lo avisa por WhatsApp (total = solo productos) */
+  deliveryFeePending?: boolean;
   deliveryAddress?: string;
   neighborhood?: string;
-  /** Pin GPS del cliente: enlace al mapa para el local */
-  coords?: { lat: number; lng: number };
   /** Pasa a recoger en el local */
   pickup?: boolean;
   /** Sede donde recoge (marcas con varias sedes) */
@@ -95,11 +95,14 @@ export function buildOrderWhatsAppMessage(order: OrderWhatsAppDetails): string {
   else if (order.deliveryAddress || order.neighborhood) {
     lines.push(`Dirección: ${[order.deliveryAddress, order.neighborhood].filter(Boolean).join(', ')}`);
   }
-  if (!order.tableNumber && !order.pickup && order.coords) {
-    lines.push(`Ubicación: https://www.google.com/maps?q=${order.coords.lat},${order.coords.lng}`);
-  }
-  if (order.deliveryFee) lines.push(`Domicilio: ${formatCOP(order.deliveryFee)}`);
+  const pendingDelivery = Boolean(order.deliveryFeePending) && !order.tableNumber && !order.pickup;
+  if (pendingDelivery) lines.push('Domicilio: por confirmar');
+  else if (order.deliveryFee) lines.push(`Domicilio: ${formatCOP(order.deliveryFee)}`);
   if (order.notes) lines.push(`Notas: ${order.notes}`);
-  lines.push(`*Total a pagar: ${formatCOP(order.total)} COP* (efectivo / contra entrega)`);
+  lines.push(
+    pendingDelivery
+      ? `*Total productos: ${formatCOP(order.total)} COP* (+ domicilio por confirmar)`
+      : `*Total a pagar: ${formatCOP(order.total)} COP* (efectivo / contra entrega)`,
+  );
   return lines.join('\n');
 }

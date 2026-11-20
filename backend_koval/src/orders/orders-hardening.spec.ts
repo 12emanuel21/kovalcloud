@@ -51,7 +51,7 @@ function buildWithRow(fields: Record<string, unknown> = {}) {
   };
   const gateway: any = { emitOrderStatusUpdated: jest.fn(), emitOrderUpdated: jest.fn() };
   const whatsapp: any = { sendTextMessage: jest.fn().mockResolvedValue({ success: true }) };
-  const service = new OrdersService(prisma, gateway, whatsapp, {} as any, {} as any, {} as any);
+  const service = new OrdersService(prisma, gateway, whatsapp, {} as any, {} as any);
   return { row, prisma, gateway, whatsapp, service };
 }
 
@@ -120,7 +120,7 @@ describe('[P1-12] Pedidos de la carta: autorización de datos (Ley 1581)', () =>
     const zones: any = { quoteForOrder: jest.fn().mockResolvedValue(null) };
     const customers: any = { safeTouch: jest.fn().mockResolvedValue({ id: 'cust-1' }) };
     const gateway: any = { emitNewOrder: jest.fn() };
-    const service = new OrdersService(prisma, gateway, {} as any, {} as any, zones, customers);
+    const service = new OrdersService(prisma, gateway, {} as any, {} as any, customers);
     return { prisma, customers, service };
   };
   const dto = (extra: Partial<CreateOrderDto> = {}) =>

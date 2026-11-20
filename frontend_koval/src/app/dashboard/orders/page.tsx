@@ -6,6 +6,11 @@ import { ExportOrdersButton } from '@/components/orders/ExportOrdersButton';
 import { ShiftExtensionPanel } from '@/components/orders/ShiftExtensionPanel';
 import { io, Socket } from 'socket.io-client';
 import PrepareActions from '@/components/orders/PrepareActions';
+import DeliveryFeeActions, {
+  DEFAULT_DELIVERY_FEE_PRESETS,
+  formatDeliveryFee,
+  type DeliveryFeeBranch,
+} from '@/components/orders/DeliveryFeeActions';
 import DispatchModal from '@/components/orders/DispatchModal';
 import PaymentProofModal from '@/components/orders/PaymentProofModal';
 import { formatCustomerPhone, isLidContact, waPhone } from '@/lib/customer-phone';
@@ -64,6 +69,10 @@ interface Order {
   customerLat?: number | null;
   customerLng?: number | null;
   deliveryDistanceKm?: number | null;
+  /** Domicilio: lo define el local con los botones rápidos (null para la cocina: sin importes) */
+  deliveryFee?: number | null;
+  /** Aún sin valor: la tarjeta muestra los botones rápidos */
+  deliveryFeePending?: boolean;
   items: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -180,6 +189,14 @@ export default function OrdersPage() {
   const singleBranch = branches.length === 1;
   // Columna visible en móvil y tablet (en escritorio se ven las 3)
   const [mobileColumn, setMobileColumn] = useState<KanbanColumnId>('pending');
+  // Botones rápidos de domicilio: montos del local y sedes activas (dueño y cocina)
+  const [feeOptions, setFeeOptions] = useState<{ presets: number[]; branches: DeliveryFeeBranch[] }>({
+    presets: DEFAULT_DELIVERY_FEE_PRESETS,
+    branches: [],
+  });
+  // Tarjeta con el domicilio en corrección (ya definido, sigue en Pendientes)
+  const [editingFeeOrderId, setEditingFeeOrderId] = useState<string | null>(null);
+  const [feeError, setFeeError] = useState<{ orderId: string; text: string } | null>(null);
   const [isConnectedWs, setIsConnectedWs] = useState<boolean>(false);
   const [newOrderToast, setNewOrderToast] = useState<{ id: string; customer: string; total: number | null } | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -214,6 +231,28 @@ export default function OrdersPage() {
       fetchOrders(true);
     }
   }, [fetchOrders, restaurantId]);
+
+  // Montos sugeridos y sedes para los botones de domicilio (sin ellos: los de siempre)
+  useEffect(() => {
+    if (!restaurantId || !token) return;
+    let cancelled = false;
+    fetch(`${API_URL}/orders/delivery-fee-options?restaurantId=${encodeURIComponent(restaurantId)}`, {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? (res.json() as Promise<{ presets?: number[]; branches?: DeliveryFeeBranch[] }>) : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setFeeOptions({
+          presets: data.presets?.length ? data.presets : DEFAULT_DELIVERY_FEE_PRESETS,
+          branches: data.branches ?? [],
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantId, token]);
 
   // Conexión WebSockets con Socket.io
   useEffect(() => {
@@ -276,6 +315,8 @@ export default function OrdersPage() {
     socket.on('new_order', handleNewOrder);
     socket.on('order_updated', handleOrderUpdated);
     socket.on('order_status_updated', handleOrderUpdated);
+    // Pasó a otra sede (al definir el domicilio): la cocina de esta sede lo quita del tablero
+    socket.on('order_removed', ({ id }: { id: string }) => setOrders((prev) => prev.filter((ord) => ord.id !== id)));
     return () => {
       socket.disconnect();
       socketRef.current = null;
@@ -315,6 +356,33 @@ export default function OrdersPage() {
   };
 
   // "Entregado / Archivar": el pedido despachado sale del tablero (sigue en la BD y en el Excel)
+  // Domicilio definido con un botón rápido: total actualizado, aviso al cliente por WhatsApp y el
+  // pedido sigue en Pendientes (la cocina lo inicia a mano)
+  const handleSetDeliveryFee = async (orderId: string, deliveryFee: number, branchId?: string) => {
+    setUpdatingOrderId(orderId);
+    setFeeError(null);
+    try {
+      const currentToken = token || (typeof window !== 'undefined' ? localStorage.getItem('koval_token') : null);
+      const res = await fetch(`${API_URL}/orders/${orderId}/delivery-fee`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + currentToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deliveryFee, ...(branchId ? { branchId } : {}) }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const message = Array.isArray(errorData.message) ? errorData.message.join('. ') : errorData.message;
+        throw new Error(message || `No se pudo guardar el domicilio (${res.status})`);
+      }
+      const updated: Order = await res.json();
+      setOrders((prev) => prev.map((ord) => (ord.id === orderId ? { ...ord, ...updated } : ord)));
+      setEditingFeeOrderId(null);
+    } catch (err: unknown) {
+      setFeeError({ orderId, text: err instanceof Error ? err.message : 'No se pudo guardar el domicilio' });
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
   const handleArchive = async (orderId: string) => {
     setUpdatingOrderId(orderId);
     try {
@@ -413,7 +481,12 @@ export default function OrdersPage() {
     const cleanPhone = waPhone(order.customerPhone);
     const isWhatsApp = order.channel === 'WHATSAPP';
     const branchName =
-      order.branchId && !singleBranch ? order.branch?.name ?? branchNameOf(branches, order.branchId, '') : '';
+      order.branchId && !singleBranch
+        ? feeOptions.branches.find((b) => b.id === order.branchId)?.name ?? order.branch?.name ?? branchNameOf(branches, order.branchId, '')
+        : '';
+    const isDeliveryOrder = order.orderType === 'DELIVERY';
+    const feePending = isDeliveryOrder && Boolean(order.deliveryFeePending);
+    const showFeeActions = isDeliveryOrder && order.status === 'PENDING' && (feePending || editingFeeOrderId === order.id);
     const hasGps = order.orderType !== 'DINE_IN' && order.customerLat != null && order.customerLng != null;
 
     return (
@@ -449,6 +522,16 @@ export default function OrdersPage() {
                 </span>
               )}
               {renderPaymentBadge(order)}
+              {isDeliveryOrder &&
+                (feePending ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-black tracking-wide text-slate-950">
+                    🛵 Domicilio por definir
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">
+                    🛵 {order.deliveryFee == null ? 'Domicilio confirmado' : `Domicilio: ${formatDeliveryFee(order.deliveryFee)}`}
+                  </span>
+                ))}
             </div>
           </div>
 
@@ -562,6 +645,34 @@ export default function OrdersPage() {
 
         {/* Botones de Acción Condicionales */}
         <div className="pt-2 border-t border-slate-700/70">
+          {/* Domicilio: el local lo define aquí (botones rápidos) antes de mandar a cocina */}
+          {showFeeActions && (
+            <div className="mb-3 space-y-2 rounded-lg border border-amber-400/40 bg-amber-400/5 p-2.5">
+              <p className="text-xs font-bold text-amber-300">🛵 ¿Cuánto vale el domicilio?</p>
+              <DeliveryFeeActions
+                presets={feeOptions.presets}
+                branches={feeOptions.branches}
+                currentBranchId={order.branchId}
+                busy={isUpdating}
+                onSubmit={(fee, branchId) => handleSetDeliveryFee(order.id, fee, branchId)}
+                onCancel={feePending ? undefined : () => setEditingFeeOrderId(null)}
+              />
+              {feeError?.orderId === order.id && (
+                <p role="alert" className="text-xs text-rose-300">
+                  {feeError.text}
+                </p>
+              )}
+            </div>
+          )}
+          {isDeliveryOrder && order.status === 'PENDING' && !showFeeActions && (
+            <button
+              type="button"
+              onClick={() => setEditingFeeOrderId(order.id)}
+              className="mb-2 min-h-11 w-full rounded-lg border border-slate-700 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white"
+            >
+              Cambiar valor del domicilio
+            </button>
+          )}
           {order.status === 'PENDING' && (
             <PrepareActions
               busy={isUpdating}

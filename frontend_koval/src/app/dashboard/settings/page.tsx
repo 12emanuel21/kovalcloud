@@ -7,7 +7,7 @@ import { ShiftExtensionPanel } from '@/components/orders/ShiftExtensionPanel';
 import { TeamSection } from './TeamSection';
 import { MyAccountSection } from './MyAccountSection';
 import { DriversSection } from './DriversSection';
-import { DeliveryZonesSection } from './DeliveryZonesSection';
+import { DeliveryFeePresetsCard, FlatDeliveryFeeCard } from './DeliveryFeeSettingsCards';
 import { BranchesSection } from './BranchesSection';
 import { CustomInstructionsCard } from './CustomInstructionsCard';
 import { AddressPaymentsCard, LocalDataCard } from './LocalDataCards';
@@ -111,7 +111,12 @@ function SettingsSection({
     case 'whatsapp':
       return <WhatsAppConnectionCard botNumber={restaurant.whatsappBotNumber} />;
     case 'domicilio':
-      return <DeliveryZonesSection />;
+      return (
+        <>
+          <DeliveryFeePresetsCard restaurant={restaurant} onSaved={onSaved} />
+          <FlatDeliveryFeeCard restaurant={restaurant} onSaved={onSaved} />
+        </>
+      );
     case 'repartidores':
       return <DriversSection />;
     case 'equipo':

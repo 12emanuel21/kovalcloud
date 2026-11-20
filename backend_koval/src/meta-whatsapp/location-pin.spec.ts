@@ -3,13 +3,10 @@ import { MetaWhatsAppService } from './meta-whatsapp.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { OrdersGateway } from '../orders/orders.gateway';
-import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService } from '../customers/customers.service';
 import { buildLocationPinRule } from './prompts/waiter.prompt';
 import {
   buildConfirmationMessage,
-  buildDistanceQuoteMessage,
-  buildOutOfCoverageMessage,
   formatSharedLocation,
   hasRequiredData,
   latestSharedLocation,
@@ -17,8 +14,7 @@ import {
   parseSharedLocation,
 } from './order-flow';
 
-const COVERED = { isCovered: true, distanceKm: 3.1, deliveryFee: 7000, zoneId: null, zoneName: '3,1 km', coverageConfigured: true } as const;
-const TOO_FAR = { isCovered: false, distanceKm: 9.4, maxRadius: 8, fallback: 'TAKEAWAY', deliveryFee: 0, coverageConfigured: true } as const;
+const PENDING = { deliveryFee: 0, deliveryFeePending: true } as const;
 
 describe('Pin de ubicación de WhatsApp', () => {
   describe('mensaje legible y coordenadas', () => {
@@ -86,45 +82,32 @@ describe('Pin de ubicación de WhatsApp', () => {
     });
   });
 
-  describe('mensajes del envío por distancia', () => {
+  describe('pin opcional y domicilio manual', () => {
     const lines = [{ menuItemId: 'i1', name: 'Perro', quantity: 1, unitPrice: 20000, subtotal: 20000 }];
     const ai: any = { intent: 'ORDER', orderType: 'DELIVERY', paymentMethod: 'CASH', items: [] };
 
-    it('distancia, costo y desglose subtotal + envío = total', () => {
-      expect(buildDistanceQuoteMessage(COVERED, 20000)).toBe(
-        '🛵 Distancia calculada: 3,1 km\n💵 Costo de envío: $7.000 COP\nSubtotal: $20.000 + Envío: $7.000 = Total: $27.000',
-      );
-      expect(buildDistanceQuoteMessage(COVERED, 0)).toBe('🛵 Distancia calculada: 3,1 km\n💵 Costo de envío: $7.000 COP');
-    });
-
-    it('fuera del radio: lo dice con el rango máximo y ofrece recoger', () => {
-      const text = 'Tu ubicación está a 9,4 km y supera nuestro rango máximo de domicilio (8 km). ¿Quieres pedirlo para recoger en el local?';
-      expect(buildDistanceQuoteMessage(TOO_FAR, 20000)).toBe(text);
-      expect(buildOutOfCoverageMessage(ai, TOO_FAR)).toBe(text);
-    });
-
-    it('una cotización por zona no produce mensaje de distancia', () => {
-      expect(buildDistanceQuoteMessage({ isCovered: true, zoneId: 'z1', zoneName: 'Norte', deliveryFee: 6000, coverageConfigured: true }, 20000)).toBeNull();
-    });
-
-    it('con el pin, la dirección escrita es opcional y el resumen muestra la distancia', () => {
+    it('con el pin, la dirección escrita es opcional; el resumen deja el domicilio por confirmar', () => {
       expect(hasRequiredData(ai, lines)).toBe(false);
       expect(hasRequiredData(ai, lines, true)).toBe(true);
-      const summary = buildConfirmationMessage(ai, lines, COVERED);
+      const summary = buildConfirmationMessage(ai, lines, PENDING);
       expect(summary).toContain('🛵 *Domicilio* a: tu ubicación compartida');
-      expect(summary).toContain('Subtotal: $20.000 + Envío: $7.000 = Total: $27.000');
+      expect(summary).toContain('Subtotal de productos: $20.000\n🛵 Domicilio: por confirmar según dirección y clima');
+      expect(summary).not.toMatch(/km|Distancia/);
       expect(summary).toMatch(/¿Confirmas\?$/);
     });
 
-    it('la regla de distancia solo entra al prompt si el local cobra por distancia (pin opcional)', () => {
-      expect(buildLocationPinRule(false)).toBe('');
-      const rule = buildLocationPinRule(true);
-      // Ya no se exige el pin: se piden dirección y barrio; el pin queda como opción del cliente
-      expect(rule).not.toContain('Por favor compártenos tu ubicación');
-      expect(rule).toContain('NO le pidas al cliente que comparta su ubicación');
-      expect(rule).toContain('el pin de ubicación es opcional');
+    it('con tarifa fija del local: desglose exacto de domicilio y total', () => {
+      const summary = buildConfirmationMessage({ ...ai, deliveryAddress: 'Cra 52 # 76-10' }, lines, { deliveryFee: 5000, deliveryFeePending: false });
+      expect(summary).toContain('Subtotal: $20.000\nDomicilio: $5.000\nTotal: $25.000');
+      expect(buildConfirmationMessage(ai, lines, { deliveryFee: 0, deliveryFeePending: false })).toContain('Domicilio: Gratis\nTotal: $20.000');
+    });
+
+    it('la regla del prompt nunca pide el pin ni calcula el envío; si el cliente lo manda, se acepta', () => {
+      const rule = buildLocationPinRule();
+      expect(rule).toContain('Nunca le pidas al cliente que comparta su ubicación');
       expect(rule).toContain('📍 Ubicación compartida:');
-      expect(rule).toContain('calculate_delivery_cost');
+      expect(rule).not.toContain('Por favor compártenos tu ubicación');
+      expect(rule).not.toContain('calculate_delivery_cost');
     });
   });
 
@@ -132,7 +115,6 @@ describe('Pin de ubicación de WhatsApp', () => {
     let service: MetaWhatsAppService;
     let prisma: any;
     let ai: { parseOrderIntent: jest.Mock };
-    let zones: { quoteForOrder: jest.Mock };
 
     const payload = (message: Record<string, unknown>) => ({
       object: 'whatsapp_business_account',
@@ -154,9 +136,8 @@ describe('Pin de ubicación de WhatsApp', () => {
     });
     const pinMessage = { type: 'location', location: { latitude: 10.99, longitude: -74.81, name: 'Casa' } };
 
-    const build = async ({ located = true, history = [] as Array<{ role: string; message: string }>, quote = COVERED as unknown } = {}) => {
+    const build = async ({ located = true, history = [] as Array<{ role: string; message: string }> } = {}) => {
       ai = { parseOrderIntent: jest.fn() };
-      zones = { quoteForOrder: jest.fn().mockResolvedValue(quote) };
       prisma = {
         restaurant: {
           findFirst: jest.fn().mockResolvedValue({
@@ -189,7 +170,6 @@ describe('Pin de ubicación de WhatsApp', () => {
         providers: [
           MetaWhatsAppService,
           { provide: AiService, useValue: ai },
-          { provide: DeliveryZonesService, useValue: zones },
           {
             provide: CustomersService,
             useValue: {
@@ -217,45 +197,41 @@ describe('Pin de ubicación de WhatsApp', () => {
       return send.mock.calls[0]?.[3] as string;
     };
 
-    it('el pin se guarda en el chat como texto legible y la IA lo recibe (con la regla del pin activa)', async () => {
+    it('el pin se guarda en el chat como texto legible y la IA lo recibe (sin opciones de distancia)', async () => {
       await build();
       await run(pinMessage, delivery());
       const saved = prisma.chatHistory.create.mock.calls.map(([arg]: any[]) => arg.data.message);
       expect(saved[0]).toBe('📍 Ubicación compartida: (10.99, -74.81)');
       expect(ai.parseOrderIntent.mock.calls[0][0]).toBe('📍 Ubicación compartida: (10.99, -74.81)');
-      expect(ai.parseOrderIntent.mock.calls[0][4]).toEqual({ distancePricing: true });
+      expect(ai.parseOrderIntent.mock.calls[0]).toHaveLength(4);
     });
 
-    it('al recibir el pin responde con la distancia, el costo y el total (calculate_delivery_cost)', async () => {
+    it('al recibir el pin no se cotiza: responde la IA, sin distancias ni costos de envío', async () => {
       await build();
       const sent = await run(pinMessage, delivery());
-      expect(zones.quoteForOrder).toHaveBeenCalledWith('rest-1', 'DELIVERY', undefined, undefined, { lat: 10.99, lng: -74.81 });
-      expect(sent).toContain('¿A nombre de quién?');
-      expect(sent).toContain('🛵 Distancia calculada: 3,1 km\n💵 Costo de envío: $7.000 COP\nSubtotal: $20.000 + Envío: $7.000 = Total: $27.000');
+      expect(sent).toBe('Listo, ya tengo tu ubicación. ¿A nombre de quién?');
+      expect(sent).not.toMatch(/km|Costo de envío|Distancia/);
     });
 
-    it('pin fuera del radio: avisa el rango máximo y ofrece recoger', async () => {
-      await build({ quote: TOO_FAR });
-      const sent = await run(pinMessage, delivery());
-      expect(sent).toContain('supera nuestro rango máximo de domicilio (8 km)');
-      expect(sent).toContain('recoger en el local');
-    });
-
-    it('al confirmar, el pedido usa el pin del historial: coordenadas, distancia y envío', async () => {
+    it('al confirmar, el pedido guarda el pin para el repartidor y el domicilio queda pendiente', async () => {
       await build({ history: [{ role: 'user', message: '📍 Ubicación compartida: (10.99, -74.81)' }] });
       const sent = await run(
         { type: 'text', text: { body: 'sí, confirmo' } },
         delivery({ customerName: 'Ana', paymentMethod: 'CASH', readyToConfirm: true, customerConfirmed: true, responseToUser: 'Perfecto.' }),
       );
-      expect(prisma.order.create.mock.calls[0][0].data).toMatchObject({
+      const data = prisma.order.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
         customerLat: 10.99,
         customerLng: -74.81,
-        deliveryDistanceKm: 3.1,
-        deliveryFee: 7000,
-        total: 27000,
+        deliveryFee: 0,
+        deliveryFeePending: true,
+        subtotal: 20000,
+        total: 20000,
         deliveryAddress: 'Ubicación compartida por WhatsApp',
       });
-      expect(sent).toContain('Pedido confirmado');
+      expect(data).not.toHaveProperty('deliveryDistanceKm');
+      expect(sent).toContain('Pedido registrado');
+      expect(sent).toContain('En instantes te confirmamos por aquí el valor del domicilio');
     });
 
     describe('[P1-7] pin de un pedido anterior', () => {
@@ -278,7 +254,6 @@ describe('Pin de ubicación de WhatsApp', () => {
         withTimedHistory(40, 30);
         await run({ type: 'text', text: { body: 'sí, confirmo' } }, confirm);
         expect(prisma.order.create).not.toHaveBeenCalled();
-        expect(zones.quoteForOrder).not.toHaveBeenCalled();
         // Se busca el último pedido no cancelado del cliente en este local
         expect(prisma.order.findFirst).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -295,16 +270,16 @@ describe('Pin de ubicación de WhatsApp', () => {
         expect(prisma.order.create.mock.calls[0][0].data).toMatchObject({ customerLat: 10.99, customerLng: -74.81 });
       });
 
-      it('"sí" repetido justo después de registrar: el antiduplicado sigue respondiendo con el pin', async () => {
+      it('"sí" repetido justo después de registrar: el pin sigue valiendo (no vuelve a pedir la ubicación)', async () => {
         await build();
         withTimedHistory(6, 1);
         const sent = await run({ type: 'text', text: { body: 'sí' } }, confirm);
-        expect(zones.quoteForOrder).toHaveBeenCalledWith('rest-1', 'DELIVERY', undefined, undefined, { lat: 10.99, lng: -74.81 });
+        expect(prisma.order.create.mock.calls[0][0].data).toMatchObject({ customerLat: 10.99, customerLng: -74.81 });
         expect(sent).toBeDefined();
       });
     });
 
-    it('local sin coordenadas: la IA se llama como antes (sin la regla del pin)', async () => {
+    it('con o sin coordenadas del local, la IA se llama igual (el domicilio ya no depende de ellas)', async () => {
       await build({ located: false });
       await run({ type: 'text', text: { body: '¿hasta qué hora abren?' } }, { intent: 'QUESTION', items: [], responseToUser: 'Hasta las 10' });
       expect(ai.parseOrderIntent.mock.calls[0]).toHaveLength(4);

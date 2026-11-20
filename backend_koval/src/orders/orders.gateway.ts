@@ -181,4 +181,13 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`🔄 Emitiendo evento [order_status_updated] / [order_updated] a sala restaurant_${restaurantId}`);
     this.emitToRestaurant(restaurantId, ['order_status_updated', 'order_updated'], order);
   }
+
+  /**
+   * El pedido pasó a otra sede (al definir el domicilio en el Kanban): la cocina de la sede anterior
+   * deja de recibir sus eventos, así que se le avisa que lo quite de su pantalla.
+   */
+  emitOrderLeftBranch(restaurantId: string, orderId: string, previousBranchId: string) {
+    if (!this.server) return;
+    this.server.to(branchKitchenRoom(restaurantId, previousBranchId)).emit('order_removed', { id: orderId, restaurantId });
+  }
 }

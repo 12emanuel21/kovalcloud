@@ -72,7 +72,11 @@ describe('order-flow', () => {
     const cash = buildConfirmationMessage(ai({ ...delivery, paymentMethod: 'CASH' }), lines);
     // Domicilio: total en productos + aclaración del envío (nunca un flete inventado)
     expect(cash).toContain(
-      'Tu total en productos es $53.000. El valor del domicilio, si aplica, se suma según tu zona.\nPago: Efectivo al recibir\n\n¿Confirmas?',
+      'Tu total en productos es $53.000. El valor del domicilio te lo confirmamos en instantes.\nPago: Efectivo al recibir\n\n¿Confirmas?',
+    );
+    // Domicilio pendiente (lo define el local en el Kanban): subtotal y la nota "por confirmar"
+    expect(buildConfirmationMessage(ai({ ...delivery, paymentMethod: 'CASH' }), lines, { deliveryFee: 0, deliveryFeePending: true })).toContain(
+      'Subtotal de productos: $53.000\n🛵 Domicilio: por confirmar según dirección y clima\nPago: Efectivo al recibir',
     );
     expect(cash).not.toContain('Se paga al recibir');
     expect(buildConfirmationMessage(ai({ ...delivery, paymentMethod: 'TRANSFER' }), lines)).toContain('Pago: Transferencia');

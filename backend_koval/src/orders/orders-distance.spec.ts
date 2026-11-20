@@ -1,10 +1,9 @@
-import { BadRequestException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { buildDriverDispatchMessage } from './dispatch-messages';
 
-describe('Pedidos con pin GPS (domicilio por distancia)', () => {
+describe('Pedidos con pin GPS (opcional: solo para el repartidor)', () => {
   const restaurant = { id: 'rest-1', name: 'Betania', isTemporarilyClosed: false, businessHours: null, extendedUntil: null, branches: [{ id: 'b-60', isMain: false }, { id: 'b-30', isMain: true }] };
-  const build = (quote: unknown) => {
+  const build = () => {
     const create = jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'o1', createdAt: new Date(), paymentReference: null, ...data }));
     const prisma: any = {
       restaurant: { findUnique: jest.fn().mockResolvedValue(restaurant) },
@@ -12,10 +11,9 @@ describe('Pedidos con pin GPS (domicilio por distancia)', () => {
       order: { count: jest.fn().mockResolvedValue(0) },
       $transaction: jest.fn().mockImplementation((fn) => fn({ order: { create } })),
     };
-    const zones: any = { quoteForOrder: jest.fn().mockResolvedValue(quote) };
     const customers: any = { safeTouch: jest.fn().mockResolvedValue({ id: 'cust-1' }) };
-    const service = new OrdersService(prisma, { emitNewOrder: jest.fn() } as any, {} as any, {} as any, zones, customers);
-    return { service, create, zones };
+    const service = new OrdersService(prisma, { emitNewOrder: jest.fn() } as any, {} as any, {} as any, customers);
+    return { service, create };
   };
   const dto = (extra: Record<string, unknown> = {}) =>
     ({
@@ -29,33 +27,29 @@ describe('Pedidos con pin GPS (domicilio por distancia)', () => {
       ...extra,
     }) as any;
 
-  it('cotiza con el pin y guarda coordenadas, distancia, envío y la sede más cercana', async () => {
-    const quote = { isCovered: true, distanceKm: 3.1, deliveryFee: 7000, zoneId: null, zoneName: '3,1 km', coverageConfigured: true, branchId: 'b-60' };
-    const { service, create, zones } = build(quote);
+  it('con pin: guarda las coordenadas para el repartidor, pero el domicilio queda pendiente (no por distancia)', async () => {
+    const { service, create } = build();
     await service.create(dto());
-    expect(zones.quoteForOrder).toHaveBeenCalledWith('rest-1', 'DELIVERY', undefined, undefined, { lat: 10.99, lng: -74.81 });
     expect(create.mock.calls[0][0].data).toMatchObject({
       customerLat: 10.99,
       customerLng: -74.81,
-      deliveryDistanceKm: 3.1,
-      deliveryFee: 7000,
+      deliveryFee: 0,
+      deliveryFeePending: true,
       subtotal: 20000,
-      total: 27000,
-      branchId: 'b-60',
+      total: 20000,
+      branchId: 'b-30',
     });
+    expect(create.mock.calls[0][0].data).not.toHaveProperty('deliveryDistanceKm');
   });
 
-  it('fuera del radio: OUT_OF_COVERAGE con la distancia y el radio, sin crear el pedido', async () => {
-    const { service, create } = build({ isCovered: false, distanceKm: 9.4, maxRadius: 8, fallback: 'TAKEAWAY', deliveryFee: 0, coverageConfigured: true });
-    const error = await service.create(dto()).catch((e) => e);
-    expect(error).toBeInstanceOf(BadRequestException);
-    expect(error.getResponse()).toMatchObject({ code: 'OUT_OF_COVERAGE', distanceKm: 9.4, maxRadius: 8, fallback: 'TAKEAWAY' });
-    expect(error.getResponse().message).toContain('9,4 km');
-    expect(create).not.toHaveBeenCalled();
+  it('un pin lejano ya no rechaza el pedido: el local decide el domicilio', async () => {
+    const { service, create } = build();
+    await expect(service.create(dto({ customerLat: 11.5, customerLng: -74.2 }))).resolves.toMatchObject({ deliveryFeePending: true });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it('sin pin el pedido no lleva coordenadas ni distancia', async () => {
-    const { service, create } = build({ isCovered: true, zoneId: 'z1', zoneName: 'Norte', deliveryFee: 6000, coverageConfigured: true });
+    const { service, create } = build();
     await service.create(dto({ customerLat: undefined, customerLng: undefined, neighborhood: 'Riomar' }));
     const data = create.mock.calls[0][0].data;
     expect(data).not.toHaveProperty('customerLat');

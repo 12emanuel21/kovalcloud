@@ -11,23 +11,29 @@ import { MetaWhatsAppService } from '../meta-whatsapp/meta-whatsapp.service';
 import { CreateOrderDto, isWebMenuChannel } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { OrderStatus, OrderType, Role } from '@prisma/client';
+import { OrderStatus, OrderType, Prisma, Role } from '@prisma/client';
 import { OrdersGateway } from './orders.gateway';
 import { buildClosedNotice, isRestaurantClosed } from '../restaurants/business-hours';
 import { assertTenantAccess, resolveTenantFilter, TenantUser } from '../auth/tenant-access';
 import { sanitizeRestaurant } from '../restaurants/sanitize-restaurant';
-import { isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
+import { isOnlinePaymentEnabled, isWompiReady, WompiCheckoutService } from '../payments/wompi-checkout.service';
 import { normalizeColombianPhone } from './phone';
 import { businessDayStart, dailyNumberOf, formatDailyNumber, withDailyNumbers } from './daily-number';
 import { DispatchOrderDto } from './dto/dispatch-order.dto';
 import { buildCustomerDispatchMessage, buildDriverDispatchMessage } from './dispatch-messages';
 import { normalizeDriverPhone } from '../drivers/drivers.service';
 import { buildOrdersWorkbook, exportFilename, resolveExportRange } from './orders-export';
-import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService } from '../customers/customers.service';
 import { resolveOrderBranchId } from '../branches/branch-routing';
-import { formatKm } from '../delivery-zones/distance/delivery-pricing.service';
 import { isRecordNotFound } from '../prisma/prisma-errors';
+import {
+  DELIVERY_FEE_PENDING_NOTE,
+  buildDeliveryFeeMessage,
+  initialDeliveryFee,
+  resolveDeliveryFeePresets,
+  usableFlatDeliveryFee,
+} from './delivery-fee';
+import type { SetDeliveryFeeDto } from './dto/set-delivery-fee.dto';
 
 /**
  * Confirmación inicial por WhatsApp. Con `paymentUrl` adjunta el link de pago (plan B si el cliente
@@ -38,7 +44,16 @@ export function buildPaymentLinkMessage(
   dailyNumber: number,
   total: number,
   paymentUrl: string | null,
+  /** Domicilio por definir: el total aún no lo incluye y el link llega cuando el local lo confirme */
+  deliveryFeePending = false,
 ): string {
+  if (deliveryFeePending) {
+    return (
+      `🧾 ¡Recibimos tu pedido ${formatDailyNumber(dailyNumber)} en ${restaurantName}! ` +
+      `Productos: $${total.toLocaleString('es-CO')} COP.\n\n` +
+      `${DELIVERY_FEE_PENDING_NOTE}. En instantes te lo confirmamos por este chat junto con el link de pago.`
+    );
+  }
   const received =
     `🧾 ¡Recibimos tu pedido ${formatDailyNumber(dailyNumber)} en ${restaurantName}! ` +
     `Total: $${total.toLocaleString('es-CO')} COP.`;
@@ -73,7 +88,6 @@ export class OrdersService {
     @Inject(forwardRef(() => MetaWhatsAppService))
     private readonly metaWhatsAppService: MetaWhatsAppService,
     private readonly wompiCheckout: WompiCheckoutService,
-    private readonly deliveryZones: DeliveryZonesService,
     private readonly customers: CustomersService,
   ) {}
 
@@ -187,26 +201,13 @@ export class OrdersService {
       };
     });
 
-    // 3.5. Domicilio: flete según la zona de cobertura del barrio (recoger y mesa no pagan envío).
-    //      Fuera de cobertura no se crea el pedido: la carta ofrece recoger en el local.
-    //      Con pin GPS del cliente y el local ubicado, por distancia (la sede más cercana).
+    // 3.5. Domicilio manual: con tarifa fija se cobra de una vez; si no, nace en $0 y pendiente para
+    //      que el local lo defina en el Kanban (según dirección, hora o clima) y se lo avise al cliente.
+    //      Recoger y mesa no pagan envío. Sin geocodificación ni cálculo por distancia.
+    const { deliveryFee, deliveryFeePending } = initialDeliveryFee(orderType, restaurant);
+    // Pin del navegador (si llega): solo ayuda al repartidor con el mapa, no define el valor
     const coords =
       typeof customerLat === 'number' && typeof customerLng === 'number' ? { lat: customerLat, lng: customerLng } : null;
-    const quote = await this.deliveryZones.quoteForOrder(restaurantId, orderType, neighborhood, deliveryAddress, coords);
-    if (quote && !quote.isCovered) {
-      throw new BadRequestException({
-        statusCode: 400,
-        error: 'Bad Request',
-        code: 'OUT_OF_COVERAGE',
-        message:
-          quote.distanceKm !== undefined && quote.maxRadius !== undefined
-            ? `${quote.geocoded ? 'Tu dirección' : 'Tu ubicación'} está a ${formatKm(quote.distanceKm)} km y supera nuestro rango de domicilio (${formatKm(quote.maxRadius)} km). Puedes pedirlo para recoger en el local.`
-            : 'Todavía no llegamos a tu barrio con domicilio. Puedes pedirlo para recoger en el local.',
-        fallback: quote.fallback,
-        ...(quote.distanceKm !== undefined ? { distanceKm: quote.distanceKm, maxRadius: quote.maxRadius } : {}),
-      });
-    }
-    const deliveryFee = quote?.deliveryFee ?? 0;
     const phone = normalizeColombianPhone(customerPhone);
 
     // 3.55. Sede que lo prepara: la de la zona (domicilio) o la elegida (recoger); si no, la principal.
@@ -220,7 +221,8 @@ export class OrdersService {
         message: 'La sede que elegiste no está disponible. Elige otra para recoger tu pedido.',
       });
     }
-    const branchId = resolveOrderBranchId({ orderType, quote, requestedBranchId, branches });
+    // Domicilios: la sede principal (el local puede cambiarla en el Kanban al definir el domicilio)
+    const branchId = resolveOrderBranchId({ orderType, quote: null, requestedBranchId, branches });
 
     // 3.6. Cliente del local (teléfono único por restaurante) y su autorización de datos (Ley 1581)
     const customer = await this.customers.safeTouch(restaurantId, phone, {
@@ -249,14 +251,13 @@ export class OrdersService {
           // total = productos + domicilio (el link de Wompi cobra el total)
           subtotal: calculatedTotal,
           deliveryFee,
+          deliveryFeePending,
           total: calculatedTotal + deliveryFee,
-          deliveryZoneId: quote?.isCovered ? quote.zoneId : null,
           ...(branchId ? { branchId } : {}),
-          // Pin del cliente (solo domicilios) y distancia con la que se cobró el envío
+          // Pin del cliente (solo domicilios): el repartidor va con el mapa
           ...(coords && orderType !== OrderType.TAKEAWAY && orderType !== OrderType.DINE_IN
             ? { customerLat: coords.lat, customerLng: coords.lng }
             : {}),
-          ...(quote?.isCovered && quote.distanceKm !== undefined ? { deliveryDistanceKm: quote.distanceKm } : {}),
           // WOMPI se reemplaza por el método real (NEQUI, CARD...) cuando llega el webhook
           paymentMethod: payOnline ? 'WOMPI' : 'CASH',
           items: {
@@ -278,10 +279,11 @@ export class OrdersService {
       });
     });
 
-    // 4.5. Link de pago de Wompi (antes de emitir: el Kanban ya ve la referencia = "pago pendiente")
+    // 4.5. Link de pago de Wompi (antes de emitir: el Kanban ya ve la referencia = "pago pendiente").
+    //      Con el domicilio por definir el total aún no es el final: el link sale cuando el local lo defina.
     let wompiCheckoutUrl: string | null = null;
     let order = createdOrder;
-    if (payOnline && restaurant.isWompiEnabled) {
+    if (payOnline && restaurant.isWompiEnabled && !deliveryFeePending) {
       try {
         const link = await this.wompiCheckout.generatePaymentLink(createdOrder, restaurant);
         wompiCheckoutUrl = link.url;
@@ -308,11 +310,18 @@ export class OrdersService {
           dailyNumber,
           order.total,
           restaurant.isWompiEnabled ? wompiCheckoutUrl : null,
+          deliveryFeePending,
         ),
       );
     }
 
-    return { ...order, dailyNumber, wompiCheckoutUrl };
+    return {
+      ...order,
+      dailyNumber,
+      wompiCheckoutUrl,
+      // Resumen para el cliente: el total aún no incluye el domicilio
+      ...(deliveryFeePending ? { deliveryFeeNote: DELIVERY_FEE_PENDING_NOTE } : {}),
+    };
   }
 
   /** Todos los pedidos del local (o de todos, para el SUPERADMIN), con su turno del día */
@@ -653,6 +662,125 @@ export class OrdersService {
       `✅ ¡Confirmamos tu pago del pedido ${formatDailyNumber(response.dailyNumber)}! Gracias 🙌`,
     );
     return response;
+  }
+
+  /**
+   * PATCH /orders/:id/delivery-fee: el local define el domicilio desde el Kanban (botones rápidos).
+   * Recalcula el total (productos + domicilio), deja el pedido en su estado (Pendientes sigue en
+   * Pendientes: la cocina lo inicia a mano), puede cambiar la sede, avisa al Kanban/KDS en vivo y le
+   * envía al cliente por WhatsApp el valor, el total definitivo y cómo pagar.
+   */
+  async setDeliveryFee(orderId: string, dto: SetDeliveryFeeDto, user: TenantUser) {
+    const order = await this.findOne(orderId, user);
+    if (order.orderType !== OrderType.DELIVERY) {
+      throw new BadRequestException('Solo los pedidos a domicilio llevan valor de domicilio');
+    }
+    if (order.status === OrderStatus.DELIVERED || order.status === OrderStatus.CANCELLED) {
+      throw new ConflictException('El pedido ya fue despachado o cancelado');
+    }
+    if (order.paymentStatus === 'PAID') {
+      throw new ConflictException('El pedido ya está pagado: su domicilio no se puede cambiar');
+    }
+    const deliveryFee = Math.round(dto.deliveryFee);
+    if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
+      throw new BadRequestException('El valor del domicilio debe ser 0 o mayor');
+    }
+
+    // Sede: solo una sede activa del mismo restaurante
+    if (dto.branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: dto.branchId, restaurantId: order.restaurantId, isActive: true },
+        select: { id: true },
+      });
+      if (!branch) throw new BadRequestException('La sede elegida no está disponible');
+    }
+    const previousBranchId = order.branchId ?? null;
+
+    // Atómico: si entretanto se pagó, se despachó o cambiaron los productos (adición por WhatsApp),
+    // no se pisa con un total viejo
+    const updated = await this.prisma.order
+      .update({
+        where: {
+          id: orderId,
+          subtotal: order.subtotal,
+          paymentStatus: { not: 'PAID' },
+          status: { notIn: [OrderStatus.DELIVERED, OrderStatus.CANCELLED] },
+        },
+        data: {
+          deliveryFee,
+          deliveryFeePending: false,
+          total: order.subtotal + deliveryFee,
+          ...(dto.branchId ? { branchId: dto.branchId } : {}),
+        },
+        include: { restaurant: true, items: { include: { menuItem: true } } },
+      })
+      .catch((error: unknown) => {
+        if (isRecordNotFound(error)) {
+          throw new ConflictException('El pedido cambió mientras definías el domicilio. Revisa el tablero e intenta de nuevo.');
+        }
+        throw error;
+      });
+
+    const response = await this.toOrderResponse(updated);
+    this.ordersGateway.emitOrderUpdated(updated.restaurantId, response);
+    // Pasó a otra sede: la cocina de la sede anterior lo quita de su pantalla
+    if (previousBranchId && updated.branchId && previousBranchId !== updated.branchId) {
+      this.ordersGateway.emitOrderLeftBranch(updated.restaurantId, updated.id, previousBranchId);
+    }
+
+    void this.sendDeliveryFeeNotice(updated, response.dailyNumber);
+    return response;
+  }
+
+  /** WhatsApp con el domicilio y el total; con pago en línea, el link de Wompi por el total final */
+  private async sendDeliveryFeeNotice(order: Prisma.OrderGetPayload<{ include: { restaurant: true } }>, dailyNumber: number) {
+    try {
+      let paymentUrl: string | null = null;
+      if (order.paymentMethod === 'WOMPI' && isOnlinePaymentEnabled(order.restaurant)) {
+        try {
+          paymentUrl = (await this.wompiCheckout.generatePaymentLink(order, order.restaurant)).url;
+        } catch (error) {
+          this.logger.error(`No se pudo generar el link de Wompi del pedido ${order.id}:`, error);
+        }
+      }
+      const text = buildDeliveryFeeMessage({
+        dailyNumber,
+        deliveryFee: order.deliveryFee,
+        subtotal: order.subtotal,
+        total: order.total,
+        paymentMethod: order.paymentMethod,
+        paymentDetails: order.restaurant.paymentDetails,
+        paymentUrl,
+      });
+      await this.notifyCustomer(order, text);
+      // Queda en el chat: el Inbox lo muestra y el asistente tiene el contexto si el cliente responde
+      await this.metaWhatsAppService.recordBotMessage(order.restaurantId, order.customerPhone, text);
+    } catch (error) {
+      this.logger.error(`No se pudo avisar el domicilio del pedido ${order.id}:`, error);
+    }
+  }
+
+  /**
+   * Botones rápidos de domicilio del Kanban: montos sugeridos, tarifa fija (si la hay) y sedes activas
+   * para reasignar. Lo usan el dueño y la cocina (sin datos sensibles).
+   */
+  async deliveryFeeOptions(user: TenantUser, requestedRestaurantId?: string) {
+    const restaurantId = resolveTenantFilter(user, requestedRestaurantId);
+    if (!restaurantId) throw new BadRequestException('Falta el restaurante');
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: {
+        deliveryFeePresets: true,
+        flatDeliveryFee: true,
+        branches: { where: { isActive: true }, select: { id: true, name: true, isMain: true }, orderBy: { name: 'asc' } },
+      },
+    });
+    if (!restaurant) throw new NotFoundException('Restaurante no encontrado');
+    return {
+      presets: resolveDeliveryFeePresets(restaurant.deliveryFeePresets),
+      flatDeliveryFee: usableFlatDeliveryFee(restaurant.flatDeliveryFee),
+      branches: restaurant.branches,
+    };
   }
 
   /**

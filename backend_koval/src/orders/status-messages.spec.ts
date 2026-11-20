@@ -10,7 +10,7 @@ describe('OrdersService.updateOrderStatus · aviso al cliente', () => {
         update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...row, ...data, restaurant: { name: 'Betania' } })),
       },
     };
-    const service = new OrdersService(prisma, { emitOrderStatusUpdated: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new OrdersService(prisma, { emitOrderStatusUpdated: jest.fn() } as any, {} as any, {} as any, {} as any);
     const notify = jest.spyOn(service, 'notifyCustomer').mockResolvedValue(undefined);
     return { service, notify };
   };

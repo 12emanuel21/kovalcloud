@@ -10,14 +10,9 @@ interface BranchForm {
   address: string;
   phone: string;
   isMain: boolean;
-  latitude: string;
-  longitude: string;
 }
 
-const EMPTY_FORM: BranchForm = { name: '', address: '', phone: '', isMain: false, latitude: '', longitude: '' };
-
-/** "10,98" o "10.98" -> 10.98; vacío -> null */
-const parseCoord = (value: string) => (value.trim() ? Number(value.trim().replace(',', '.')) : null);
+const EMPTY_FORM: BranchForm = { name: '', address: '', phone: '', isMain: false };
 
 const inputClass =
   'w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition placeholder-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20';
@@ -30,8 +25,8 @@ const sortBranches = (list: Branch[]) =>
 
 /**
  * Ajustes > Sedes: cocinas de la marca. La carta, el WhatsApp y los pagos siguen siendo uno solo;
- * la sede decide qué cocina prepara cada pedido (domicilios por la zona del barrio, recoger por la
- * sede que elige el cliente). La principal recibe lo que no tiene zona.
+ * la sede decide qué cocina prepara cada pedido (recoger: la que elige el cliente; domicilios: la
+ * principal, y el local la cambia en el tablero al definir el valor del domicilio).
  */
 export function BranchesSection() {
   const { branches, setBranches, loading, error, base, headers } = useBranches();
@@ -54,8 +49,6 @@ export function BranchesSection() {
             address: branch.address,
             phone: branch.phone ?? '',
             isMain: branch.isMain,
-            latitude: branch.latitude == null ? '' : String(branch.latitude),
-            longitude: branch.longitude == null ? '' : String(branch.longitude),
           }
         : { ...EMPTY_FORM, isMain: branches.length === 0 },
     );
@@ -74,13 +67,6 @@ export function BranchesSection() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!base || !editing) return;
-    const latitude = parseCoord(form.latitude);
-    const longitude = parseCoord(form.longitude);
-    const badCoord = (v: number | null, max: number) => v !== null && (!Number.isFinite(v) || Math.abs(v) > max);
-    if ((latitude === null) !== (longitude === null) || badCoord(latitude, 90) || badCoord(longitude, 180)) {
-      setFeedback({ type: 'error', text: 'Escribe la latitud y la longitud de la sede (o deja ambas vacías).' });
-      return;
-    }
     setSaving(true);
     try {
       const isNew = editing === 'new';
@@ -92,8 +78,6 @@ export function BranchesSection() {
           address: form.address.trim(),
           phone: form.phone.trim() || null,
           isMain: form.isMain,
-          latitude,
-          longitude,
         }),
       });
       if (!res.ok) throw new Error(await branchApiError(res, 'No se pudo guardar la sede'));
@@ -103,7 +87,7 @@ export function BranchesSection() {
       setFeedback({
         type: 'success',
         text: isNew
-          ? `${saved.name} quedó creada${saved.isMain ? ' como sede principal' : ''}. Asígnale zonas en la pestaña Domicilios.`
+          ? `${saved.name} quedó creada${saved.isMain ? ' como sede principal' : ''}. Asígnale repartidores y cuentas de cocina.`
           : 'Sede actualizada.',
       });
     } catch (err) {
@@ -133,7 +117,7 @@ export function BranchesSection() {
     if (
       !base ||
       !window.confirm(
-        `¿Eliminar la sede ${branch.name}? Sus zonas, repartidores y cocinas quedan sin sede (pasan a la principal). Los pedidos se conservan.`,
+        `¿Eliminar la sede ${branch.name}? Sus repartidores y cocinas quedan sin sede (pasan a la principal). Los pedidos se conservan.`,
       )
     ) {
       return;
@@ -175,16 +159,16 @@ export function BranchesSection() {
           <details className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-sm text-slate-400">
             <summary className="cursor-pointer font-semibold text-slate-300">¿Cómo se reparten los pedidos entre sedes?</summary>
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Cada domicilio va a la cocina de la sede que atiende el barrio (según la zona de domicilio).</li>
+              <li>Cada domicilio llega a la sede principal; al definir su valor en el tablero puedes pasarlo a otra sede.</li>
               <li>Quien recoge en el local elige la sede en la carta o por WhatsApp.</li>
-              <li>La sede principal recibe los pedidos de barrios sin zona y los que no eligieron sede.</li>
+              <li>La sede principal también recibe los pedidos para recoger que no eligieron sede.</li>
             </ul>
           </details>
         )}
         {!loading && branches.length === 1 && !editing && (
           <p className="text-sm text-slate-400">
             Con una sola sede todo funciona como un solo local. Agrega otra cuando abras un segundo local para separar
-            cocinas, repartidores y zonas.
+            cocinas y repartidores.
           </p>
         )}
 
@@ -229,35 +213,6 @@ export function BranchesSection() {
                 />
               </label>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-400">Latitud (opcional)</span>
-                <input
-                  inputMode="decimal"
-                  value={form.latitude}
-                  onChange={(e) => {
-                    // Pegar "10.98, -74.80" de Google Maps llena los dos campos
-                    const pair = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(e.target.value);
-                    setForm(pair ? { ...form, latitude: pair[1], longitude: pair[2] } : { ...form, latitude: e.target.value });
-                  }}
-                  placeholder="Ej. 10.9878"
-                  className={inputClass}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-400">Longitud (opcional)</span>
-                <input
-                  inputMode="decimal"
-                  value={form.longitude}
-                  onChange={(e) => setForm({ ...form, longitude: e.target.value })}
-                  placeholder="Ej. -74.7889"
-                  className={inputClass}
-                />
-              </label>
-              <p className="col-span-2 text-[11px] text-slate-500">
-                Con coordenadas, los domicilios con ubicación del cliente salen de la sede más cercana y se cobran por distancia.
-              </p>
-            </div>
             <label className="flex items-start gap-2 text-sm text-slate-300">
               <input
                 type="checkbox"
@@ -270,7 +225,7 @@ export function BranchesSection() {
               <span>
                 Sede principal
                 <span className="block text-xs text-slate-500">
-                  Recibe los domicilios de barrios sin zona (tarifa estándar) y los pedidos para recoger sin sede elegida.
+                  Recibe los domicilios (el local puede reasignarlos en el tablero) y los pedidos para recoger sin sede elegida.
                 </span>
               </span>
             </label>
@@ -298,7 +253,7 @@ export function BranchesSection() {
               <p className="text-sm font-semibold text-slate-300">Tu marca funciona como un solo local</p>
               <p className="max-w-sm text-xs text-slate-500">
                 No necesitas configurar nada aquí. Si abres otro local, agrégalo: cada sede tendrá su propia pantalla de
-                cocina, sus repartidores y sus zonas de domicilio.
+                cocina y sus repartidores.
               </p>
               <button type="button" onClick={() => openForm()} className={`${primaryButtonClass} mt-2 min-h-11`}>
                 <Plus className="h-4 w-4" /> Tengo más de un local
@@ -328,7 +283,6 @@ export function BranchesSection() {
                   <p className="truncate text-xs text-slate-400">
                     {branch.address}
                     {branch.phone ? ` · ${branch.phone}` : ''}
-                    {branch.latitude != null && branch.longitude != null ? ' · 📍 Ubicada' : ''}
                   </p>
                 </div>
                 {!branch.isMain && branch.isActive && (

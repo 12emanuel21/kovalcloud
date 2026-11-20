@@ -44,21 +44,32 @@ describe('OrdersService.create · pago en línea', () => {
     };
     const gateway: any = { emitNewOrder: jest.fn() };
     const whatsapp: any = { sendTextMessage: jest.fn().mockResolvedValue({}) };
-    const zones = { quoteForOrder: jest.fn().mockResolvedValue(null) } as any;
     const customers = { safeTouch: jest.fn().mockResolvedValue({ id: 'cust-1' }) } as any;
-    const service = new OrdersService(prisma, gateway, whatsapp, new WompiCheckoutService(prisma), zones, customers);
+    const service = new OrdersService(prisma, gateway, whatsapp, new WompiCheckoutService(prisma), customers);
     const notify = jest.spyOn(service, 'notifyCustomer').mockResolvedValue(undefined);
     return { prisma, gateway, service, notify };
   };
 
-  const dto = (paymentMethod?: 'WOMPI' | 'CASH') =>
+  // Para recoger: el total es final desde el inicio (un domicilio espera a que el local defina el envío)
+  const dto = (paymentMethod?: 'WOMPI' | 'CASH', orderType: 'TAKEAWAY' | 'DELIVERY' = 'TAKEAWAY') =>
     ({
       restaurantId: 'rest-1',
       customerName: 'Ana',
       customerPhone: '573001112233',
+      orderType,
       items: [{ menuItemId: 'item-1', quantity: 2 }],
       paymentMethod,
     }) as any;
+
+  it('WOMPI con domicilio por definir: sin link todavía (el total no es el final); el plan B lo explica', async () => {
+    const { prisma, service, notify } = build();
+    const order = await service.create(dto('WOMPI', 'DELIVERY'));
+
+    expect(order).toMatchObject({ paymentMethod: 'WOMPI', deliveryFeePending: true, wompiCheckoutUrl: null });
+    expect(prisma.order.update).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.anything(), buildPaymentLinkMessage('Burger BQ', 1, 25000, null, true));
+    expect(buildPaymentLinkMessage('Burger BQ', 1, 25000, null, true)).toContain('🛵 Domicilio: por confirmar según dirección y clima');
+  });
 
   it('WOMPI: guarda el método, asigna referencia, devuelve wompiCheckoutUrl y manda el link por WhatsApp', async () => {
     const { prisma, gateway, service, notify } = build();

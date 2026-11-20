@@ -51,17 +51,25 @@ describe('DeliveryZonesService', () => {
     expect(prisma.deliveryZone.delete).not.toHaveBeenCalled();
   });
 
-  it('tarifa estándar del local: la usa para barrios fuera de las zonas y la expone a la carta', async () => {
+  it('tarifa estándar del local: la usa para barrios fuera de las zonas', async () => {
     const { service } = build(undefined, 15000);
     await expect(service.calculateDeliveryFee('rest-1', 'Soledad')).resolves.toMatchObject({
       isCovered: true,
       zoneName: 'Tarifa general',
       deliveryFee: 15000,
     });
-    const only = build([], 15000);
-    only.prisma.deliveryZone.findMany.mockResolvedValueOnce([]);
-    await expect(only.service.publicCoverage('rest-1')).resolves.toEqual({ coverageConfigured: true, zones: [], defaultDeliveryFee: 15000 });
-    const none = build([], null);
-    await expect(none.service.publicCoverage('rest-1')).resolves.toEqual({ coverageConfigured: false, zones: [], defaultDeliveryFee: null });
+  });
+
+  it('la carta solo recibe la tarifa fija única (sin ella, el local confirma el domicilio por WhatsApp)', async () => {
+    const flat = build([], null);
+    flat.prisma.restaurant.findUnique.mockResolvedValueOnce({ flatDeliveryFee: 5000 });
+    await expect(flat.service.publicCoverage('rest-1')).resolves.toEqual({ flatDeliveryFee: 5000 });
+    expect(flat.prisma.restaurant.findUnique).toHaveBeenCalledWith({ where: { id: 'rest-1' }, select: { flatDeliveryFee: true } });
+
+    const manual = build([], null);
+    manual.prisma.restaurant.findUnique.mockResolvedValueOnce({ flatDeliveryFee: null });
+    await expect(manual.service.publicCoverage('rest-1')).resolves.toEqual({ flatDeliveryFee: null });
+    // Las zonas ya no se exponen a la carta
+    expect(manual.prisma.deliveryZone.findMany).not.toHaveBeenCalled();
   });
 });

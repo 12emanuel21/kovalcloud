@@ -2,11 +2,11 @@ import { DeliveryZonesService } from '../delivery-zones.service';
 import { DeliveryPricingService } from './delivery-pricing.service';
 import { HaversineDistanceCalculator, haversineKm } from './haversine-calculator.service';
 import { OrdersService } from '../../orders/orders.service';
-import { buildDistanceQuoteMessage } from '../../meta-whatsapp/order-flow';
 
 /**
- * Dirección escrita (sin pin GPS): se geocodifica y se cotiza por distancia con la sede más cercana.
- * Geocodificador simulado (sin red) y motor Haversine real.
+ * Motor de cotización por distancia con dirección escrita (geocodificada). Hoy está DESCONECTADO de
+ * los pedidos (el domicilio lo define el local en el Kanban); se conserva y se prueba por si se
+ * reactiva. Geocodificador simulado (sin red) y motor Haversine real.
  */
 const SEDE_1 = { id: 'sede-1', name: 'Sede 1 · Calle 30', isMain: true, latitude: 10.9639, longitude: -74.7964 };
 const SEDE_2 = { id: 'sede-2', name: 'Sede 2 · Calle 84', isMain: false, latitude: 11.0045, longitude: -74.815 };
@@ -105,30 +105,19 @@ describe('Cotización por distancia con la dirección escrita (sin pin)', () => 
     const uncovered = build({ zones: [zone], geocoded: far });
     const quote = await uncovered.zonesService.quote('rest-1', { address: 'Calle 10 # 1-1', neighborhood: 'Otro' });
     expect(quote).toMatchObject({ isCovered: false, geocoded: true, fallback: 'TAKEAWAY' });
-    expect(buildDistanceQuoteMessage(quote, 0)).toMatch(/^Tu dirección está a .* km y supera nuestro rango máximo/);
   });
 
-  it('el resumen del bot marca la distancia como aproximada', async () => {
-    const { zonesService } = build({ geocoded: NEAR_SEDE_2 });
-    const quote = await zonesService.quote('rest-1', { address: 'Cra 52 # 76-10' });
-    expect(buildDistanceQuoteMessage(quote, 20000)).toContain('🛵 Distancia aproximada:');
-  });
-
-  it('la carta sabe que el local cobra por distancia (cotiza con solo la dirección)', async () => {
-    const { zonesService } = build();
-    await expect(zonesService.publicCoverage('rest-1')).resolves.toMatchObject({ distancePricing: true, coverageConfigured: true });
-  });
 });
 
-describe('Pedido web con la dirección en texto (sin customerLat/customerLng)', () => {
-  it('se cobra por distancia y lo prepara la Sede 2; no se guardan coordenadas aproximadas como pin', async () => {
-    const { prisma, zonesService, geocoder } = build({ geocoded: NEAR_SEDE_2 });
+describe('Pedido web con la dirección en texto: el motor de distancia ya no interviene', () => {
+  it('no geocodifica ni cotiza: domicilio pendiente en la sede principal, sin distancia', async () => {
+    const { prisma, geocoder } = build({ geocoded: NEAR_SEDE_2 });
     const create = jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'o1', createdAt: new Date(), paymentReference: null, ...data }));
     prisma.menuItem = { findMany: jest.fn().mockResolvedValue([{ id: 'item-1', price: 20000 }]) };
     prisma.order = { count: jest.fn().mockResolvedValue(0) };
     prisma.$transaction = jest.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn({ order: { create } }));
     const customers: any = { safeTouch: jest.fn().mockResolvedValue({ id: 'cust-1' }) };
-    const orders = new OrdersService(prisma, { emitNewOrder: jest.fn() } as any, {} as any, {} as any, zonesService, customers);
+    const orders = new OrdersService(prisma, { emitNewOrder: jest.fn() } as any, {} as any, {} as any, customers);
 
     await orders.create({
       restaurantId: 'rest-1',
@@ -142,12 +131,10 @@ describe('Pedido web con la dirección en texto (sin customerLat/customerLng)', 
       items: [{ menuItemId: 'item-1', quantity: 1 }],
     } as any);
 
-    expect(geocoder.geocode).toHaveBeenCalledWith('Cra 52 # 76-10 apto 302', expect.objectContaining({ neighborhood: 'Alto Prado' }));
+    expect(geocoder.geocode).not.toHaveBeenCalled();
     const data = create.mock.calls[0][0].data;
-    expect(data).toMatchObject({ branchId: 'sede-2', deliveryFee: 4000, subtotal: 20000, total: 24000, deliveryZoneId: null });
-    expect(data.deliveryDistanceKm).toBeGreaterThan(0);
-    // El repartidor va con la dirección escrita: el punto geocodificado no se presenta como pin del cliente
+    expect(data).toMatchObject({ branchId: 'sede-1', deliveryFee: 0, deliveryFeePending: true, subtotal: 20000, total: 20000 });
+    expect(data).not.toHaveProperty('deliveryDistanceKm');
     expect(data).not.toHaveProperty('customerLat');
-    expect(data).not.toHaveProperty('customerLng');
   });
 });

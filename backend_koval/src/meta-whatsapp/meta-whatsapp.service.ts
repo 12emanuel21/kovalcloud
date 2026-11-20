@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { syncWhatsAppBotNumber } from '../restaurants/whatsapp-bot-number';
 import { AiService, dayPartOf, type OrderIntent } from '../ai/ai.service';
+import { initialDeliveryFee } from '../orders/delivery-fee';
 import { isLidContact, normalizeColombianPhone } from '../orders/phone';
 import { OrdersGateway } from '../orders/orders.gateway';
 import { OrderStatus, OrderType } from '@prisma/client';
@@ -19,9 +20,7 @@ import {
 } from '../chats/chat-history';
 import { BOT_PAUSED_MARKER, getHandoverState } from '../chats/handover';
 import { ChatQueue } from './chat-queue';
-import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService, PRIVACY_NOTICE, withPrivacyNotice } from '../customers/customers.service';
-import { isValidGeoPoint } from '../delivery-zones/distance/distance-calculator.interface';
 import { activeBranchesOf, mainBranchOf, matchBranchByName, resolveOrderBranchId } from '../branches/branch-routing';
 import { activeSessionHistory } from './chat-session';
 import { isHttpUrl, menuLinkReply, menuWebUrl, withMenuLink } from './menu-link';
@@ -46,18 +45,15 @@ import {
   ADD_ON_LOCKED_MARKER,
   buildAddOnRegisteredMessage,
   buildConfirmationMessage,
-  buildDistanceQuoteMessage,
   formatSharedLocation,
   latestSharedLocation,
   parseSharedLocation,
   buildOrderStatusMessage,
-  buildOutOfCoverageMessage,
   buildWebOrderReceivedMessage,
   buildWebOrderConflictMessage,
   nameFromWebOrderMessage,
   parseWebOrderReference,
   type WebOrderReference,
-  deliveryFeeOf,
   type OrderLine,
   buildPaymentInstructions,
   buildOrderLines,
@@ -161,9 +157,17 @@ export class MetaWhatsAppService {
     private readonly prisma: PrismaService,
     private readonly aiService: AiService,
     private readonly ordersGateway: OrdersGateway,
-    private readonly deliveryZones: DeliveryZonesService,
     private readonly customers: CustomersService,
   ) { }
+
+  /**
+   * Mensaje que el sistema le envió al cliente fuera de la conversación (ej. el valor del domicilio
+   * definido en el Kanban): queda en el Inbox y como contexto del asistente si el cliente responde.
+   */
+  async recordBotMessage(restaurantId: string, customerPhone: string | null | undefined, message: string): Promise<void> {
+    if (!customerPhone) return;
+    await this.recordChat(restaurantId, customerPhone, [{ role: CHAT_ROLE_MODEL, message }]);
+  }
 
   /**
    * Auditoría del Inbox: guarda en orden los mensajes de un intercambio que no pasó por la IA.
@@ -1096,18 +1100,13 @@ export class MetaWhatsAppService {
       // Multisede: con más de una sede activa la IA pregunta en cuál recoge (TAKEAWAY)
       const branches = await activeBranchesOf(this.prisma, restaurant.id);
       const pickupBranchNames = branches.length > 1 ? branches.map((b) => b.name ?? '').filter(Boolean) : [];
-      // Domicilio por distancia: el local o alguna sede tiene coordenadas -> se pide el pin de WhatsApp
-      const distancePricing = [restaurant, ...branches].some((place) =>
-        isValidGeoPoint({ lat: place.latitude ?? undefined, lng: place.longitude ?? undefined }),
-      );
       // Instrucciones especiales del local (Ajustes > Perfil): van al final del prompt
       const customInstructions = restaurant.customInstructions?.trim() || null;
       const aiExtras = {
         ...(pickupBranchNames.length > 1 ? { pickupBranches: pickupBranchNames } : {}),
-        ...(distancePricing ? { distancePricing } : {}),
         ...(customInstructions ? { customInstructions } : {}),
       };
-      // Sin sedes ni motor por distancia la IA se llama exactamente como antes
+      // Sin sedes ni instrucciones la IA se llama exactamente como antes
       const aiOptions: [] | [typeof aiExtras] = Object.keys(aiExtras).length > 0 ? [aiExtras] : [];
 
       let aiResult: OrderIntent;
@@ -1189,7 +1188,7 @@ export class MetaWhatsAppService {
             toPrismaOrderType(aiResult) === OrderType.TAKEAWAY && branches.length > 1
               ? (matchBranchByName(branches, aiResult.pickupBranch) ?? mainBranchOf(branches))
               : null;
-          // Pin de WhatsApp (en este mensaje o antes en la sesión): el envío se cobra por distancia.
+          // Pin de WhatsApp (opcional, si el cliente lo envía): queda en el pedido para el repartidor.
           // Un pin anterior a su último pedido ya se usó (no se reutiliza para un pedido nuevo).
           const hasPinInHistory = chatHistory.some((h) => h.role === CHAT_ROLE_USER && parseSharedLocation(h.message));
           const lastOrderAt = hasPinInHistory ? await this.lastOrderCreatedAt(restaurant.id, senderNumber) : null;
@@ -1198,33 +1197,20 @@ export class MetaWhatsAppService {
           const reconfirming =
             aiResult.customerConfirmed && lastOrderAt !== null && Date.now() - lastOrderAt.getTime() < DUPLICATE_ORDER_WINDOW_MS;
           const customerCoords = latestSharedLocation(messageText, chatHistory, { notBefore: reconfirming ? null : lastOrderAt });
-          const isLocationMessage = Boolean(parseSharedLocation(messageText));
-          const coordsArg: [] | [{ lat: number; lng: number }] = customerCoords ? [customerCoords] : [];
           const complete = hasRequiredData(aiResult, lines, Boolean(customerCoords));
           // Domicilio/recoger no se confirman sin saber si paga en efectivo o por transferencia
           const missingPaymentMethod = complete && needsPaymentMethod(aiResult) && !aiResult.paymentMethod;
-          // Domicilio: zona de cobertura y flete según el barrio (o la dirección); recoger y mesa: null
-          const quote =
-            complete && (aiResult.readyToConfirm || aiResult.customerConfirmed)
-              ? await this.deliveryZones.quoteForOrder(
-                  restaurant.id,
-                  toPrismaOrderType(aiResult),
-                  aiResult.neighborhood,
-                  aiResult.deliveryAddress,
-                  ...coordsArg,
-                )
-              : null;
+          // Domicilio manual: tarifa fija del local o pendiente (el local lo define en el Kanban y se lo
+          // confirma al cliente). Sin cálculo por zonas, distancia ni geocodificación.
+          const delivery = initialDeliveryFee(toPrismaOrderType(aiResult), restaurant);
 
-          if (quote && !quote.isCovered) {
-            // 6.00. Fuera de cobertura o del radio máximo (o falta el barrio): no se confirma; se ofrece recoger
-            finalResponse = buildOutOfCoverageMessage(aiResult, quote);
-          } else if (missingPaymentMethod && (aiResult.readyToConfirm || aiResult.customerConfirmed)) {
+          if (missingPaymentMethod && (aiResult.readyToConfirm || aiResult.customerConfirmed)) {
             // 6.0. La IA dio el pedido por listo sin el método de pago: se pregunta antes del resumen
             finalResponse = withPaymentMethodQuestion(aiResult, aiResult.responseToUser);
           } else if (complete && aiResult.customerConfirmed) {
             // 6.1. El cliente aceptó la confirmación: registrar el pedido (total = productos + domicilio)
             const subtotal = orderTotal(lines);
-            const deliveryFee = deliveryFeeOf(quote);
+            const { deliveryFee, deliveryFeePending } = delivery;
             const total = subtotal + deliveryFee;
             const duplicate = await this.prisma.order.findFirst({
               where: {
@@ -1248,10 +1234,10 @@ export class MetaWhatsAppService {
                 address: isDelivery ? aiResult.deliveryAddress : undefined,
                 neighborhood: isDelivery ? aiResult.neighborhood : undefined,
               });
-              // Sede que lo prepara: la de la zona del barrio; recoger o sin zona: la principal
+              // Sede que lo prepara: recoger, la elegida; domicilio, la principal (el local la cambia en el Kanban)
               const branchId = resolveOrderBranchId({
                 orderType: toPrismaOrderType(aiResult),
-                quote,
+                quote: null,
                 requestedBranchId: pickupBranch?.id,
                 branches,
               });
@@ -1267,15 +1253,14 @@ export class MetaWhatsAppService {
                   deliveryAddress: isDelivery
                     ? aiResult.deliveryAddress?.trim() || (customerCoords ? 'Ubicación compartida por WhatsApp' : undefined)
                     : undefined,
-                  // Pin del cliente y distancia con la que se cobró el envío (el repartidor va con el mapa)
+                  // Pin del cliente (si lo envió): el repartidor va con el mapa
                   ...(isDelivery && customerCoords ? { customerLat: customerCoords.lat, customerLng: customerCoords.lng } : {}),
-                  ...(quote?.isCovered && quote.distanceKm !== undefined ? { deliveryDistanceKm: quote.distanceKm } : {}),
                   neighborhood: isDelivery ? aiResult.neighborhood?.trim() || undefined : undefined,
                   notes: buildOrderNotes(aiResult, lines),
                   subtotal,
                   deliveryFee,
+                  deliveryFeePending,
                   total,
-                  deliveryZoneId: quote?.isCovered ? quote.zoneId : null,
                   paymentMethod: toOrderPaymentMethod(aiResult),
                   status: OrderStatus.PENDING,
                   items: {
@@ -1298,10 +1283,11 @@ export class MetaWhatsAppService {
               // Emitir el evento por WebSocket al KDS (Kitchen Display System)
               this.ordersGateway.emitNewOrder(restaurant.id, { ...newOrder, dailyNumber });
 
-              finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber, pickupBranch?.name)}`.trim();
+              finalResponse = `${aiResult.responseToUser}\n\n${buildRegisteredMessage(aiResult, dailyNumber, pickupBranch?.name, deliveryFeePending)}`.trim();
 
-              // Cobro: efectivo sin cuentas; transferencia con los datos de pago del local y el comprobante
-              const paymentInstructions = buildPaymentInstructions(aiResult, restaurant.paymentDetails);
+              // Cobro: efectivo sin cuentas; transferencia con los datos de pago del local y el comprobante.
+              // Domicilio pendiente: los datos de pago llegan con el valor del domicilio (aún no hay total).
+              const paymentInstructions = deliveryFeePending ? null : buildPaymentInstructions(aiResult, restaurant.paymentDetails);
               if (paymentInstructions) finalResponse += `\n\n${paymentInstructions}`;
             }
           } else if (complete && aiResult.readyToConfirm) {
@@ -1309,22 +1295,11 @@ export class MetaWhatsAppService {
             finalResponse = [
               aiResult.responseToUser,
               addOnLockedNotice,
-              buildConfirmationMessage(aiResult, lines, quote, pickupBranch?.name),
+              buildConfirmationMessage(aiResult, lines, delivery, pickupBranch?.name),
             ]
               .filter((part) => part?.trim())
               .join('\n\n')
               .trim();
-          } else if (isLocationMessage && customerCoords && toPrismaOrderType(aiResult) === OrderType.DELIVERY) {
-            // 6.25. Acaba de compartir su ubicación: distancia y costo del envío de una vez
-            const pinQuote = await this.deliveryZones.quoteForOrder(
-              restaurant.id,
-              OrderType.DELIVERY,
-              aiResult.neighborhood,
-              aiResult.deliveryAddress,
-              customerCoords,
-            );
-            const pinMessage = pinQuote ? buildDistanceQuoteMessage(pinQuote, orderTotal(lines)) : null;
-            if (pinMessage) finalResponse = `${aiResult.responseToUser}\n\n${pinMessage}`.trim();
           }
           // 6.3. Si faltan datos, la respuesta de la IA ya está pidiendo lo que falta
         }

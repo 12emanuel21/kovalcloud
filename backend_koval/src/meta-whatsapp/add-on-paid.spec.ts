@@ -167,6 +167,8 @@ describe('Adiciones por WhatsApp a un pedido pagado o con link de pago', () => {
     const data = prisma.order.create.mock.calls[0][0].data;
     expect(data.items.create).toEqual([{ menuItemId: 'item-2', quantity: 1, unitPrice: 4000, subtotal: 4000 }]);
     expect(data.total).toBe(4000);
-    expect(reply).toContain('Pedido confirmado');
+    // Domicilio nuevo: el local define el envío en el Kanban y se lo confirma al cliente
+    expect(data.deliveryFeePending).toBe(true);
+    expect(reply).toContain('Pedido registrado');
   });
 });

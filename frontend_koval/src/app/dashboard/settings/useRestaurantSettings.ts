@@ -29,6 +29,9 @@ export interface RestaurantSettings {
   businessHours?: BusinessHours | null;
   isTemporarilyClosed?: boolean;
   closedMessage?: string | null;
+  /** Domicilio manual: montos de los botones rápidos del tablero y tarifa fija única (opcional) */
+  deliveryFeePresets?: number[] | null;
+  flatDeliveryFee?: number | null;
   owner?: { id: string; email: string; role: string } | null;
   plan?: { id: string; name: string; price: number } | null;
 }

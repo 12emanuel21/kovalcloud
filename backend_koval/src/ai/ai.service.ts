@@ -177,10 +177,9 @@ export class AiService {
     restaurantName: string = 'nuestro restaurante',
     /**
      * pickupBranches: marcas con varias sedes (para preguntar dónde recoge).
-     * distancePricing: el local está ubicado y cobra el domicilio por distancia (se pide el pin).
      * customInstructions: reglas del negocio escritas por el dueño (van al final del prompt).
      */
-    options: { pickupBranches?: string[]; distancePricing?: boolean; customInstructions?: string | null } = {},
+    options: { pickupBranches?: string[]; customInstructions?: string | null } = {},
   ): Promise<OrderIntent> {
     this.logger.log('Parsing order intent for message: ' + userMessage);
 
@@ -200,7 +199,6 @@ export class AiService {
         dayPart,
         menu: menuContext,
         pickupBranches: options.pickupBranches,
-        distancePricing: options.distancePricing,
         customInstructions: options.customInstructions,
       }),
       messages: [

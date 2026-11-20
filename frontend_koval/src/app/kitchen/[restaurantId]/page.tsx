@@ -45,6 +45,8 @@ interface Order {
   orderType?: OrderType;
   tableNumber?: string;
   deliveryAddress?: string | null;
+  /** Domicilio aún sin valor (el local lo define en el Kanban) */
+  deliveryFeePending?: boolean;
   channel?: string;
   status: OrderStatus;
   notes?: string;
@@ -247,6 +249,8 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
 
     socket.on('new_order', handleNewOrder);
     socket.on('order_updated', handleOrderUpdated);
+    // El local lo pasó a otra sede al definir el domicilio: sale de esta pantalla
+    socket.on('order_removed', ({ id }: { id: string }) => setOrders((prev) => prev.filter((o) => o.id !== id)));
     return () => {
       socket.disconnect();
     };
@@ -363,6 +367,12 @@ export default function KitchenPage({ params }: { params: Promise<{ restaurantId
                         {isPending ? 'Pendiente' : 'Preparando'}
                       </span>
                     </div>
+
+                    {order.orderType === 'DELIVERY' && order.deliveryFeePending && (
+                      <p className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md bg-amber-400 px-2 py-0.5 text-xs font-black text-slate-950">
+                        🛵 Domicilio por definir: espera la confirmación del local
+                      </p>
+                    )}
 
                     <div className="mt-3 flex items-center justify-between gap-3 border-b border-slate-800 pb-3">
                       <span className="flex min-w-0 items-center gap-1.5 text-sm text-slate-300">

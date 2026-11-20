@@ -24,6 +24,7 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto, WEB_MENU_CHANNEL } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { DispatchOrderDto } from './dto/dispatch-order.dto';
+import { SetDeliveryFeeDto } from './dto/set-delivery-fee.dto';
 import { orderViewFor } from './order-visibility';
 
 @Controller('orders')
@@ -76,6 +77,14 @@ export class OrdersController {
     return orderViewFor(user.role, await this.ordersService.findAll(user, restaurantId, scope));
   }
 
+  // Botones rápidos de domicilio del Kanban (montos sugeridos y sedes). Antes de ':id' para no confundirse.
+  @KitchenAccess()
+  @UseGuards(JwtAuthGuard)
+  @Get('delivery-fee-options')
+  deliveryFeeOptions(@CurrentUser() user: AuthenticatedUser, @Query('restaurantId') restaurantId?: string) {
+    return this.ordersService.deliveryFeeOptions(user, restaurantId);
+  }
+
   @KitchenAccess()
   @UseGuards(JwtAuthGuard)
   @Get(':id')
@@ -112,6 +121,15 @@ export class OrdersController {
   @HttpCode(HttpStatus.OK)
   async dispatch(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: DispatchOrderDto) {
     return orderViewFor(user.role, await this.ordersService.dispatch(id, dto, user));
+  }
+
+  // Domicilio definido en el Kanban (botón rápido): recalcula el total, avisa al cliente por WhatsApp y
+  // deja el pedido en su estado (Pendientes sigue en Pendientes). Dueño y cocina (roles operativos).
+  @KitchenAccess()
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/delivery-fee')
+  async setDeliveryFee(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: SetDeliveryFeeDto) {
+    return orderViewFor(user.role, await this.ordersService.setDeliveryFee(id, dto, user));
   }
 
   // "Entregado / Archivar": saca del Kanban un pedido despachado o cancelado (no lo borra)

@@ -17,7 +17,7 @@ describe('Instrucciones del local en el prompt del asistente', () => {
     const prompt = buildWaiterSystemPrompt({ ...base, customInstructions: `  ${RULE}  ` });
     expect(prompt.trimEnd().endsWith(`<instrucciones_del_local>\n${RULE}\n</instrucciones_del_local>`)).toBe(true);
     expect(prompt.indexOf('<instrucciones_del_local>')).toBeGreaterThan(prompt.indexOf(base.menu));
-    expect(prompt).toContain('NUNCA cambian los precios del INVENTARIO, el valor del domicilio que calcula el sistema');
+    expect(prompt).toContain('NUNCA cambian los precios del INVENTARIO, el valor del domicilio que define el restaurante');
     expect(prompt).toContain('Betania');
     expect(prompt).not.toMatch(/\{[A-Z_]+\}/);
   });

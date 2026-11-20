@@ -2,7 +2,8 @@ import { BadRequestException, Injectable, NotFoundException, Optional } from '@n
 import { OrderType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDeliveryZoneDto, UpdateDeliveryZoneDto } from './dto/delivery-zone.dto';
-import { normalizePlace, quoteFor, usableDefaultFee, type DeliveryQuote } from './delivery-coverage';
+import { normalizePlace, quoteFor, type DeliveryQuote } from './delivery-coverage';
+import { usableFlatDeliveryFee } from '../orders/delivery-fee';
 import { assertBranchOf, branchData } from '../branches/branch-ownership';
 import { DeliveryPricingService } from './distance/delivery-pricing.service';
 import { isValidGeoPoint, type GeoPoint } from './distance/distance-calculator.interface';
@@ -49,25 +50,13 @@ export class DeliveryZonesService {
     });
   }
 
-  /** Zonas activas y tarifa estándar para la carta: nombre y tarifa (las palabras clave son internas) */
+  /**
+   * Domicilio para la carta: la tarifa fija única si el local la usa (el carrito la suma al total);
+   * sin ella, el local define el valor de cada domicilio en el Kanban y lo confirma por WhatsApp.
+   */
   async publicCoverage(restaurantId: string) {
-    const [zones, restaurant] = await Promise.all([
-      this.prisma.deliveryZone.findMany({
-        where: { restaurantId, isActive: true },
-        orderBy: { name: 'asc' },
-        select: { name: true, fee: true },
-      }),
-      this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { defaultDeliveryFee: true } }),
-    ]);
-    const defaultDeliveryFee = usableDefaultFee(restaurant?.defaultDeliveryFee);
-    // Por distancia: la carta cotiza la dirección escrita (no solo el barrio de una zona)
-    const distancePricing = await this.pricing.hasDistancePricing(restaurantId);
-    return {
-      coverageConfigured: zones.length > 0 || defaultDeliveryFee !== null || distancePricing,
-      zones,
-      defaultDeliveryFee,
-      ...(distancePricing ? { distancePricing: true } : {}),
-    };
+    const restaurant = await this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { flatDeliveryFee: true } });
+    return { flatDeliveryFee: usableFlatDeliveryFee(restaurant?.flatDeliveryFee) };
   }
 
   async create(restaurantId: string, dto: CreateDeliveryZoneDto) {

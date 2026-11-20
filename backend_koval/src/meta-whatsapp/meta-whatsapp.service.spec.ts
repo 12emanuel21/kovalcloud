@@ -4,7 +4,6 @@ import { BOT_PAUSED_MARKER } from '../chats/handover';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
 import { OrdersGateway } from '../orders/orders.gateway';
-import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CustomersService, PRIVACY_NOTICE } from '../customers/customers.service';
 
 describe('MetaWhatsAppService', () => {
@@ -26,11 +25,6 @@ describe('MetaWhatsAppService', () => {
             }),
             transcribeAudio: jest.fn().mockResolvedValue('Audio transcrito'),
           },
-        },
-        {
-          // Sin zonas configuradas: domicilio sin flete calculado (como antes de la Fase 2)
-          provide: DeliveryZonesService,
-          useValue: { quoteForOrder: jest.fn().mockResolvedValue(null) },
         },
         {
           // Cliente que ya autorizó sus datos: las respuestas no llevan el aviso de la Ley 1581
@@ -775,12 +769,10 @@ describe('MetaWhatsAppService', () => {
       });
     });
 
-    describe('Habeas Data (Ley 1581) y domicilio por zonas', () => {
+    describe('Habeas Data (Ley 1581) y domicilio manual', () => {
       let customers: { findByPhone: jest.Mock; safeTouch: jest.Mock };
-      let zones: { quoteForOrder: jest.Mock };
       beforeEach(() => {
         customers = (service as any).customers;
-        zones = (service as any).deliveryZones;
       });
       /** chatHistory.findFirst: el aviso ya se envió (o no) a este cliente */
       const noticeAlreadySent = (sent: boolean) =>
@@ -843,35 +835,40 @@ describe('MetaWhatsAppService', () => {
         ...extra,
       });
 
-      it('WhatsApp: el resumen desglosa subtotal, domicilio de la zona y total', async () => {
+      it('WhatsApp: el resumen muestra los productos y el domicilio "por confirmar" (no lo calcula)', async () => {
         jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
-        zones.quoteForOrder.mockResolvedValueOnce({ isCovered: true, zoneId: 'z1', zoneName: 'Norte', deliveryFee: 6000, coverageConfigured: true });
         (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce(deliveryIntent({}));
         const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
 
         await service.processIncomingWebhook(textPayload('listo'), 'napoles-verify-token');
 
-        expect(zones.quoteForOrder).toHaveBeenCalledWith('rest-1', 'DELIVERY', 'Riomar', 'Cra 52 # 98-10');
-        expect(sendSpy.mock.calls[0][3]).toContain('Subtotal: $25.000\nDomicilio (Norte): $6.000\nTotal: $31.000');
+        expect(sendSpy.mock.calls[0][3]).toContain('Subtotal de productos: $25.000\n🛵 Domicilio: por confirmar según dirección y clima');
+        expect(sendSpy.mock.calls[0][3]).toMatch(/¿Confirmas\?$/);
       });
 
-      it('WhatsApp: al confirmar registra subtotal, flete, total, zona y cliente', async () => {
-        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
+      it('WhatsApp: al confirmar registra el pedido con el domicilio pendiente ($0) y avisa que lo confirman en instantes', async () => {
+        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce({ ...baseRestaurant, paymentDetails: 'Nequi 300 000 0000' } as any);
         (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(null);
-        zones.quoteForOrder.mockResolvedValueOnce({ isCovered: true, zoneId: 'z1', zoneName: 'Norte', deliveryFee: 6000, coverageConfigured: true });
-        (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce(deliveryIntent({ customerConfirmed: true }));
-        jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
+        (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce(deliveryIntent({ customerConfirmed: true, paymentMethod: 'TRANSFER' }));
+        const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
 
         await service.processIncomingWebhook(textPayload('sí'), 'napoles-verify-token');
 
-        expect((prismaService.order.create as jest.Mock).mock.calls.at(-1)[0].data).toMatchObject({
+        const data = (prismaService.order.create as jest.Mock).mock.calls.at(-1)[0].data;
+        expect(data).toMatchObject({
           subtotal: 25000,
-          deliveryFee: 6000,
-          total: 31000,
+          deliveryFee: 0,
+          deliveryFeePending: true,
+          total: 25000,
           neighborhood: 'Riomar',
-          deliveryZoneId: 'z1',
           customerId: 'cust-1',
         });
+        expect(data).not.toHaveProperty('deliveryZoneId');
+        const reply = sendSpy.mock.calls[0][3];
+        expect(reply).toContain('✅ Pedido registrado');
+        expect(reply).toContain('En instantes te confirmamos por aquí el valor del domicilio y el total a pagar');
+        // Los datos de pago llegan con el valor del domicilio (aún no hay total definitivo)
+        expect(reply).not.toContain('Nequi');
         expect(customers.safeTouch).toHaveBeenCalledWith('rest-1', '573009876543', {
           name: 'Ana',
           address: 'Cra 52 # 98-10',
@@ -879,29 +876,36 @@ describe('MetaWhatsAppService', () => {
         });
       });
 
-      it('WhatsApp con tarifa estándar: barrio fuera de las zonas se confirma con "Tarifa general"', async () => {
-        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
-        zones.quoteForOrder.mockResolvedValueOnce({ isCovered: true, zoneId: null, zoneName: 'Tarifa general', deliveryFee: 15000, coverageConfigured: true });
-        (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce(deliveryIntent({ neighborhood: 'Soledad' }));
+      it('WhatsApp con tarifa fija única: el resumen la desglosa y el pedido la cobra (sin quedar pendiente)', async () => {
+        const flat = { ...baseRestaurant, flatDeliveryFee: 5000 };
+        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(flat as any);
+        (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce(deliveryIntent({}));
         const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
-
         await service.processIncomingWebhook(textPayload('listo'), 'napoles-verify-token');
+        expect(sendSpy.mock.calls[0][3]).toContain('Subtotal: $25.000\nDomicilio: $5.000\nTotal: $30.000');
 
-        expect(sendSpy.mock.calls[0][3]).toContain('Subtotal: $25.000\nDomicilio (Tarifa general): $15.000\nTotal: $40.000');
-        expect(sendSpy.mock.calls[0][3]).not.toContain('cobertura');
+        jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(flat as any);
+        (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(null);
+        (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce(deliveryIntent({ customerConfirmed: true }));
+        await service.processIncomingWebhook(textPayload('sí'), 'napoles-verify-token');
+        expect((prismaService.order.create as jest.Mock).mock.calls.at(-1)[0].data).toMatchObject({
+          deliveryFee: 5000,
+          deliveryFeePending: false,
+          total: 30000,
+        });
       });
 
-      it('WhatsApp fuera de cobertura: no confirma ni registra y ofrece recoger', async () => {
+      it('WhatsApp: un barrio que antes estaba "fuera de cobertura" se registra igual (el local decide el domicilio)', async () => {
         jest.spyOn(prismaService.restaurant, 'findFirst').mockResolvedValueOnce(baseRestaurant as any);
-        zones.quoteForOrder.mockResolvedValueOnce({ isCovered: false, deliveryFee: 0, fallback: 'TAKEAWAY', coverageConfigured: true });
+        (prismaService.order as any).findFirst = jest.fn().mockResolvedValue(null);
         (aiService.parseOrderIntent as jest.Mock).mockResolvedValueOnce(deliveryIntent({ neighborhood: 'Soledad', customerConfirmed: true }));
         const createCalls = (prismaService.order.create as jest.Mock).mock.calls.length;
         const sendSpy = jest.spyOn(service, 'sendTextMessage').mockResolvedValueOnce({});
 
         await service.processIncomingWebhook(textPayload('sí'), 'napoles-verify-token');
 
-        expect(sendSpy.mock.calls[0][3]).toBe('Por ahora no tenemos cobertura de domicilio en Soledad. ¿Quieres pedirlo para recoger en el local?');
-        expect((prismaService.order.create as jest.Mock).mock.calls.length).toBe(createCalls);
+        expect((prismaService.order.create as jest.Mock).mock.calls.length).toBe(createCalls + 1);
+        expect(sendSpy.mock.calls[0][3]).not.toContain('cobertura');
       });
     });
   });
